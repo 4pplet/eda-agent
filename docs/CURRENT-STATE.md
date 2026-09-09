@@ -68,6 +68,17 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   Source tests do not execute Altium's VM. Counts/schema are not export parity,
   electrical acceptance or full extraction completeness.
 
+- Native dirty-state read test PASSED (2026-09-09, session
+  20260909103901779-23934625, working 22p project, generation 2): with two
+  operator-confirmed unsaved documents (22p-adapter.PcbDoc,
+  3_22p-adapter_mcu.SchDoc), `proj_get_compile_freshness` reported
+  dirty_doc_count=2 and named both files, `proj_list_documents` still served,
+  and `proj_get_bom` was refused with `DIRTY_PROJECT - Save intended edits
+  manually before compiled reads`. First native confirmation of the dirty-target
+  guard: inspection reads work, compiled reads refuse. Closes the Gate 1
+  "dirty selected documents" matrix row for reads; the post-save recovery
+  half and dirty-unrelated-document case recorded separately when run.
+
 ## Continuation ownership (2026-09-09)
 
 The agent that built this integration has stopped (out of credits) and will not
