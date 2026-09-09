@@ -111,8 +111,13 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   alias-tolerant net partitions (splits/merges reported separately); first run
   reproduced audit A2 (172/172, 550/550, zero splits/merges, nine single-pin
   nets correctly no-net on the PCB). CI wiring remains open.
-- [ ] Bulk parameter read - **source-complete in 2026.09.09.2, native
-  qualification pending**: shared mode now exposes the reviewed upstream
+- [x] Bulk parameter read - **NATIVELY QUALIFIED 2026-09-09** (runtime
+  `selected-readonly-batch-20260909`, session 20260909143632721): full
+  172-designator batch matched=172/not_found=[] with byte-equivalence to the
+  single-call loop on parameters/footprint/comment for every component; a
+  bogus designator correctly returned in not_found. Prepared via the guarded
+  cross-version manage_shared_runtime prepare (receipt written). Original
+  scope note: shared mode now exposes the reviewed upstream
   `Proj_GetComponentInfoBatch` (uncompiled, parameters-only flags) as ninth
   tool `proj_get_component_info_batch`; the client validates 1-500 unique
   designators and requires every one back as matched or not_found

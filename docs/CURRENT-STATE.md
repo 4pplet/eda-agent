@@ -86,6 +86,14 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty reporting is selection-scoped. Drafts (new unsaved documents in the
   selected project) remain an open matrix row.
 
+- Batch candidate 2026.09.09.2 QUALIFIED and active (2026-09-09): runtime
+  `shared/selected-readonly-batch-20260909`, prepared with the guarded
+  cross-version manage_shared_runtime prepare (update-receipt records the
+  09.09.1 baseline). Ninth tool proj_get_component_info_batch: full
+  172-designator pull matched all, byte-equivalent to the single-call loop,
+  not_found honest for unknown designators; eight existing reads regression-
+  passed with extraction validation active. Rollback: the 09.09.1 extraction
+  runtime, itself falling back to the 09.08.2 permissions runtime.
 - Extraction candidate 2026.09.09.1 QUALIFIED and active (2026-09-09):
   new runtime `shared/selected-readonly-extraction-20260909` (23 files
   hashed, integrity check passed offline, eight-tool schema intact) is now
