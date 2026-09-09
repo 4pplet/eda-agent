@@ -68,6 +68,15 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   Source tests do not execute Altium's VM. Counts/schema are not export parity,
   electrical acceptance or full extraction completeness.
 
+## Continuation ownership (2026-09-09)
+
+The agent that built this integration has stopped (out of credits) and will not
+continue. The plan and evidence here remain the handoff. Stefan's decision:
+resume gate work later, **on a day without CAD work** — Gate 0 lifecycle tests
+involve repeated Altium quit/restart cycles and the known direct-quit crash,
+and must never share a session with real design edits. Read-only use continues
+under the operating contract in the shared runbook meanwhile.
+
 ## Remaining work, in order
 
 This is qualification order, not a strictly sequential implementation queue.
