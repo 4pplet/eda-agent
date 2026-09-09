@@ -86,6 +86,65 @@ Const
     SPINNER_FRAMES      = 4;
 
 
+Procedure RefreshSelectedLabel(Dummy : Integer);
+Var
+    P : IProject;
+Begin
+    If Not SELECTED_PROJECT_READ_ONLY Then Exit;
+    P := CurrentSelectedProject(0);
+    If P = Nil Then
+    Begin
+        lbl_SelectedProject.Caption := 'READ ONLY - no project selected';
+        lbl_SelectedProject.Hint := 'Choose a project, then click Use this project.';
+        StatusForm.Caption := 'No project selected - EDA (READ ONLY)';
+    End
+    Else
+    Begin
+        lbl_SelectedProject.Caption := 'Selected: ' + ExtractFileName(SelectedPath)
+            + #13#10 + 'READ ONLY - hover here for the full path';
+        lbl_SelectedProject.Hint := SelectedPath;
+        StatusForm.Caption := ExtractFileName(SelectedPath) + ' - EDA (READ ONLY)';
+    End;
+End;
+
+Procedure RefreshProjectChoices(Sender : TObject);
+Var
+    W : IWorkspace;
+    P : IProject;
+    I : Integer;
+    Path, Draft : String;
+Begin
+    If Not SELECTED_PROJECT_READ_ONLY Then Exit;
+    If SelectedBusy Or InFlightActive Then Exit;
+    Draft := cmb_Project.Text;
+    cmb_Project.Items.Clear;
+    W := GetWorkspace;
+    If W <> Nil Then
+        For I := 0 To W.DM_ProjectCount - 1 Do
+        Begin
+            P := W.DM_Projects(I);
+            If P <> Nil Then
+            Begin
+                Path := P.DM_ProjectFullPath;
+                If LooksAbsolutePath(Path) And
+                   (LowerCase(ExtractFileExt(Path)) = '.prjpcb') And FileExists(Path) Then
+                    cmb_Project.Items.Add(Path);
+            End;
+        End;
+    cmb_Project.ItemIndex := cmb_Project.Items.IndexOf(Draft);
+    RefreshSelectedLabel(0);
+End;
+
+Procedure UseProjectClick(Sender : TObject);
+Begin
+    If Not SELECTED_PROJECT_READ_ONLY Then Exit;
+    If SelectedBusy Or InFlightActive Then Exit;
+    If cmb_Project.ItemIndex < 0 Then Exit;
+    If Not UseSelectedProject(cmb_Project.Text) Then
+        lbl_LastErr.Caption := 'Selected project is unavailable; refresh the list.';
+    RefreshSelectedLabel(0);
+End;
+
 Function PadLeft(S : String; Width : Integer) : String;
 Begin
     Result := S;
@@ -361,6 +420,11 @@ Begin
         InFlightCommand := Command;
         InFlightStartMs := GetTickCount;
         InFlightActive := True;
+        If SELECTED_PROJECT_READ_ONLY Then
+        Begin
+            cmb_Project.Enabled := False;
+            btn_UseProject.Enabled := False;
+        End;
         SpinnerFrame := 0;
         Try tmr_Spinner.Enabled := True; Except End;
         Try
@@ -377,6 +441,11 @@ Begin
     Try
         InFlightActive := False;
         InFlightCommand := '';
+        If SELECTED_PROJECT_READ_ONLY Then
+        Begin
+            cmb_Project.Enabled := True;
+            btn_UseProject.Enabled := True;
+        End;
         Try tmr_Spinner.Enabled := False; Except End;
         Try
             lbl_Spinner.Caption := '';
@@ -516,6 +585,7 @@ Begin
         MsStr := IntToStr(AltiumMs) + 'ms';
 
     Try lbl_ValUp.Caption  := UpStr; Except End;
+    If SELECTED_PROJECT_READ_ONLY Then RefreshSelectedLabel(0);
     Try lbl_ValReq.Caption := IntToStr(Requests); Except End;
     Try lbl_ValMs.Caption  := MsStr; Except End;
     ColorCountdown(IdleSecToShutdown);
@@ -615,6 +685,24 @@ Begin
         Try pnl_StatusDot.Color := COLOR_ACCENT_GREEN; Except End;
         Try lbl_Status.Caption := 'idle'; Except End;
         Try lbl_LastErr.Caption := ''; Except End;
+        cmb_Project.Visible := SELECTED_PROJECT_READ_ONLY;
+        btn_UseProject.Visible := SELECTED_PROJECT_READ_ONLY;
+        lbl_SelectedProject.Visible := SELECTED_PROJECT_READ_ONLY;
+        lbl_Permissions.Visible := SELECTED_PROJECT_READ_ONLY;
+        If SELECTED_PROJECT_READ_ONLY Then
+        Begin
+            lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
+                + #13#10 + 'Unavailable: edits, saves, output jobs';
+            lbl_Permissions.Hint := 'Requires an explicitly selected project. '
+                + 'Compile may create cache/report files. Editing permissions are not implemented.';
+            { Children have already been DPI-scaled by the native form loader.
+              Use their bounds and the scaled button/label gap, not raw pixels. }
+            pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height
+                + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height);
+            StatusForm.Caption := 'EDA Agent - selected project (READ ONLY)';
+            RefreshProjectChoices(Nil);
+        End;
+        { Non-shared mode retains the DFM's naturally scaled header height. }
         { Button is always enabled: dashboard can run standalone. }
         UpdateOpenWebState(0);
     Except End;

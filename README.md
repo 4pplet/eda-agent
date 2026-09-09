@@ -4,6 +4,27 @@ MCP server that lets an AI (or any MCP-compatible client) **interact with a live
 
 > **⚠️ Experimental.** Not all tools are extensively tested. Some can crash the Altium DelphiScript engine. See [Known limitations](#known-limitations) before using on any design you haven't backed up.
 
+Local fork reliability work and acceptance gaps: [integration TODO](TODO.md).
+Current deployment, evidence and next-agent memory: [current-state handoff](docs/CURRENT-STATE.md).
+
+### Restricted integration status (2026-09-09)
+
+The separate shared-project candidate uses script `2026.09.08.2`, a native
+Project dropdown and **eight read-only tools**. Native reads on 22p/cyber80 and
+explicit switching/stale-request rejection passed; broader qualification remains
+pending. The latest 23-file candidate passes startup and all eight 22p read checks;
+its new permissions-label visual check and lifecycle tests remain pending.
+Existing named copy profiles remain at `.1`;
+their installed clients must be used with those scripts. Source edits do not
+update running installations. Direct quit with a running bridge remains unsafe:
+use the documented no-save stop-first workflow.
+
+See the companion [shared setup and acceptance guide](https://github.com/4pplet/PLT-hw/blob/main/tools/eda-agent/SHARED-PROJECTS.md)
+and the [component-editing roadmap](docs/PROJECT-SELECTION-AND-WRITES.md) for future
+MFG/MPN, value, footprint, annotation and variant capabilities. **Writes remain
+disabled in our restricted integrations.** The broader upstream tool catalog and
+dashboard descriptions below are not the exposed shared-mode feature set.
+
 ## Demo
 
 Claude Code reviewing a buck converter through eda-agent. The feedback resistor divider on this schematic is intentionally wrong; Claude catches it among other recommendations.
@@ -16,7 +37,7 @@ Claude Code reviewing a buck converter through eda-agent. The feedback resistor 
 
 Two dashboards ship with eda-agent:
 
-- **In-Altium status window** - a floating Altium-side window showing live status, request count, cumulative Altium-side time, auto-shutdown countdown, and a per-command log with durations. `Hide pings` filters the 30 s keep-alive traffic; `Only >100ms` isolates slow calls. The **Detach** button saves all dirty docs and exits the polling loop cleanly.
+- **In-Altium status window** - a floating Altium-side window showing live status, request count, cumulative Altium-side time, auto-shutdown countdown, and a per-command log with durations. `Hide pings` filters the 30 s keep-alive traffic; `Only >100ms` isolates slow calls. Its native **Detach** button requests a no-save stop. API/browser Detach instead saves dirty documents. See [shutdown and recovery](docs/SHUTDOWN.md).
 - **Web dashboard** - a local browser dashboard at `http://127.0.0.1:8766`, focused on design review. A **Review** tab surfaces datasheet / MPN / manufacturer / footprint coverage gauges and an actionable issue queue (missing datasheet, missing MPN, orphan nets, ...); **Project**, **Components**, **Nets**, **Libraries** and **Plan** tabs give live structured views. Click any component or net to drill into a detail drawer; one click cross-probes it into Altium. Light / dark theme, server-sent-events live feed. It is auto-started by the MCP server - the **Open Dashboard** button on the in-Altium status window launches the browser.
 
 ## How it works
@@ -329,10 +350,11 @@ Altium itself uses DelphiScript internally for many built-in commands (some ribb
 
 **The polling loop owns the scripting engine for as long as it's running.** While it runs, Altium's own script-backed buttons sit waiting. The loop exits when either:
 
-- The MCP client calls `app_detach` (or the dashboard **Detach** button is clicked); the loop saves all dirty docs, exits within ~500 ms, and Altium becomes fully responsive, OR
+- The MCP client calls `app_detach` (or the browser dashboard **Detach** button is clicked); dirty documents are saved before stopping, OR
+- The native Altium status window's **Detach** / Close button is used, or a `stop` file is placed in the verified IPC workspace; these request a stop without saving CAD, OR
 - **10 minutes of total silence** from the MCP client (no commands AND no keep-alive pings) triggers the built-in auto-shutdown
 
-In practice, while an MCP client is attached and sending keep-alive pings every 30 s, the loop will never time out on its own; you need to either have the AI call `app_detach` or close the MCP client session entirely. After the client disconnects, expect up to ~10 minutes for the loop to auto-exit unless you use **Detach** to release it immediately.
+While an MCP client sends keep-alive pings every 30 s, inactivity shutdown does not occur. Disconnecting that client does not immediately stop the Altium loop. Explicitly stop the bridge and confirm a fresh session-end log before closing its script project or quitting Altium. A blocking command or modal can delay stopping; do not assume a fixed deadline. [Shutdown instructions and pending native regression tests](docs/SHUTDOWN.md) cover the local quit-crash hardening.
 
 ### ECO (sch → PCB update) opens a modal, and there is no silent API
 
@@ -378,7 +400,7 @@ While an MCP client is attached, the Python bridge pings Altium every 30 seconds
 - **30 s later, Python pings** → Altium responds "pong", idle timer resets
 - **10 min later, still no AI activity and no ping** → Altium auto-shuts down
 
-In practice: the server stays alive as long as an MCP client is connected, and exits cleanly ~10 minutes after the client fully disconnects. No manual stop needed in the common case. For a hard exit, the AI (or the **Detach** button on the dashboard window) calls `app_detach`, which persists any unsaved work via `app_save_all` and returns control to Altium within ~500 ms.
+The server normally remains alive while a client sends keep-alives. After disconnection, inactivity shutdown is approximately ten minutes (paused sessions do not time out). Before quitting Altium, explicitly stop and verify completion. Native status-window Detach is no-save; API/browser Detach invokes `application.stop_server`, which calls `SaveAllDirty(0)`. Neither can guarantee a stop deadline while a command blocks. See [shutdown instructions](docs/SHUTDOWN.md).
 
 ### Why this matters for Altium UI responsiveness
 

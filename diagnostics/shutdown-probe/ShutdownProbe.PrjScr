@@ -1,0 +1,12 @@
+[Design]
+Version=1.0
+ReorderDocumentsOnCompile=0
+
+[Document1]
+DocumentPath=ShutdownProbe.pas
+
+[Document2]
+DocumentPath=ShutdownProbe.dfm
+
+[Generic_ScriptingSystem]
+StartProcName=ShutdownProbe.pas>RunShutdownProbe

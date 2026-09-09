@@ -11,12 +11,19 @@ Var
     StatusRequestCount   : Integer;
     StatusLastCommand    : String;
     StatusTotalAltiumMs  : Cardinal;
+    MCPHostClosing      : Boolean;
+    MCPStopReason       : String;
 
 Function ProcessCommand(Command : String; Params : String; RequestId : String) : String;
 Var
     Category, Action : String;
     DotPos : Integer;
 Begin
+    If SELECTED_PROJECT_READ_ONLY Then
+    Begin
+        Result := ProcessSelectedCommand(Command, Params, RequestId);
+        Exit;
+    End;
     DotPos := Pos('.', Command);
     If DotPos > 0 Then
     Begin
@@ -303,14 +310,63 @@ End;
 
 {..............................................................................}
 { Clean up state left by the MCP server before exiting. Deletes any leftover   }
-{ per-request IPC files and flushes the UI.                                    }
+{ per-request IPC files. Never pump UI messages during teardown.               }
 {..............................................................................}
 
 Procedure CleanupMCPServer(Dummy : Integer);
 Begin
     CleanupOrphanRequests(0);
     CleanupOrphanProgress(0);
+End;
+
+{ Recheck after every UI yield: quitting can begin inside ProcessMessages.
+  These checks cannot recover a VM destroyed inside that native call. Stop
+  the bridge before closing its script project or exiting Altium. }
+Function MCPHostAvailable(Dummy : Integer) : Boolean;
+Begin
+    Result := False;
+    If MCPHostClosing Then Exit;
+    Try
+        If Client.IsQuitting Then
+        Begin
+            MCPHostClosing := True;
+            MCPStopReason := 'host-quitting';
+        End;
+    Except
+        MCPHostClosing := True;
+        MCPStopReason := 'host-unavailable';
+    End;
+    If MCPHostClosing Then
+    Begin
+        Running := False;
+        Exit;
+    End;
+    Result := True;
+End;
+
+Function MCPContinuePolling(StopPath : String) : Boolean;
+Begin
+    Result := False;
+    If Not MCPHostAvailable(0) Then Exit;
+    If Not Running Then Exit;
+    If FileExists(StopPath) Then
+    Begin
+        { Latch the stop before file I/O: deletion failure must not resume. }
+        Running := False;
+        MCPStopReason := 'stop-file';
+        DeleteFile(StopPath);
+        Exit;
+    End;
+    Result := True;
+End;
+
+Function MCPYield(StopPath : String) : Boolean;
+Begin
+    Result := False;
+    If Not MCPContinuePolling(StopPath) Then Exit;
     Application.ProcessMessages;
+    { No Sleep, status access or new request before this post-yield check. }
+    Result := MCPContinuePolling(StopPath);
 End;
 
 {..............................................................................}
@@ -336,8 +392,13 @@ Var
     HadRequest     : Boolean;
     I              : Integer;
     ActiveTickCount : Integer;
+    LoopFailed     : Boolean;
 Begin
     If Running Then Exit;
+    MCPHostClosing := False;
+    MCPStopReason := 'stop-requested';
+    LoopFailed := False;
+    If Not MCPHostAvailable(0) Then Exit;
 
     InitDefaultConfig(0);
     EnsureWorkspaceDir(0);
@@ -361,6 +422,7 @@ Begin
     StatusRequestCount := 0;
     StatusLastCommand := '';
     StatusTotalAltiumMs := 0;
+    If SELECTED_PROJECT_READ_ONLY Then InitSelectedProject(0);
     ShowStatusForm(0);
     UpdateStatusHeader('MCP: idle');
     UpdateStatsLine(0, 0, 0, AutoShutdownMs Div 1000);
@@ -370,25 +432,7 @@ Begin
     Try
         While Running Do
         Begin
-            // Shutdown detection: Altium quitting
-            Try
-                If Client.IsQuitting Then
-                Begin
-                    Running := False;
-                    Break;
-                End;
-            Except
-                Running := False;
-                Break;
-            End;
-
-            // Stop file
-            If FileExists(StopPath) Then
-            Begin
-                DeleteFile(StopPath);
-                Running := False;
-                Break;
-            End;
+            If Not MCPContinuePolling(StopPath) Then Break;
 
             // Renew button: reset the real idle deadline once per click.
             If RenewRequested Then
@@ -413,6 +457,7 @@ Begin
                 Begin
                     If (NowMs - LastActivityMs) > AutoShutdownMs Then
                     Begin
+                        MCPStopReason := 'idle-timeout';
                         Running := False;
                         Break;
                     End;
@@ -428,12 +473,13 @@ Begin
                     StatusRequestCount,
                     StatusTotalAltiumMs,
                     AutoShutdownMs Div 1000);
-                Application.ProcessMessages;
+                If Not MCPYield(StopPath) Then Break;
                 Sleep(PollIntervalIdleMs);
                 Continue;
             End;
 
             HadRequest := ProcessSingleRequest(0);
+            If Not MCPContinuePolling(StopPath) Then Break;
 
             If HadRequest Then
             Begin
@@ -468,9 +514,8 @@ Begin
             Begin
                 For I := 1 To YieldIterations Do
                 Begin
-                    Application.ProcessMessages;
+                    If Not MCPYield(StopPath) Then Break;
                     Sleep(CurrentSleep Div YieldIterations);
-                    If Not Running Then Break;
                 End;
                 ActiveTickCount := 0;
             End
@@ -479,20 +524,37 @@ Begin
                 Inc(ActiveTickCount);
                 If ActiveTickCount >= YieldEveryNActive Then
                 Begin
-                    Application.ProcessMessages;
+                    If Not MCPYield(StopPath) Then Break;
                     ActiveTickCount := 0;
                 End;
                 Sleep(CurrentSleep);
             End;
         End;
     Except
-        // Altium shutting down or fatal error, exit gracefully
+        { Do not turn an exception into a claimed clean shutdown, or touch
+          possibly destroyed status controls on this path. }
+        LoopFailed := True;
+        MCPStopReason := 'loop-exception';
     End;
 
     Running := False;
-    AppendLog(FormatLogStamp(0) + ',0,_session_end,requests=' + IntToStr(StatusRequestCount));
-    HideStatusForm(0);
-    CleanupMCPServer(0);
+    If Not LoopFailed Then
+    Begin
+        If MCPHostAvailable(0) Then HideStatusForm(0);
+    End;
+    Try
+        CleanupMCPServer(0);
+    Except
+        LoopFailed := True;
+        MCPStopReason := 'cleanup-exception';
+    End;
+    Try
+        If LoopFailed Then
+            AppendLog(FormatLogStamp(0) + ',0,_session_aborted,reason=' + MCPStopReason)
+        Else
+            AppendLog(FormatLogStamp(0) + ',0,_session_end,requests='
+                + IntToStr(StatusRequestCount) + ',reason=' + MCPStopReason);
+    Except End;
 End;
 
 {..............................................................................}

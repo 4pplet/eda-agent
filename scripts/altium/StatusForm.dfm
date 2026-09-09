@@ -29,6 +29,70 @@ object StatusForm: TStatusForm
     Align = alTop
     BevelOuter = bvNone
     Color = $00202126
+    object cmb_Project: TComboBox
+      Left = 14
+      Top = 50
+      Width = 352
+      Height = 24
+      Anchors = [akLeft, akTop, akRight]
+      Style = csDropDownList
+      Color = clWindow
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -11
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ParentFont = False
+      TabOrder = 0
+      Visible = False
+      OnDropDown = RefreshProjectChoices
+    end
+    object btn_UseProject: TButton
+      Left = 14
+      Top = 79
+      Width = 130
+      Height = 25
+      Caption = 'Use this project'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clBtnText
+      Font.Height = -11
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ParentFont = False
+      TabOrder = 1
+      Visible = False
+      OnClick = UseProjectClick
+    end
+    object lbl_SelectedProject: TLabel
+      Left = 14
+      Top = 110
+      Width = 352
+      Height = 50
+      Anchors = [akLeft, akTop, akRight]
+      AutoSize = False
+      WordWrap = True
+      ShowHint = True
+      Caption = 'READ ONLY - no project selected'
+      Visible = False
+    end
+    object lbl_Permissions: TLabel
+      Left = 14
+      Top = 166
+      Width = 352
+      Height = 36
+      Anchors = [akLeft, akTop, akRight]
+      AutoSize = False
+      WordWrap = True
+      ShowHint = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = $00E1E2E6
+      Font.Height = -11
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ParentFont = False
+      Caption = 'Read-only permissions'
+      Visible = False
+    end
     object pnl_StatusDot: TPanel
       Left = 14
       Top = 19

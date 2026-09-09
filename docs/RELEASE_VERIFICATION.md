@@ -1,4 +1,18 @@
-# Release verification: 2026.09.01.3
+# Release verification and native acceptance backlog
+
+For the latest scoped test results and remaining work, read the
+[current-state handoff](CURRENT-STATE.md) first.
+
+Current local source/shared candidate: `2026.09.08.2`. Its eight-tool read-only
+surface and project dropdown await native qualification; use the companion
+[shared acceptance checklist](../../PLT-hw/tools/eda-agent/SHARED-PROJECTS.md).
+The `.1` named-profile observations remain in [the shutdown log](SHUTDOWN.md).
+The selector does not fix direct quit while the bridge runs.
+
+The inherited broad feature checklist below is not evidence of qualification or
+permission to enable writes. Run only separately authorized tests on disposable
+designs; do not execute this checklist wholesale against a working project.
+Future scoped editing has its own [roadmap and acceptance requirements](PROJECT-SELECTION-AND-WRITES.md).
 
 Everything below is Pascal that FPC and the linter have checked and that
 **Altium's DelphiScript engine has never executed**. The two are not the
@@ -139,7 +153,7 @@ objects you can delete afterwards.
 app_ping
 ```
 
-Expect `altium_script_version` = `2026.09.01.3`, `version_match` =
+Expect `altium_script_version` = `2026.09.08.1`, `version_match` =
 `true`, and `mcp_server_version` = `0.5.0`.
 
 Those are two different versions and they fail differently.

@@ -20,6 +20,7 @@ FILES = [
     'PCB.pas',
     'Generic.pas',
     'Audit.pas',
+    'SelectedProject.pas',
     'StatusForm.pas',
     'Dispatcher.pas',
 ]

@@ -1,0 +1,284 @@
+{ Shared read-only selection. Loaded after Project and before StatusForm/Dispatcher.
+  No project opens, focus changes, saves or writes. UI is the only selection grant. }
+Var
+    SelectedPath : String;
+    SelectedSession : String;
+    SelectedGeneration : Integer;
+    SelectedReference : IProject;
+    SelectedBusy : Boolean;
+
+Procedure ClearSelectedProject(Dummy : Integer);
+Begin
+    SelectedPath := '';
+    SelectedReference := Nil;
+    Inc(SelectedGeneration);
+    SelectedCompileReady := False;
+    SelectedCompileProject := Nil;
+    InvalidateCompileCache(0);
+End;
+
+Procedure InitSelectedProject(Dummy : Integer);
+Begin
+    SelectedGeneration := 0;
+    SelectedBusy := False;
+    SelectedSession := FormatDateTime('yyyymmddhhnnsszzz', Now)
+        + '-' + IntToStr(GetTickCount);
+    ClearSelectedProject(0);
+End;
+
+Function OpenSelectedCandidate(Path : String) : IProject;
+Var
+    W : IWorkspace;
+Begin
+    Result := Nil;
+    If Not LooksAbsolutePath(Path) Then Exit;
+    If LowerCase(ExtractFileExt(Path)) <> '.prjpcb' Then Exit;
+    If Not FileExists(Path) Then Exit;
+    W := GetWorkspace;
+    If W = Nil Then Exit;
+    Result := FindProjectByPath(W, Path);
+End;
+
+Function CurrentSelectedProject(Dummy : Integer) : IProject;
+Var
+    Candidate : IProject;
+Begin
+    Result := Nil;
+    If SelectedPath = '' Then Exit;
+    Candidate := OpenSelectedCandidate(SelectedPath);
+    { Compare interface identity without dereferencing the retained old object. }
+    If (Candidate = Nil) Or (Candidate <> SelectedReference) Then
+    Begin
+        ClearSelectedProject(0);
+        Exit;
+    End;
+    Result := Candidate;
+End;
+
+Function UseSelectedProject(Path : String) : Boolean;
+Var
+    Candidate : IProject;
+Begin
+    Result := False;
+    If SelectedBusy Then Exit;
+    Candidate := OpenSelectedCandidate(Path);
+    ClearSelectedProject(0);
+    If Candidate = Nil Then Exit;
+    SelectedPath := Candidate.DM_ProjectFullPath;
+    SelectedReference := Candidate;
+    Result := True;
+End;
+
+Function SelectionJSON(Dummy : Integer) : String;
+Var
+    P : IProject;
+Begin
+    P := CurrentSelectedProject(0);
+    Result := '{"project_path":"' + EscapeJsonString(SelectedPath)
+        + '","session":"' + EscapeJsonString(SelectedSession)
+        + '","generation":' + IntToStr(SelectedGeneration)
+        + ',"access":"read-only","selected":' + BoolToJsonStr(P <> Nil) + '}';
+End;
+
+Function SelectedProjectsJSON(Dummy : Integer) : String;
+Var
+    W : IWorkspace;
+    P : IProject;
+    I, Count : Integer;
+    Path, Body : String;
+Begin
+    W := GetWorkspace;
+    Body := '';
+    Count := 0;
+    If W <> Nil Then
+        For I := 0 To W.DM_ProjectCount - 1 Do
+        Begin
+            P := W.DM_Projects(I);
+            If P <> Nil Then
+            Begin
+                Path := P.DM_ProjectFullPath;
+                If LooksAbsolutePath(Path) And
+                   (LowerCase(ExtractFileExt(Path)) = '.prjpcb') And FileExists(Path) Then
+                Begin
+                    If Count > 0 Then Body := Body + ',';
+                    Body := Body + '{"project_name":"' + EscapeJsonString(ExtractFileName(Path))
+                        + '","project_path":"' + EscapeJsonString(Path) + '"}';
+                    Inc(Count);
+                End;
+            End;
+        End;
+    Result := '{"projects":[' + Body + '],"count":' + IntToStr(Count) + '}';
+End;
+
+Function SelectedFreshnessJSON(Project : IProject) : String;
+Var
+    I, DirtyCount, OpenCount : Integer;
+    D : IDocument;
+    S : IServerDocument;
+    Path, DirtyList : String;
+Begin
+    DirtyCount := 0;
+    OpenCount := 0;
+    DirtyList := '';
+    For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        D := Project.DM_LogicalDocuments(I);
+        If D = Nil Then Begin Result := ''; Exit; End;
+        Path := D.DM_FullPath;
+        If Not LooksAbsolutePath(Path) Then Begin Result := ''; Exit; End;
+        S := Client.GetDocumentByPath(Path);
+        If S <> Nil Then
+        Begin
+            Inc(OpenCount);
+            If S.Modified Then
+            Begin
+                If DirtyCount > 0 Then DirtyList := DirtyList + ',';
+                DirtyList := DirtyList + '"' + EscapeJsonString(Path) + '"';
+                Inc(DirtyCount);
+            End;
+        End;
+    End;
+    Result := '{"project":"' + EscapeJsonString(SelectedPath)
+        + '","dirty_doc_count":' + IntToStr(DirtyCount)
+        + ',"open_doc_count":' + IntToStr(OpenCount)
+        + ',"dirty_docs":[' + DirtyList + ']}';
+End;
+
+Function SelectedDocumentsJSON(Project : IProject) : String;
+Var
+    I : Integer;
+    D : IDocument;
+    Body, Path : String;
+Begin
+    Body := '';
+    For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        D := Project.DM_LogicalDocuments(I);
+        If D = Nil Then Begin Result := ''; Exit; End;
+        Path := D.DM_FullPath;
+        If Not LooksAbsolutePath(Path) Then Begin Result := ''; Exit; End;
+        If I > 0 Then Body := Body + ',';
+        Body := Body + '{"file_path":"' + EscapeJsonString(Path)
+            + '","document_kind":"' + EscapeJsonString(D.DM_DocumentKind) + '"}';
+    End;
+    Result := '{"documents":[' + Body + '],"count":'
+        + IntToStr(Project.DM_LogicalDocumentCount) + '}';
+End;
+
+Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
+Var
+    P : IProject;
+    Binding, SafeParams, Body, Reply, Freshness : String;
+    ExpectedSession, ExpectedGeneration, ExpectedPath : String;
+    LimitValue : Integer;
+    Compiled : Boolean;
+Begin
+    { This is the complete native allowlist in shared mode, not just MCP filtering. }
+    If Command = 'application.ping' Then
+    Begin
+        Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
+            + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
+            + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}');
+        Exit;
+    End;
+    If Command = 'selection.get_projects' Then
+    Begin
+        Result := BuildSuccessResponse(RequestId, SelectedProjectsJSON(0));
+        Exit;
+    End;
+    If Command = 'selection.get_selected' Then
+    Begin
+        Result := BuildSuccessResponse(RequestId, SelectionJSON(0));
+        Exit;
+    End;
+    If (Command <> 'project.get_documents') And
+       (Command <> 'project.get_compile_freshness') And
+       (Command <> 'project.get_bom') And (Command <> 'project.get_nets') And
+       (Command <> 'project.get_component_info') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
+        Exit;
+    End;
+    P := CurrentSelectedProject(0);
+    ExpectedSession := ExtractJsonValue(Params, 'selection_session');
+    ExpectedGeneration := ExtractJsonValue(Params, 'selection_generation');
+    ExpectedPath := ExtractJsonValue(Params, 'project_path');
+    If (P = Nil) Or (ExpectedSession <> SelectedSession) Or
+       (ExpectedGeneration <> IntToStr(SelectedGeneration)) Or
+       (UpperCase(ExpectedPath) <> UpperCase(SelectedPath)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Select a project in Altium; stale requests are not redirected');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    SafeParams := '{"project_path":"' + EscapeJsonString(SelectedPath) + '"';
+    SelectedBusy := True;
+    Try
+        Compiled := (Command = 'project.get_bom') Or (Command = 'project.get_nets');
+        Freshness := SelectedFreshnessJSON(P);
+        If Freshness = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS', 'Cannot establish selected-project document identity');
+            Exit;
+        End;
+        If Compiled Then
+        Begin
+            If ExtractJsonValue(Freshness, 'dirty_doc_count') <> '0' Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'DIRTY_PROJECT', 'Save intended edits manually before compiled reads');
+                Exit;
+            End;
+            LimitValue := StrToIntDef(ExtractJsonValue(Params, 'limit'), 0);
+            If (LimitValue < 1) Or (LimitValue > 50000) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'INVALID_LIMIT', 'Expected bounded positive limit');
+                Exit;
+            End;
+            SafeParams := SafeParams + ',"limit":' + IntToStr(LimitValue);
+            { Compile may pump native UI. Re-resolve before a handler reads objects. }
+            P.DM_Compile;
+            If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Project changed during compile');
+                Exit;
+            End;
+            Freshness := SelectedFreshnessJSON(P);
+            If ExtractJsonValue(Freshness, 'dirty_doc_count') <> '0' Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'DIRTY_PROJECT', 'Project changed during compile');
+                Exit;
+            End;
+            SelectedCompileProject := P;
+            SelectedCompileReady := True;
+        End;
+        If Command = 'project.get_component_info' Then
+            SafeParams := SafeParams + ',"designator":"'
+                + EscapeJsonString(ExtractJsonValue(Params, 'designator'))
+                + '","with_pin_nets":"false","with_parameters":"true"';
+        SafeParams := SafeParams + '}';
+        If Command = 'project.get_documents' Then Body := SelectedDocumentsJSON(P)
+        Else If Command = 'project.get_compile_freshness' Then Body := Freshness
+        Else
+        Begin
+            If Command = 'project.get_bom' Then Reply := Proj_GetBOM(SafeParams, RequestId)
+            Else If Command = 'project.get_nets' Then Reply := Proj_GetNets(SafeParams, RequestId)
+            Else Reply := Proj_GetComponentInfo(SafeParams, RequestId);
+            If ExtractJsonValue(Reply, 'success') <> 'true' Then
+            Begin
+                Result := Reply;
+                Exit;
+            End;
+            Body := ExtractJsonValue(Reply, 'data');
+        End;
+        If Body = '' Then
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_RESULT', 'Selected-project read returned no data')
+        Else If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Project changed during read; discard result')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding + ',"result":' + Body + '}');
+    Finally
+        SelectedCompileReady := False;
+        SelectedCompileProject := Nil;
+        SelectedBusy := False;
+    End;
+End;

@@ -269,6 +269,9 @@ DItemRevisionGUID=
 GenerateClassCluster=0
 DocumentUniqueId=
 
+[Document14]
+DocumentPath=SelectedProject.pas
+
 [Generic_ScriptingSystem]
 StartProcName=Dispatcher.pas>StartMCPServer
 

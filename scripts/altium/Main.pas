@@ -13,7 +13,9 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.09.01.3';
+    SCRIPT_VERSION = '2026.09.08.2';
+    { Shared deployment enables this; legacy named profiles keep it False. }
+    SELECTED_PROJECT_READ_ONLY = False;
 
     // How far up the mechanical layers a pair tidy looks. Altium allows 1024,
     // and checking every combination of those is a million probes for a stack
@@ -60,6 +62,8 @@ Const
 Var
     WorkspaceDir : String;
     Running : Boolean;
+    SelectedCompileReady : Boolean;
+    SelectedCompileProject : IProject;
 
     { Polling tunables, defaults below, overridden by mcp_config.json at      }
     { startup via LoadMCPConfig. Single source of truth: the config file.     }
@@ -292,6 +296,12 @@ End;
 Procedure SmartCompile(Project : IProject);
 Begin
     If Project = Nil Then Exit;
+    { Shared dispatcher already compiled and revalidated this exact selection.
+      Do not compile again inside a delegated handler after its lifetime check. }
+    If SELECTED_PROJECT_READ_ONLY And SelectedCompileReady Then
+    Begin
+        If Project = SelectedCompileProject Then Exit;
+    End;
     // Honour the TTL window only when nothing in the project has changed
     // since the last compile. An external UI edit invalidates the cache
     // immediately, so the next MCP call after the user clicked "Add part"
