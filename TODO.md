@@ -73,10 +73,19 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   with 172 components/559 pin entries and valid schemas. This does not
   fix native enumeration omissions or the separate offline extractor.
 - [ ] Return compile outcome and physical-versus-logical enumeration mode.
-  `Main.pas:GetCompiledDocs` silently falls back to logical documents; BOM/net
-  handlers skip nil documents/components/pins without reporting omissions.
-  Flag or reject uncertain hierarchical connectivity. This is a **source-level
-  risk**, not evidence that the verified 22p mapping was wrong.
+  **Candidate 2026.09.09.1 implemented at source (f285621 + PLT-hw 9f11328),
+  native qualification pending.** BOM/net responses carry an extraction block
+  (enumeration mode, doc_count, skipped-nil counters, limit_hit,
+  compile_action); the Python wrapper rejects nonzero skips, truncation,
+  logical-multisheet fallback and unrecorded compiles; INCOMPLETE_DOCUMENTS
+  now names the identityless document (closes the draft-diagnosability note
+  at source). Lint 12/0; all source tests pass including the two previously
+  failing wheel force-include checks (SelectedProject.pas added). Remaining:
+  create a new dated shared runtime at the next stopped-Altium window
+  (create_shared_runtime), native startup + 22p reads verifying the block,
+  and a draft test confirming the named-document error. compile_action
+  records call completion, not Altium's compile verdict - ECO/ECC stays
+  authoritative.
 - [x] Fix offline BOM extraction returning a successful empty result
   (fixed 2026-09-09, commit 93f5f4a). Root cause was input handling, not the
   SchDoc reader: a nonexistent path, a non-.SchDoc/.PrjPcb input or a missing
@@ -135,7 +144,10 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   worktrees verified. See the current-state handoff for immutable links.
   Keep venvs, copied CAD, IPC logs and workstation runtime artifacts out of Git.
 
-- [ ] Draft-state diagnosability (noted 2026-09-09, behavior itself accepted):
+- [ ] Draft-state diagnosability - source-implemented in candidate
+  2026.09.09.1 (see the extraction-report item above); native verification
+  pending. Original note kept for context (noted 2026-09-09, behavior itself
+  accepted):
   with an unsaved new sheet in the selected project, ALL project reads refuse
   with `INCOMPLETE_DOCUMENTS - Cannot establish selected-project document
   identity` - correct fail-closed handling, natively verified. But unlike
