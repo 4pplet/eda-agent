@@ -111,13 +111,21 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   alias-tolerant net partitions (splits/merges reported separately); first run
   reproduced audit A2 (172/172, 550/550, zero splits/merges, nine single-pin
   nets correctly no-net on the PCB). CI wiring remains open.
-- [ ] Add a bulk parameter read (proposed 2026-09-09): `proj_get_bom` strips
-  parameters, so a full-project parameter table costs one
-  `proj_get_component_info` call per component. Companion `dump_parameters.py`
-  (PLT-hw 6db9c8b) is the client-side stand-in and works today (172 components,
-  ~1 min); a native `proj_get_parameters` bulk handler would replace it. New
-  read tool: needs the usual schema/policy surface review and a deployment
-  window (never replace loaded scripts).
+- [ ] Bulk parameter read - **source-complete in 2026.09.09.2, native
+  qualification pending**: shared mode now exposes the reviewed upstream
+  `Proj_GetComponentInfoBatch` (uncompiled, parameters-only flags) as ninth
+  tool `proj_get_component_info_batch`; the client validates 1-500 unique
+  designators and requires every one back as matched or not_found
+  (validate_component_batch). Whole-project baseline = two calls (BOM +
+  batch). Deploy a new runtime at the next stopped-Altium window and qualify
+  live (172-designator batch equals the dump_parameters.py loop output).
+  `dump_parameters.py` remains the fallback meanwhile.
+- [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
+  `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
+  another version family, used only by manage_shared_runtime
+  inspect/prepare/rollback (which previously could not even validate a
+  rollback target from an older family). Clients stay version-strict.
+  Verified live against the real 2026.09.08.2 runtime; four new tests.
 
 ## P1: Deployment and evidence consistency
 
