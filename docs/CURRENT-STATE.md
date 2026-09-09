@@ -36,6 +36,12 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
 
 ## Latest observed evidence
 
+- Operator confirmed the short project close/reopen and Detach/quit/restart
+  checks completed on 2026-09-09. This is operator-reported evidence; exact cycle
+  count/session logs were not supplied. It does not close dirty-state, duplicate
+  names, native guard bypass, helper-stop or in-flight tests, or fix direct quit
+  with the bridge running.
+
 - Missing Start report resolved: user was viewing the Projects panel, not
   File > Run Script. `Dispatcher.pas > StartMCPServer` works; no startup fix needed.
 - Candidate live session `20260909084536379-17129109`, Altium PID 3612:
@@ -53,6 +59,11 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   electrical acceptance or full extraction completeness.
 
 ## Remaining work, in order
+
+This is qualification order, not a strictly sequential implementation queue.
+Packaging, documentation and permissions design may proceed alongside native
+read/lifecycle testing. Reliable target/baseline reads, approval enforcement,
+failure recovery and separate-save safeguards must pass before enabling writes.
 
 1. Finish candidate visual/selection lifecycle tests (draft, tabs, close/reopen,
    duplicate names, dirty documents), native guard tests and repeated no-save

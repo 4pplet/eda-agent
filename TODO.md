@@ -20,6 +20,10 @@ generation-4 checks passed all eight tools; see the current-state handoff.
 
 ## P0: Native shutdown qualification
 
+2026-09-09 update: operator confirms the short close/reopen and
+Detach/quit/restart checks completed. Exact cycles/logs not supplied; remaining
+matrix items below are not closed by that confirmation. See current-state handoff.
+
 Progress: 22p live reads on `2026.09.08.1`, no-save stop acknowledgement and one
 operator-confirmed normal quit after stopping passed. **Quit while running FAILED
 on that same patched revision**, with `ScriptingSystem.DLL` access violation at

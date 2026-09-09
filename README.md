@@ -5,6 +5,7 @@ MCP server that lets an AI (or any MCP-compatible client) **interact with a live
 > **⚠️ Experimental.** Not all tools are extensively tested. Some can crash the Altium DelphiScript engine. See [Known limitations](#known-limitations) before using on any design you haven't backed up.
 
 Local fork reliability work and acceptance gaps: [integration TODO](TODO.md).
+Agents: read [AGENTS.md](AGENTS.md) before using the upstream setup or connecting to Altium.
 Current deployment, evidence and next-agent memory: [current-state handoff](docs/CURRENT-STATE.md).
 
 ### Restricted integration status (2026-09-09)
