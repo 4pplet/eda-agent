@@ -87,7 +87,18 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   First snapshot-verified run against the 2026-09-08 Protel2 bundle export:
   172/172 designators, 550/550 shared pins identical, 9 additional single-pin
   bridge entries, 0 mismatches. Content agreement only, not connectivity or
-  electrical acceptance; ODB++ comparison and CI wiring remain open.
+  electrical acceptance. **ODB++ leg landed 2026-09-09**: companion
+  `odb_parity.py` (PLT-hw 1173560) parses the ODB++ step and checks
+  alias-tolerant net partitions (splits/merges reported separately); first run
+  reproduced audit A2 (172/172, 550/550, zero splits/merges, nine single-pin
+  nets correctly no-net on the PCB). CI wiring remains open.
+- [ ] Add a bulk parameter read (proposed 2026-09-09): `proj_get_bom` strips
+  parameters, so a full-project parameter table costs one
+  `proj_get_component_info` call per component. Companion `dump_parameters.py`
+  (PLT-hw 6db9c8b) is the client-side stand-in and works today (172 components,
+  ~1 min); a native `proj_get_parameters` bulk handler would replace it. New
+  read tool: needs the usual schema/policy surface review and a deployment
+  window (never replace loaded scripts).
 
 ## P1: Deployment and evidence consistency
 
