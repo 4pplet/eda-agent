@@ -1,4 +1,4 @@
-﻿{ SPDX-License-Identifier: Apache-2.0                                   }
+{ SPDX-License-Identifier: Apache-2.0                                   }
 { Copyright (c) 2026 George Saliba <george.saliba@salitronic.com>                                      }
 {..............................................................................}
 { Main.pas - Constants, IPC primitives and JSON helpers for the Altium bridge   }
@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.09.08.2';
+    SCRIPT_VERSION = '2026.09.09.1';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
 
@@ -82,6 +82,14 @@ Var
       SaveOneDocByDocRef. Reset by App_SaveAll before each pass. }
     SaveAttempts : Integer;
     LastCompiledProject : IProject;
+    { How the last SmartCompile call for the current request was satisfied:
+      'delegated' (shared dispatcher already compiled this selection),
+      'cache' (TTL window, no dirty docs), 'compiled' (DM_Compile ran and
+      returned without a script exception), or '' before any call. Read by
+      the BOM/net handlers for their extraction report. This deliberately
+      records call completion, not Altium's own compile verdict - ECO/ECC
+      messages remain the authority on compile health. }
+    LastCompileAction : String;
 
     { Silent cast-failure counter, incremented every time a defensive       }
     { Try/Except in an iteration helper swallows an interface cast that      }
@@ -300,7 +308,11 @@ Begin
       Do not compile again inside a delegated handler after its lifetime check. }
     If SELECTED_PROJECT_READ_ONLY And SelectedCompileReady Then
     Begin
-        If Project = SelectedCompileProject Then Exit;
+        If Project = SelectedCompileProject Then
+        Begin
+            LastCompileAction := 'delegated';
+            Exit;
+        End;
     End;
     // Honour the TTL window only when nothing in the project has changed
     // since the last compile. An external UI edit invalidates the cache
@@ -309,8 +321,13 @@ Begin
     If (Project = LastCompiledProject) And (LastCompileTick > 0) And
        ((GetTickCount - LastCompileTick) < COMPILE_CACHE_TTL_MS) And
        (Not ProjectHasDirtyDocs(Project)) Then
+    Begin
+        LastCompileAction := 'cache';
         Exit;
+    End;
+    LastCompileAction := '';
     Project.DM_Compile;
+    LastCompileAction := 'compiled';
     LastCompiledProject := Project;
     LastCompileTick := GetTickCount;
 End;

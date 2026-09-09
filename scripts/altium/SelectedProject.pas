@@ -110,6 +110,37 @@ Begin
     Result := '{"projects":[' + Body + '],"count":' + IntToStr(Count) + '}';
 End;
 
+{ Names the documents that break identity when SelectedFreshnessJSON gives
+  up: a nil member or one whose DM_FullPath is not absolute (an unsaved new
+  sheet carries only its virtual name). Diagnostic names only - content reads
+  stay refused while any such member exists; this merely tells the operator
+  WHICH document to save or discard instead of a bare INCOMPLETE_DOCUMENTS. }
+Function SelectedIdentityProblems(Project : IProject) : String;
+Var
+    I : Integer;
+    D : IDocument;
+    Path : String;
+Begin
+    Result := '';
+    If Project = Nil Then Exit;
+    For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        D := Project.DM_LogicalDocuments(I);
+        If D = Nil Then
+        Begin
+            If Result <> '' Then Result := Result + ', ';
+            Result := Result + 'document #' + IntToStr(I) + ' unresolved';
+            Continue;
+        End;
+        Path := D.DM_FullPath;
+        If Not LooksAbsolutePath(Path) Then
+        Begin
+            If Result <> '' Then Result := Result + ', ';
+            Result := Result + 'unsaved/identityless: ' + Path;
+        End;
+    End;
+End;
+
 Function SelectedFreshnessJSON(Project : IProject) : String;
 Var
     I, DirtyCount, OpenCount : Integer;
@@ -218,7 +249,10 @@ Begin
         Freshness := SelectedFreshnessJSON(P);
         If Freshness = '' Then
         Begin
-            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS', 'Cannot establish selected-project document identity');
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P)
+                + '); save or discard the named document');
             Exit;
         End;
         If Compiled Then
