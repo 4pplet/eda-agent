@@ -324,12 +324,24 @@ def review_project_file(path: str | Path) -> dict[str, Any]:
     from .altium_project import read_project_sheets
 
     path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
     if path.suffix.lower() == ".schdoc":
         return review_schematic_file(path)
     if path.suffix.lower() == ".schlib":
         return review_library_file(path)
+    if path.suffix.lower() != ".prjpcb":
+        raise ValueError(
+            f"{path} is not a .SchDoc, .SchLib or .PrjPcb; refusing to "
+            "guess (reviewing zero sheets would be a silent clean pass)")
 
     sheets = read_project_sheets(path)
+    if not sheets:
+        raise ValueError(
+            f"no schematic sheets resolved for {path}: the sibling "
+            f"{path.with_suffix('.PrjPcbStructure').name} is missing, "
+            "empty, or its sheets do not exist next to the project -- "
+            "a zero-sheet review would be a silent clean pass")
     all_findings: list[dict] = []
     sheet_reports: list[dict] = []
     components_by_sheet: dict[str, list[dict]] = {}

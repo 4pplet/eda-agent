@@ -421,7 +421,8 @@ def _run_bom(args) -> int:
     from .fileio.bom import bom_from_file, bom_to_csv
 
     try:
-        lines = bom_from_file(args.file)
+        lines = bom_from_file(args.file,
+                              allow_empty=getattr(args, "allow_empty", False))
     except (ValueError, OSError) as e:
         print(f"ERROR: cannot read {args.file}: {e}", file=sys.stderr)
         return 2
@@ -705,6 +706,10 @@ def main() -> int:
                        help="Opt in to the no-Altium reader (required).")
     bom_p.add_argument("--csv", action="store_true", help="Emit CSV.")
     bom_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    bom_p.add_argument("--allow-empty", action="store_true",
+                       help="Permit an empty BOM (confirmed-empty design "
+                            "only); by default an empty result is an error, "
+                            "because it usually means failed extraction.")
 
     # netlist -- offline geometric netlist + connectivity ERC (opt-in).
     net_p = subparsers.add_parser(

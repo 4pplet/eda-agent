@@ -70,27 +70,60 @@ def consolidate_bom(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return lines
 
 
-def bom_from_file(path: str | Path) -> list[dict[str, Any]]:
+def bom_from_file(path: str | Path, *,
+                  allow_empty: bool = False) -> list[dict[str, Any]]:
     """Read a ``.SchDoc`` or ``.PrjPcb`` and return its consolidated BOM.
 
     A ``.SchDoc`` is read directly; a ``.PrjPcb`` aggregates every sheet
     (a designator that repeats across sheets, e.g. a multi-part component,
     is de-duplicated so it counts once). Pure Python; no Altium.
+
+    An empty result is refused by default: a missing file, an unsupported
+    suffix, a project whose sheet list cannot be resolved, or a design that
+    parses to zero placed components all raise instead of returning ``[]``
+    with success -- an empty BOM for a populated design is failed
+    extraction, not a result. A genuinely empty project must be stated
+    explicitly with ``allow_empty=True``.
     """
     path = Path(path)
-    if path.suffix.lower() == ".schdoc":
+    if not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
+    suffix = path.suffix.lower()
+    if suffix == ".schdoc":
         from .altium_sch import read_schematic_components
-        return consolidate_bom(read_schematic_components(path))
+        components = read_schematic_components(path)
+        if not components and not allow_empty:
+            raise ValueError(
+                f"{path} parsed to zero placed components; refusing to "
+                "report an empty BOM (pass allow_empty=True only for a "
+                "confirmed-empty sheet)")
+        return consolidate_bom(components)
+    if suffix != ".prjpcb":
+        raise ValueError(
+            f"{path} is not a .SchDoc or .PrjPcb; refusing to guess "
+            "(a .PcbDoc or other file would silently yield an empty BOM)")
 
     from .altium_project import read_project_sheets
     from .altium_sch import read_schematic_components
 
+    sheets = read_project_sheets(path)
+    if not sheets:
+        raise ValueError(
+            f"no schematic sheets resolved for {path}: the sibling "
+            f"{path.with_suffix('.PrjPcbStructure').name} is missing, "
+            "empty, or its sheets do not exist next to the project")
+
     by_designator: dict[str, dict] = {}
-    for sheet in read_project_sheets(path):
+    for sheet in sheets:
         for comp in read_schematic_components(sheet):
             d = (comp.get("designator") or "").strip()
             if d:
                 by_designator.setdefault(d, comp)  # first sheet wins per refdes
+    if not by_designator and not allow_empty:
+        raise ValueError(
+            f"{path} parsed {len(sheets)} sheet(s) but zero placed "
+            "components; refusing to report an empty BOM (pass "
+            "allow_empty=True only for a confirmed-empty project)")
     return consolidate_bom(list(by_designator.values()))
 
 

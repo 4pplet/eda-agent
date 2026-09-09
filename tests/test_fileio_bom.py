@@ -99,3 +99,66 @@ def test_bom_to_csv_empty_is_header_only():
     assert bom_to_csv([]).strip().split("\n") == ["Quantity,Designators,MPN,"
                                                   "Manufacturer,Value,"
                                                   "LibReference,Datasheet"]
+
+
+# ---------------------------------------------------------------------------
+# Empty-result refusal (2026-09-09): an empty BOM with success for a populated
+# design is failed extraction. Reproduced on a real 172-component project:
+# a nonexistent path (and any non-project suffix) returned [] with exit 0.
+
+import pytest
+
+from eda_agent.fileio.review import review_project_file
+
+
+def test_nonexistent_path_raises_not_empty(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        bom_from_file(tmp_path / "no-such-project.PrjPcb")
+
+
+def test_wrong_suffix_raises_not_empty(tmp_path):
+    fake = tmp_path / "board.PcbDoc"
+    fake.write_bytes(b"not a schematic")
+    with pytest.raises(ValueError, match="not a .SchDoc or .PrjPcb"):
+        bom_from_file(fake)
+
+
+def test_project_without_structure_file_raises(tmp_path):
+    prj = tmp_path / "board.PrjPcb"
+    prj.write_text("[Design]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no schematic sheets resolved"):
+        bom_from_file(prj)
+
+
+def test_structure_pointing_at_missing_sheets_raises(tmp_path):
+    prj = tmp_path / "board.PrjPcb"
+    prj.write_text("[Design]\n", encoding="utf-8")
+    (tmp_path / "board.PrjPcbStructure").write_text(
+        "Record=TopLevelDocument|FileName=gone.SchDoc|SheetNumber=\n",
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="no schematic sheets resolved"):
+        bom_from_file(prj)
+
+
+def test_review_nonexistent_path_raises_not_clean(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        review_project_file(tmp_path / "no-such-project.PrjPcb")
+
+
+def test_review_wrong_suffix_raises_not_clean(tmp_path):
+    fake = tmp_path / "board.PcbDoc"
+    fake.write_bytes(b"not a schematic")
+    with pytest.raises(ValueError, match="refusing to guess"):
+        review_project_file(fake)
+
+
+def test_review_project_without_structure_raises(tmp_path):
+    prj = tmp_path / "board.PrjPcb"
+    prj.write_text("[Design]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="silent clean pass"):
+        review_project_file(prj)
+
+
+def test_real_fixture_still_reads():
+    lines = bom_from_file(PRJ)
+    assert lines, "fixture project must yield a non-empty BOM"
