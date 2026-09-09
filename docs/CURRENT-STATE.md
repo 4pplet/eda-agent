@@ -94,8 +94,9 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   CLI: one-command status/bom/nets/parameters(+blank-report)/documents/
   freshness bound to the live selection, runtime root from the reviewed
   ACTIVE-RUNTIME.txt pointer, DIRTY_PROJECT errors enriched with dirty
-  document names; dead-bridge path live-verified, happy path smoke pending
-  the next bridge start. New `check_install.py` drift doctor: 13/13 on the
+  document names; both paths live-verified (2026-09-09 15:11 session: status and the
+  full 172-component parameters+blank-report in seconds on the 60-min
+  clock). New `check_install.py` drift doctor: 13/13 on the
   current installation. Stop-first at wind-down matters more with the longer
   timeout, not less.
 - Batch candidate 2026.09.09.2 QUALIFIED and active (2026-09-09): runtime
