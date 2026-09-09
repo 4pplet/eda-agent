@@ -80,9 +80,14 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
 - [ ] Fix offline BOM extraction returning a successful empty result for a
   known populated 172-component project. Add real-format regression coverage;
   keep native exports authoritative until verified.
-- [ ] Automate same-snapshot designator and connected-pin/net comparison with
-  native exports. Report missing, mismatched and additional entries separately;
-  matching counts do not establish connectivity or electrical acceptance.
+- [x] Automate same-snapshot designator and connected-pin/net comparison with
+  native exports: companion PLT-hw `tools/eda-agent/compare_native_export.py`
+  (commit c00957e) diffs bridge BOM/net dumps against native Protel v1/v2
+  exports, reporting missing, mismatched and additional entries separately.
+  First snapshot-verified run against the 2026-09-08 Protel2 bundle export:
+  172/172 designators, 550/550 shared pins identical, 9 additional single-pin
+  bridge entries, 0 mismatches. Content agreement only, not connectivity or
+  electrical acceptance; ODB++ comparison and CI wiring remain open.
 
 ## P1: Deployment and evidence consistency
 

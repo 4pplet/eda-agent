@@ -52,6 +52,16 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   C101 metadata. Every scoped response retained the selected path/session/token.
   No CAD edit/save command sent; BOM/net reads use allowed non-forced compilation.
   This is a copy under `projects/plt-22p/design-copy`, not necessarily latest CAD.
+- 2026-09-09 continuation (different agent): the same-snapshot export
+  comparison is automated in companion PLT-hw `compare_native_export.py`
+  (c00957e, ten synthetic tests, suite green in the installed venv). Real run
+  with hash-verified snapshot identity (design-copy files == PLT-hw `05d18ab`):
+  bridge generation-4 BOM/net dumps versus the 09-08 Protel2 bundle export gave
+  172/172 designators, 550/550 shared pins with identical nets, 0 mismatches
+  and 9 additional-only single-pin entries (spare pads, TVS NCs, floating U205
+  EN, freed PC15, and D302-3 - extra evidence for the open D302 numbering
+  dispute). The 15:48 sheet-scoped v1 export carries only 542 of the 550;
+  prefer the full-project Protel2 export as comparison input.
 - Re-run: 89 companion Python tests, 13 native-selection source checks,
   10 shutdown source checks and 8 standalone-probe source checks pass.
   Full Pascal lint in canonical source order: 12 files, zero errors/warnings.
