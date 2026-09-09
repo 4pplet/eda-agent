@@ -86,6 +86,18 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty reporting is selection-scoped. Drafts (new unsaved documents in the
   selected project) remain an open matrix row.
 
+- Extraction candidate 2026.09.09.1 QUALIFIED and active (2026-09-09):
+  new runtime `shared/selected-readonly-extraction-20260909` (23 files
+  hashed, integrity check passed offline, eight-tool schema intact) is now
+  the operating shared runtime; `selected-readonly-permissions-20260909`
+  remains untouched as rollback. Live qualification on the working 22p
+  project: version agreement, all reads, extraction block
+  physical/zero-skips/delegated with strict client validation enforcing,
+  draft refusal naming the offending document, and immediate recovery after
+  a deliberate discard. The cross-version guard in manage_shared_runtime
+  correctly refused to inspect the old-family runtime (documented
+  limitation); create_shared_runtime provisioned the new family directly.
+
 - Foreign-tab invariance, post-crash recovery and drafts recovery PASSED
   (2026-09-09, session 20260909120705744, post-crash relaunch): with a tab of
   a NON-selected project focused, selection stayed 22p generation 2 and all
