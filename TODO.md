@@ -77,9 +77,15 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   handlers skip nil documents/components/pins without reporting omissions.
   Flag or reject uncertain hierarchical connectivity. This is a **source-level
   risk**, not evidence that the verified 22p mapping was wrong.
-- [ ] Fix offline BOM extraction returning a successful empty result for a
-  known populated 172-component project. Add real-format regression coverage;
-  keep native exports authoritative until verified.
+- [x] Fix offline BOM extraction returning a successful empty result
+  (fixed 2026-09-09, commit 93f5f4a). Root cause was input handling, not the
+  SchDoc reader: a nonexistent path, a non-.SchDoc/.PrjPcb input or a missing
+  .PrjPcbStructure returned [] with exit 0, and the offline review turned the
+  same cases into a silent clean pass. bom_from_file/review_project_file now
+  refuse those (allow_empty/--allow-empty states a genuinely empty design
+  explicitly); eight regression tests. Verified against the real project:
+  refusals exit 2, 66 lines / 172 parts on the .PrjPcb. Native exports remain
+  authoritative for sign-off; the reader itself matched the live BOM count.
 - [x] Automate same-snapshot designator and connected-pin/net comparison with
   native exports: companion PLT-hw `tools/eda-agent/compare_native_export.py`
   (commit c00957e) diffs bridge BOM/net dumps against native Protel v1/v2

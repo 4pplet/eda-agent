@@ -77,6 +77,17 @@ involve repeated Altium quit/restart cycles and the known direct-quit crash,
 and must never share a session with real design edits. Read-only use continues
 under the operating contract in the shared runbook meanwhile.
 
+- 2026-09-09 (continuation agent): offline BOM/review silent-empty defect
+  fixed at source (93f5f4a) and the installed wheel rebuilt from that commit
+  during a no-Altium window: old wheel preserved as
+  wheels/eda_agent-0.5.0-py3-none-any.whl.pre-fix-20260909.bak
+  (SHA-256 84fb7109...), new build SHA-256 28b74f49... installed, pip check
+  clean, installed CLI verified on the real project, shared client eight-tool
+  list-only schema check passes. pytest was added to the runtime venv as dev
+  tooling (runtime lock unchanged per pip check). Targeted suites around the
+  changed files: identical 15 pre-existing failures on clean tree, +7 new
+  passing regressions; full-suite baseline comparison recorded separately.
+
 ## Remaining work, in order
 
 This is qualification order, not a strictly sequential implementation queue.
