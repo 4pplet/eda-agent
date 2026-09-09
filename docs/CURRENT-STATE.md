@@ -75,9 +75,16 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty_doc_count=2 and named both files, `proj_list_documents` still served,
   and `proj_get_bom` was refused with `DIRTY_PROJECT - Save intended edits
   manually before compiled reads`. First native confirmation of the dirty-target
-  guard: inspection reads work, compiled reads refuse. Closes the Gate 1
-  "dirty selected documents" matrix row for reads; the post-save recovery
-  half and dirty-unrelated-document case recorded separately when run.
+  guard: inspection reads work, compiled reads refuse. The full row is now closed
+  (2026-09-09, session 20260909113532577): an operator save that did NOT
+  reach disk was correctly still refused (file mtimes proved the bridge
+  right); after a real Save All, dirty_doc_count returned 0 and BOM/net
+  reads succeeded (172/559, byte-identical schematic content to the
+  pre-edit baseline). Dirty state also survives a bridge restart - it is
+  live Altium state, not bridge cache - and unsaved documents of the other
+  open, unselected project (cyber80) never appeared in any response:
+  dirty reporting is selection-scoped. Drafts (new unsaved documents in the
+  selected project) remain an open matrix row.
 
 ## Continuation ownership (2026-09-09)
 
