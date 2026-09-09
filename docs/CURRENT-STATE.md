@@ -86,6 +86,18 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty reporting is selection-scoped. Drafts (new unsaved documents in the
   selected project) remain an open matrix row.
 
+- Usability batch (2026-09-09 afternoon, companion PLT-hw, client-side only,
+  no deployment needed): shared idle timeout is config-pinned to 60 minutes
+  (operator decision; EDA_AGENT_AUTO_SHUTDOWN_MS overrides; seeded for new
+  runtimes, re-pinned after every wheel connect, current runtime updated) -
+  the 10-minute default forced two mid-CAD restarts. New `bridge_read.py`
+  CLI: one-command status/bom/nets/parameters(+blank-report)/documents/
+  freshness bound to the live selection, runtime root from the reviewed
+  ACTIVE-RUNTIME.txt pointer, DIRTY_PROJECT errors enriched with dirty
+  document names; dead-bridge path live-verified, happy path smoke pending
+  the next bridge start. New `check_install.py` drift doctor: 13/13 on the
+  current installation. Stop-first at wind-down matters more with the longer
+  timeout, not less.
 - Batch candidate 2026.09.09.2 QUALIFIED and active (2026-09-09): runtime
   `shared/selected-readonly-batch-20260909`, prepared with the guarded
   cross-version manage_shared_runtime prepare (update-receipt records the
