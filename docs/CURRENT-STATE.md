@@ -86,6 +86,19 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty reporting is selection-scoped. Drafts (new unsaved documents in the
   selected project) remain an open matrix row.
 
+- Foreign-tab invariance, post-crash recovery and drafts recovery PASSED
+  (2026-09-09, session 20260909120705744, post-crash relaunch): with a tab of
+  a NON-selected project focused, selection stayed 22p generation 2 and all
+  eight reads served only selected-project data with the correct binding on
+  every response; the tool surface exposes no active-tab query at all. Same
+  probe confirmed clean recovery after the 11:50 crash and after the
+  identityless draft ceased to exist (dirty 0, BOM 172, nets 559). Drafts row
+  closed: fail-closed INCOMPLETE_DOCUMENTS while a draft exists (see TODO
+  diagnosability note), clean reads once it is gone; the deliberate
+  discard-without-crash variant can be repeated cheaply any session.
+  Remaining live matrix work: repeat helper-stop, close/reopen selection
+  clearing, duplicate names, dirty-unrelated-document case.
+
 - New shutdown-family crash data point (2026-09-09): X2.EXE 23.3.1.30
   crashed at 11:50:51 with exception 0xc0000374 (heap corruption, faulting
   module ntdll.dll, WER report 541a7215-1b4d-43ec-add6-e7eb165d7dc6) - 1.2 s
