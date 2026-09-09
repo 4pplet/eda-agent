@@ -225,7 +225,8 @@ Begin
     If (Command <> 'project.get_documents') And
        (Command <> 'project.get_compile_freshness') And
        (Command <> 'project.get_bom') And (Command <> 'project.get_nets') And
-       (Command <> 'project.get_component_info') Then
+       (Command <> 'project.get_component_info') And
+       (Command <> 'project.get_component_info_batch') Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -289,6 +290,13 @@ Begin
             SafeParams := SafeParams + ',"designator":"'
                 + EscapeJsonString(ExtractJsonValue(Params, 'designator'))
                 + '","with_pin_nets":"false","with_parameters":"true"';
+        { Bulk parameter read: the reviewed batch handler in its uncompiled
+          parameters-only mode (same flags as the single lookup above). The
+          Python client validates each designator and joins with '~~'. }
+        If Command = 'project.get_component_info_batch' Then
+            SafeParams := SafeParams + ',"designators":"'
+                + EscapeJsonString(ExtractJsonValue(Params, 'designators'))
+                + '","with_pin_nets":"false","with_parameters":"true"';
         SafeParams := SafeParams + '}';
         If Command = 'project.get_documents' Then Body := SelectedDocumentsJSON(P)
         Else If Command = 'project.get_compile_freshness' Then Body := Freshness
@@ -296,6 +304,7 @@ Begin
         Begin
             If Command = 'project.get_bom' Then Reply := Proj_GetBOM(SafeParams, RequestId)
             Else If Command = 'project.get_nets' Then Reply := Proj_GetNets(SafeParams, RequestId)
+            Else If Command = 'project.get_component_info_batch' Then Reply := Proj_GetComponentInfoBatch(SafeParams, RequestId)
             Else Reply := Proj_GetComponentInfo(SafeParams, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
             Begin
