@@ -4,6 +4,12 @@ Updated 2026-09-09. This is the current-state entry point; dated session logs ar
 historical evidence, not pending-work truth. See [TODO](../TODO.md) and the
 [read/write delivery gates](PROJECT-SELECTION-AND-WRITES.md#delivery-plan-and-release-gates-2026-09-09).
 
+Published checkpoint: [eda-agent d5b62a0](https://github.com/4pplet/eda-agent/commit/d5b62a03b20d1c2c6dfa416b4990d7c74fe11ad9)
+and [PLT-hw 3b7cc66](https://github.com/4pplet/PLT-hw/commit/3b7cc66f4bd55cffe53a26141abdc85a52e65160).
+Both were pushed to `origin/main`; their remote hashes and clean worktrees were
+verified before this documentation-only receipt. These are matching source/helper
+baselines; no installed package/runtime redeployment accompanied publication.
+
 ## What is running
 
 - Fork: `4pplet/eda-agent`, based on `1b60105cbe0c4bd557007b87bc04dda2fd4ef9a1`.
@@ -42,6 +48,7 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   This is a copy under `projects/plt-22p/design-copy`, not necessarily latest CAD.
 - Re-run: 89 companion Python tests, 13 native-selection source checks,
   10 shutdown source checks and 8 standalone-probe source checks pass.
+  Full Pascal lint in canonical source order: 12 files, zero errors/warnings.
   Source tests do not execute Altium's VM. Counts/schema are not export parity,
   electrical acceptance or full extraction completeness.
 

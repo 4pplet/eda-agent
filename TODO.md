@@ -104,9 +104,9 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   that item is complete for shared mode, not a CAD snapshot guarantee. Legacy
   startup enforcement and exact source/copy revision evidence remain open.
   Detect saved-copy/source drift; do not silently refresh CAD or compare revisions.
-- [ ] Complete publication verification of source fixes, tests and companion runbooks.
-  This checkpoint prepares both repos for commit/push; verify remote commit IDs
-  and both clean worktrees before reporting publication complete.
+- [x] Publish the scoped source fixes, tests and companion runbooks checkpoint.
+  Fork `d5b62a0` and PLT-hw `3b7cc66` pushed to origin/main; remote hashes and clean
+  worktrees verified. See the current-state handoff for immutable links.
   Keep venvs, copied CAD, IPC logs and workstation runtime artifacts out of Git.
 
 ## P2: Cancellation, deadlines and usability
