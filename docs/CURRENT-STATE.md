@@ -86,6 +86,18 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   dirty reporting is selection-scoped. Drafts (new unsaved documents in the
   selected project) remain an open matrix row.
 
+- New shutdown-family crash data point (2026-09-09): X2.EXE 23.3.1.30
+  crashed at 11:50:51 with exception 0xc0000374 (heap corruption, faulting
+  module ntdll.dll, WER report 541a7215-1b4d-43ec-add6-e7eb165d7dc6) - 1.2 s
+  AFTER the bridge loop ended cleanly by idle-timeout at 11:50:49.794
+  (_session_end, requests=51). Not the known quit-while-running case: the loop
+  had exited first. Either a spontaneous crash right after loop teardown or an
+  operator close racing it. Strengthens "do not depend on inactivity timeout
+  to quit"; relevant to the P0 lifetime investigation. An unsaved draft sheet
+  (part of the drafts matrix test) was open at crash time; saved documents
+  (11:37 Save All) were unaffected. Two unrelated LiveKernelEvent reports
+  (10:33, 11:21) the same morning are system-level, not X2.
+
 ## Continuation ownership (2026-09-09)
 
 The agent that built this integration has stopped (out of credits) and will not
