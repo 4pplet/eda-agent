@@ -144,6 +144,18 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   (11:37 Save All) were unaffected. Two unrelated LiveKernelEvent reports
   (10:33, 11:21) the same morning are system-level, not X2.
 
+- Wind-down evidence 2026-09-09 evening (positive, plus one anomaly):
+  deliberate stop at 16:05:47 (`_session_end reason=stop-requested`; fresh
+  session 9 s later served reads) — first live helper-stop data point toward
+  the "repeat helper-stop" matrix row. After the 16:16:36 idle-timeout exit,
+  Altium was closed with NO crash in the event log (contrast 11:50:51 —
+  the idle-timeout-then-crash signature did not repeat). Anomaly: that final
+  session timed out after exactly 600.0 s despite the 60-minute pin
+  (mcp_config.json held 3600000, mtime 15:11:47), while the 15:11 session
+  had survived 53 min idle — the pin held once and not the other time.
+  Logged with hypotheses in TODO.md (config re-read race vs restart-time
+  read); investigate on a non-CAD day alongside the deferred crash work.
+
 ## Continuation ownership (2026-09-09)
 
 The agent that built this integration has stopped (out of credits) and will not
@@ -195,6 +207,9 @@ The named kernel client guard coordinates updated cooperating clients only.
 
 **Detach before closing the script project or quitting Altium.** Direct quit with
 the loop running remains a known failure, not a fixed issue. Pause is not Detach.
-The ten-minute timeout tracks bridge traffic, including keepalive pings, not
-general Altium activity. Never replace loaded scripts or auto-dismiss/save/kill
+The idle timeout tracks bridge traffic, including keepalive pings, not general
+Altium activity; it is pinned to 60 minutes via mcp_config.json, but the
+2026-09-09 16:16 anomaly (a 600 s timeout despite the pin — see TODO.md) means
+the pin cannot yet be relied on: treat the effective timeout as possibly ten
+minutes until the anomaly is resolved. Never replace loaded scripts or auto-dismiss/save/kill
 Altium to complete tests. No write permissions were enabled by this publication.

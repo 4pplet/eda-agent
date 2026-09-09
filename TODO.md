@@ -29,6 +29,23 @@ operator-confirmed normal quit after stopping passed. **Quit while running FAILE
 on that same patched revision**, with `ScriptingSystem.DLL` access violation at
 read address `0x78` and no end/abort log. Details are in the shutdown log below.
 
+- [ ] **Idle-timeout pin anomaly (observed 2026-09-09 16:16):** the bridge
+  session started 16:05:56 idle-timed-out after exactly 600.0 s (last request
+  16:06:36.8, `_session_end reason=idle-timeout` 16:16:36.9) despite the
+  60-minute pin; `mcp_config.json` on disk held `3600000` (mtime 15:11:47,
+  the connect-time re-pin). The earlier 15:11 session survived 53 min idle
+  before a clean `stop-requested` end at 16:05:47, so the pin worked at least
+  once. Hypotheses to check on a non-CAD day: does the Pascal side re-read
+  the config on client connect and race the wheel's default rewrite against
+  `apply_auto_shutdown`'s re-pin, or does a bridge restart read something
+  other than the pinned file? Evidence: batch-20260909 `workspace/activity.log`.
+- [ ] **2026-09-09 wind-down evidence (positive):** deliberate stop at
+  16:05:47 (`reason=stop-requested`, 9 s later a fresh session served reads) —
+  first live helper-stop data point; and after the 16:16 idle-timeout exit,
+  Altium was closed with **no crash in the Windows event log** (contrast the
+  11:50:51 heap-corruption signature that followed an idle-timeout exit).
+  Only unrelated LiveKernelEvent WER entries (P1 124/1cc, 15:49:56) —
+  machine-level, not Altium. Count toward the shutdown matrix rows.
 - [ ] Complete [the shutdown matrix](docs/SHUTDOWN.md) on disposable CAD:
   new-version ping/read, explicit no-save stop, native Detach/Close, repeated
   restart cycles, paused/active/idle stop and timeout. Test quit while running
