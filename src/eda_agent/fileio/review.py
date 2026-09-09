@@ -324,8 +324,9 @@ def review_project_file(path: str | Path) -> dict[str, Any]:
     from .altium_project import read_project_sheets
 
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"{path} does not exist")
+    # A missing/unreadable .SchDoc or .SchLib fails naturally in its reader;
+    # the .PrjPcb branch is the one that could silently review zero sheets,
+    # so it alone gets explicit existence and suffix guards.
     if path.suffix.lower() == ".schdoc":
         return review_schematic_file(path)
     if path.suffix.lower() == ".schlib":
@@ -334,6 +335,8 @@ def review_project_file(path: str | Path) -> dict[str, Any]:
         raise ValueError(
             f"{path} is not a .SchDoc, .SchLib or .PrjPcb; refusing to "
             "guess (reviewing zero sheets would be a silent clean pass)")
+    if not path.exists():
+        raise FileNotFoundError(f"{path} does not exist")
 
     sheets = read_project_sheets(path)
     if not sheets:
