@@ -135,6 +135,16 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   worktrees verified. See the current-state handoff for immutable links.
   Keep venvs, copied CAD, IPC logs and workstation runtime artifacts out of Git.
 
+- [ ] Draft-state diagnosability (noted 2026-09-09, behavior itself accepted):
+  with an unsaved new sheet in the selected project, ALL project reads refuse
+  with `INCOMPLETE_DOCUMENTS - Cannot establish selected-project document
+  identity` - correct fail-closed handling, natively verified. But unlike
+  DIRTY_PROJECT (where freshness still serves and names dirty_docs), nothing
+  names the identityless member. Let proj_get_compile_freshness (or a small
+  diagnostics read) list draft/identityless documents - names only, content
+  reads keep refusing. Decision: keep fail-closed; new files are supported
+  once saved.
+
 ## P2: Cancellation, deadlines and usability
 
 - [ ] Define cancellation semantics and a consistent end-to-end deadline.
