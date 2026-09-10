@@ -172,9 +172,12 @@ under the operating contract in the shared runbook meanwhile.
   classes, trace lengths, component pads, selected objects, board stats)
   + `proj_get_erc_messages` (first native ERC pull: 197 violations in 6
   classes, triaged in PLT-hw reviews/2026-09-10-erc-triage.md - 191
-  noise, 6 for operator eyes). CANDIDATE =
-  `selected-readonly-audits-20260910` (2026.09.10.6, thirty-one tools):
-  six purity-reviewed layout audits, deploy at next restart. The pads
+  noise, 6 for operator eyes). ACTIVE since
+  the afternoon deploy = `selected-readonly-audits-20260910` (2026.09.10.6,
+  thirty-one tools): six layout audits qualified live, one client
+  validator bug fixed via surgical runtime patch, and the audit data
+  caught a shorting hazard in the PLT-hw floorplan DOCS (U205 PowerPAD
+  vias belong on the L4 island, not L2 GND - CAD was right, docs fixed). The pads
   read caught U301 90 deg off the recommended orientation on first use
   (operator fixed; re-verified pin-1-SW). Idle-timeout race ROOT-CAUSED
   and fixed three ways (bridge_read finally re-pin, shared_server atexit,
