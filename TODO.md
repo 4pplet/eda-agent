@@ -289,6 +289,13 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   side: add ERC + uncapped-DRC report outputs to 22p-adapter.OutJob
   (one-time). Client side: gated tool + parsers for the two report
   formats + freshness/hash recording per the evidence discipline.
+  **Scope extension (agreed 2026-09-10): plan TWO OutJobs.** Validation
+  job (ERC + uncapped DRC + ODB + Protel netlist - cheap, every
+  checkpoint; the netlist feeds compare_native_export automatically) and
+  a Release job (variant-aware BOM CSV closing the not-a-purchasing-BOM
+  caveat, pick-and-place/CPL cross-checkable against the live placements
+  read, Gerbers/NC drill, schematic PDFs - the order package as one
+  dated hashable artifact set). Same approval gate, per-container.
 - [ ] **Wider upstream survey (2026-09-10) — further read-side candidates**,
   same caveats as above (unreviewed, mostly focused-document targeting,
   each needs read-only verification + selection scoping):
