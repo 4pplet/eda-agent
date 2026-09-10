@@ -275,6 +275,20 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   (c) allow-list + Python validation + version bump + stopped-Altium deploy
   + live qualification vs a same-snapshot ODB export. Comparable in shape
   and effort to the 2026-09-09 item-3/item-4 batch.
+- [x] **Audit tranche NATIVELY QUALIFIED 2026-09-10 (2026.09.10.6,
+  runtime selected-readonly-audits-20260910, session 20260910121336748,
+  pointer flipped, doctor 13/13).** Six/six audits ran and validated on
+  the live board; findings coherent (outline/edge/mirrored clean, 2
+  mixed-silk pairs = rough-stage noise, 10 via antennas = the known
+  not-yet-poured stubs incl. the U207 VCC5V pair, 6 return-via flags =
+  the U205 island vias, exempt once the net is renamed VEE_IBB_LOCAL -
+  the power-name matcher covers VEE*). One client-side validator bug
+  found and fixed (mixed-rotation counts pairs, items list contributors;
+  regression test added); the deployed runtime's client was patched
+  surgically with backup/manifest/provenance per the selector-patch
+  precedent. Bonus: audit data exposed a shorting hazard in the PLT-hw
+  floorplan DOCS ("PowerPAD vias to L2" - U205's pad is -3.3V; docs
+  corrected, CAD was right).
 - [ ] **Phase 2 kickoff candidate (agreed with operator 2026-09-10):
   approval-gated OutJob generation + report parsers.** Solves all three
   documented read limitations at once: an ERC report output carries the
