@@ -38,10 +38,18 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   (b) the compiled reads' DM_Compile at 09:31 pushing net updates into an
   open PcbDoc (known Altium stale-line trigger), (c) native Altium
   ratsnest staleness, coincidental. Connection DATA was self-consistent
-  at 09:26 (unrouted read validated). A/B procedure agreed: refresh
-  first, then move-test with the bridge stopped vs running. Until
-  resolved: prefer PCB reads over compiled reads during active board
-  editing, and note that compiled reads compile the open project.
+  at 09:26 (unrouted read validated). **A/B RESULT (~10:00): issue
+  persists after a full Altium restart with NO bridge running — the
+  polling loop is exonerated as the live cause.** Stale lines also
+  survived PcbDoc close/reopen and Clean All Nets, so the state is in
+  the saved file or is a native bug. Remaining bridge-related suspect is
+  one-time: the 09:31 compiled-read DM_Compile into the open PcbDoc,
+  saved shortly after. Interim guidance stands and is now precautionary:
+  prefer PCB reads over compiled reads during active board editing;
+  compiled reads at operator save points only. Next: ECO-dialog probe
+  (Import Changes, read-only inspection) to see whether board nets
+  desynced; known-good PcbDoc exists in git (yesterday's commit) as the
+  bounded fallback.
 - [ ] **Idle-timeout pin anomaly (observed 2026-09-09 16:16):** the bridge
   session started 16:05:56 idle-timed-out after exactly 600.0 s (last request
   16:06:36.8, `_session_end reason=idle-timeout` 16:16:36.9) despite the
