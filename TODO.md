@@ -224,6 +224,17 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   The 2026-09-09 600s observations are explained by the same race. The
   remaining proper fix (Pascal-side floor or per-request config re-read)
   rides with the next runtime alongside the atexit hardening.
+  **Tranche 3 same day (2026.09.10.3, runtime
+  selected-readonly-pcbreads3-20260910, commit 8d7f989):** six more
+  purity-reviewed reads - design_rules (all kinds), net_classes,
+  trace_lengths (optional net filter), component_pads (placed-pad
+  geometry), selected_objects (operator-cooperative), board_statistics
+  (flat summary; its core and the outline core drop the upstream
+  Invalidate/Rebuild/Validate mutation). Twenty-four tools total; 144
+  companion tests pass; fork failed-set diff vs baseline identical; lint
+  0/0; the atexit timeout re-pin rides in this runtime's client. Deploy
+  at the next natural bridge restart; qualify the six live; flip the
+  pointer.
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
