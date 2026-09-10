@@ -275,6 +275,20 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   (c) allow-list + Python validation + version bump + stopped-Altium deploy
   + live qualification vs a same-snapshot ODB export. Comparable in shape
   and effort to the 2026-09-09 item-3/item-4 batch.
+- [ ] **Phase 2 kickoff candidate (agreed with operator 2026-09-10):
+  approval-gated OutJob generation + report parsers.** Solves all three
+  documented read limitations at once: an ERC report output carries the
+  per-violation detail/severity the DM_ShortDescriptorString API cannot;
+  an UNCAPPED DRC report output gives DRC access without exposing the
+  state-mutating PCB_RunDRC as a read (the mutation happens inside a
+  deliberate generation); and the same trigger refreshes the Validation
+  ODB bundle, closing the export-freshness gap. Design: NOT a read -
+  Proj_GenerateOutput/Proj_GetOutJobContainers behind a NATIVE
+  confirmation dialog in Altium (operator clicks Allow at the machine;
+  selector form is the precedent) - Gate-2-lite, never ambient. Operator
+  side: add ERC + uncapped-DRC report outputs to 22p-adapter.OutJob
+  (one-time). Client side: gated tool + parsers for the two report
+  formats + freshness/hash recording per the evidence discipline.
 - [ ] **Wider upstream survey (2026-09-10) — further read-side candidates**,
   same caveats as above (unreviewed, mostly focused-document targeting,
   each needs read-only verification + selection scoping):
