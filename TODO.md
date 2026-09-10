@@ -169,6 +169,33 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   (c) allow-list + Python validation + version bump + stopped-Altium deploy
   + live qualification vs a same-snapshot ODB export. Comparable in shape
   and effort to the 2026-09-09 item-3/item-4 batch.
+- [ ] **Wider upstream survey (2026-09-10) — further read-side candidates**,
+  same caveats as above (unreviewed, mostly focused-document targeting,
+  each needs read-only verification + selection scoping):
+  1. **Audit.pas suite (~30 prebuilt checks)** — highest value; maps
+     directly onto the 22p layout-completion checklist and open passes:
+     Audit_FindSignalViasWithoutReturn (return-path review),
+     FindViaAntennas, FindBadConnections, FindFloating/UnmatchedPorts,
+     FindSinglePinNets, FindComponentsOutsideBoardOutline,
+     FindPadsNearBoardEdge, FindDesignatorCollisions,
+     FindMixedDesignatorRotation, FindMirroredPcbText,
+     **FindMissingDatasheets + FindMpnInconsistencies** (the 111-blank MPN
+     entry pass), ValidateComponentParams, PowerPortOrientation,
+     VariantNotFitted. Verify each is pure-read (no select/highlight side
+     effects) before exposure.
+  2. **Library geometry reads** — Lib_GetFootprints, Lib_GetFootprintPads,
+     Lib_GetLibraryGeometry: native footprint pad geometry, replacing the
+     offline olefile binary parsing for footprint-vs-datasheet checks
+     (R218 Kelvin lands, FH58SA pin-1 location for the pinout session).
+  3. **Proj_GenerateOutput / Proj_GetOutJobContainers** — could automate
+     the ODB checkpoint refresh that PCB-side validation depends on. NOT
+     read-only (writes output files, may compile): if exposed, behind an
+     explicit per-call approval, never ambient.
+  4. **Proj_CrossProbe** — cooperative review aid (agent names a component,
+     Altium highlights it for the operator). Verify it cannot modify.
+  5. **Generic filtered primitive queries** (Gen_QueryObjects /
+     ProcessPCBBoardObjects) — general fallback for object reads without
+     dedicated tools; large-payload limits + honesty reporting required.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
