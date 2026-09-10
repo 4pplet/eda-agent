@@ -196,6 +196,12 @@ under the operating contract in the shared runbook meanwhile.
 
 ## Remaining work, in order
 
+The long-horizon sequencing - importing the remaining upstream surface
+through the scoped model, phase by phase up the risk ladder with a
+never-import list - is planned in [PARITY-ROADMAP.md](PARITY-ROADMAP.md)
+(agreed with Stefan 2026-09-10). The numbered items below are the near-term
+qualification order within that plan.
+
 This is qualification order, not a strictly sequential implementation queue.
 Packaging, documentation and permissions design may proceed alongside native
 read/lifecycle testing. Reliable target/baseline reads, approval enforcement,
