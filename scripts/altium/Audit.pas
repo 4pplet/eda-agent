@@ -950,10 +950,11 @@ End;
 {   items[]        -- per-violation                                           }
 {                      net    -- signal net name                              }
 {                      at     -- "(x,y)" mils of the signal via              }
-Function Audit_FindSignalViasWithoutReturn(Params,
-                                            RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents  }
+{ in PCB.pas): the caller resolves and owns the Board reference.             }
+Function Audit_FindSignalViasWithoutReturnForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     BIter, SIter : IPCB_BoardIterator;
     SpatIter : IPCB_SpatialIterator;
     Via1, Via2 : IPCB_Via;
@@ -964,15 +965,6 @@ Var
     SignalNet, RefNet, ItemsJson, EntryJson : String;
     First, ReturnFound : Boolean;
 Begin
-    Board := Nil;
-    Try Board := GetPCBBoardAnywhere(0); Except End;
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No active PCB board. Open the .PcbDoc and try again.');
-        Exit;
-    End;
-
     RadiusMils := StrToFloatDef(ExtractJsonValue(Params, 'radius_mils'), 50.0);
     If RadiusMils <= 0.0 Then RadiusMils := 50.0;
     Radius := MilsToCoord(Round(RadiusMils));
@@ -1053,6 +1045,22 @@ Begin
             JsonFloat('radius_mils', RadiusMils) + ',' +
             JsonRaw('items', '[' + ItemsJson + ']')
         ));
+End;
+
+Function Audit_FindSignalViasWithoutReturn(Params,
+                                            RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := Nil;
+    Try Board := GetPCBBoardAnywhere(0); Except End;
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No active PCB board. Open the .PcbDoc and try again.');
+        Exit;
+    End;
+    Result := Audit_FindSignalViasWithoutReturnForBoard(Board, Params, RequestId);
 End;
 
 
@@ -1425,9 +1433,10 @@ End;
 {                                                                              }
 { Response shape: checked, violations, items -- each entry carries net,    }
 { at coords, connected_layers count.                                         }
-Function Audit_FindViaAntennas(Params, RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. }
+Function Audit_FindViaAntennasForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     BIter : IPCB_BoardIterator;
     SIter : IPCB_SpatialIterator;
     Stack : IPCB_LayerStack;
@@ -1440,15 +1449,6 @@ Var
     NetName, ItemsJson, EntryJson : String;
     First, HitOnLayer : Boolean;
 Begin
-    Board := Nil;
-    Try Board := GetPCBBoardAnywhere(0); Except End;
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No active PCB board. Open the .PcbDoc and try again.');
-        Exit;
-    End;
-
     Stack := Nil;
     Try Stack := Board.LayerStack_V7; Except End;
     If Stack = Nil Then
@@ -1551,6 +1551,21 @@ Begin
             JsonInt('violations', Violations) + ',' +
             JsonRaw('items', '[' + ItemsJson + ']')
         ));
+End;
+
+Function Audit_FindViaAntennas(Params, RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := Nil;
+    Try Board := GetPCBBoardAnywhere(0); Except End;
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No active PCB board. Open the .PcbDoc and try again.');
+        Exit;
+    End;
+    Result := Audit_FindViaAntennasForBoard(Board, Params, RequestId);
 End;
 
 
@@ -1986,10 +2001,10 @@ End;
 {                                                                              }
 { Response: checked, violations, items where each entry has designator,    }
 { at coords (mils), layer.                                                  }
-Function Audit_FindComponentsOutsideBoardOutline(Params,
-                                                  RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. }
+Function Audit_FindComponentsOutsideBoardOutlineForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Outline : IPCB_BoardOutline;
     Iter : IPCB_BoardIterator;
     Obj : IPCB_Primitive;
@@ -1998,15 +2013,6 @@ Var
     Designator, LayerStr, ItemsJson, EntryJson : String;
     First, Inside : Boolean;
 Begin
-    Board := Nil;
-    Try Board := GetPCBBoardAnywhere(0); Except End;
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No active PCB board. Open the .PcbDoc and try again.');
-        Exit;
-    End;
-
     Outline := Nil;
     Try Outline := Board.BoardOutline; Except End;
     If Outline = Nil Then
@@ -2065,6 +2071,22 @@ Begin
         ));
 End;
 
+Function Audit_FindComponentsOutsideBoardOutline(Params,
+                                                  RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := Nil;
+    Try Board := GetPCBBoardAnywhere(0); Except End;
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No active PCB board. Open the .PcbDoc and try again.');
+        Exit;
+    End;
+    Result := Audit_FindComponentsOutsideBoardOutlineForBoard(Board, Params, RequestId);
+End;
+
 
 { Audit_FindPadsNearBoardEdge                                                  }
 {                                                                              }
@@ -2081,9 +2103,10 @@ End;
 {                                                                              }
 { Response: checked, violations, clearance_mils, items where each entry has}
 { kind (pad / via), designator (refdes), distance_mils, at coords.          }
-Function Audit_FindPadsNearBoardEdge(Params, RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. }
+Function Audit_FindPadsNearBoardEdgeForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Outline : IPCB_BoardOutline;
     Iter : IPCB_BoardIterator;
     Obj : IPCB_Primitive;
@@ -2095,14 +2118,6 @@ Var
     KindStr, DesStr, ItemsJson, EntryJson : String;
     First : Boolean;
 Begin
-    Board := Nil;
-    Try Board := GetPCBBoardAnywhere(0); Except End;
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No active PCB board. Open the .PcbDoc and try again.');
-        Exit;
-    End;
     Outline := Nil;
     Try Outline := Board.BoardOutline; Except End;
     If Outline = Nil Then
@@ -2170,6 +2185,21 @@ Begin
             JsonInt('clearance_mils', ClearanceMils) + ',' +
             JsonRaw('items', '[' + ItemsJson + ']')
         ));
+End;
+
+Function Audit_FindPadsNearBoardEdge(Params, RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := Nil;
+    Try Board := GetPCBBoardAnywhere(0); Except End;
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No active PCB board. Open the .PcbDoc and try again.');
+        Exit;
+    End;
+    Result := Audit_FindPadsNearBoardEdgeForBoard(Board, Params, RequestId);
 End;
 
 
@@ -2652,9 +2682,10 @@ End;
 { Flags mixed designator rotations on a silkscreen overlay.                  }
 {                                                                              }
 { Response: per-layer flags + offending component list.                       }
-Function Audit_FindMixedDesignatorRotation(Params, RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. }
+Function Audit_FindMixedDesignatorRotationForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iter : IPCB_BoardIterator;
     Comp : IPCB_Component;
     DesigText : IPCB_Text;
@@ -2669,14 +2700,6 @@ Var
     First : Boolean;
     OnTop : Boolean;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No PCB document focused');
-        Exit;
-    End;
-
     TopHas0 := False; TopHas90 := False; TopHas180 := False; TopHas270 := False;
     BotHas0 := False; BotHas90 := False; BotHas180 := False; BotHas270 := False;
     Checked := 0;
@@ -2804,6 +2827,20 @@ Begin
             JsonBool('bottom_mixed_90_270', BotMixed90_270) + ',' +
             JsonRaw('items', '[' + ItemsJson + ']')
         ));
+End;
+
+Function Audit_FindMixedDesignatorRotation(Params, RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No PCB document focused');
+        Exit;
+    End;
+    Result := Audit_FindMixedDesignatorRotationForBoard(Board, Params, RequestId);
 End;
 
 
@@ -2996,9 +3033,10 @@ End;
 { inspector. The reverse on either side is a fab-prep mistake.              }
 {                                                                              }
 { Flags free-floating PCB text mirrored on the wrong overlay.                }
-Function Audit_FindMirroredPcbText(Params, RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. }
+Function Audit_FindMirroredPcbTextForBoard(Board : IPCB_Board;
+    Params, RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iter : IPCB_BoardIterator;
     Obj : IPCB_Text;
     Checked, Violations : Integer;
@@ -3006,14 +3044,6 @@ Var
     First, MirrorFlag : Boolean;
     LayerVal : TLayer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No PCB document focused');
-        Exit;
-    End;
-
     Checked := 0;
     Violations := 0;
     ItemsJson := '';
@@ -3064,6 +3094,20 @@ Begin
             JsonInt('violations', Violations) + ',' +
             JsonRaw('items', '[' + ItemsJson + ']')
         ));
+End;
+
+Function Audit_FindMirroredPcbText(Params, RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No PCB document focused');
+        Exit;
+    End;
+    Result := Audit_FindMirroredPcbTextForBoard(Board, Params, RequestId);
 End;
 
 

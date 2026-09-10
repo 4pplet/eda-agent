@@ -276,7 +276,13 @@ Begin
         Or (Command = 'pcb.get_trace_lengths')
         Or (Command = 'pcb.get_selected_objects')
         Or (Command = 'pcb.get_component_pads')
-        Or (Command = 'pcb.get_board_statistics');
+        Or (Command = 'pcb.get_board_statistics')
+        Or (Command = 'pcb.audit_signal_vias_without_return')
+        Or (Command = 'pcb.audit_via_antennas')
+        Or (Command = 'pcb.audit_components_outside_outline')
+        Or (Command = 'pcb.audit_pads_near_edge')
+        Or (Command = 'pcb.audit_mixed_designator_rotation')
+        Or (Command = 'pcb.audit_mirrored_text');
 End;
 
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
@@ -428,6 +434,22 @@ Begin
                 Reply := PCB_GetComponentPadsForBoard(Board,
                     '{"designator":"' + EscapeJsonString(ExtractJsonValue(Params, 'designator')) + '"}',
                     RequestId)
+            Else If Command = 'pcb.audit_signal_vias_without_return' Then
+                Reply := Audit_FindSignalViasWithoutReturnForBoard(Board,
+                    '{"radius_mils":"' + EscapeJsonString(ExtractJsonValue(Params, 'radius_mils')) + '"}',
+                    RequestId)
+            Else If Command = 'pcb.audit_via_antennas' Then
+                Reply := Audit_FindViaAntennasForBoard(Board, '{}', RequestId)
+            Else If Command = 'pcb.audit_components_outside_outline' Then
+                Reply := Audit_FindComponentsOutsideBoardOutlineForBoard(Board, '{}', RequestId)
+            Else If Command = 'pcb.audit_pads_near_edge' Then
+                Reply := Audit_FindPadsNearBoardEdgeForBoard(Board,
+                    '{"clearance_mils":"' + EscapeJsonString(ExtractJsonValue(Params, 'clearance_mils')) + '"}',
+                    RequestId)
+            Else If Command = 'pcb.audit_mixed_designator_rotation' Then
+                Reply := Audit_FindMixedDesignatorRotationForBoard(Board, '{}', RequestId)
+            Else If Command = 'pcb.audit_mirrored_text' Then
+                Reply := Audit_FindMirroredPcbTextForBoard(Board, '{}', RequestId)
             Else
                 Reply := PCB_GetDiffPairRulesForBoard(Board, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
