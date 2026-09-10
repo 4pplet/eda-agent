@@ -264,22 +264,15 @@ End;
 { PCB_GetNetClasses - Get all net classes with their member nets              }
 {..............................................................................}
 
-Function PCB_GetNetClasses(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetNetClassesForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     ObjClass : IPCB_ObjectClass;
     JsonItems : String;
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -310,6 +303,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"net_classes":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetNetClasses(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetNetClassesForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -411,22 +417,15 @@ End;
 { PCB_GetDesignRules - Get all design rules                                   }
 {..............................................................................}
 
-Function PCB_GetDesignRules(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetDesignRulesForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Rule : IPCB_Rule;
     JsonItems, RuleTypeStr : String;
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -464,6 +463,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"rules":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetDesignRules(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetDesignRulesForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -3403,9 +3415,9 @@ End;
 { PCB_GetTraceLengths - Sum track segment lengths per net                     }
 {..............................................................................}
 
-Function PCB_GetTraceLengths(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetTraceLengthsForBoard(Board : IPCB_Board; Params : String; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Track : IPCB_Track;
     Arc : IPCB_Arc;
@@ -3422,13 +3434,6 @@ Var
     I, FoundIdx : Integer;
     SegLen, DX, DY, ArcAngle, RadiusMils, Accum : Double;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     FilterNet := ExtractJsonValue(Params, 'net');
 
     NetNames := TStringList.Create;
@@ -3506,6 +3511,19 @@ Begin
         NetLengthStrs.Free;
         NetNames.Free;
     End;
+End;
+
+Function PCB_GetTraceLengths(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetTraceLengthsForBoard(Board, Params, RequestId);
 End;
 
 {..............................................................................}
@@ -4190,21 +4208,14 @@ End;
 { PCB_GetSelectedObjects - Get properties of currently selected PCB objects   }
 {..............................................................................}
 
-Function PCB_GetSelectedObjects(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetSelectedObjectsForBoard(Board : IPCB_Board; Params : String; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Obj : IPCB_Primitive;
     PropsStr, JsonItems, ObjTypeStr, NetName, LayerName : String;
     First : Boolean;
     I, Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     PropsStr := ExtractJsonValue(Params, 'properties');
     If PropsStr = '' Then PropsStr := 'ObjectId,X,Y,Layer,Net';
 
@@ -4226,6 +4237,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"objects":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetSelectedObjects(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetSelectedObjectsForBoard(Board, Params, RequestId);
 End;
 
 {..............................................................................}
@@ -5636,9 +5660,9 @@ End;
 { Params: designator=<ref>                                                   }
 {..............................................................................}
 
-Function PCB_GetComponentPads(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetComponentPadsForBoard(Board : IPCB_Board; Params : String; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Comp : IPCB_Component;
     GrpIter : IPCB_GroupIterator;
     Pad : IPCB_Pad;
@@ -5646,13 +5670,6 @@ Var
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     DesStr := ExtractJsonValue(Params, 'designator');
     If DesStr = '' Then
     Begin
@@ -5704,6 +5721,19 @@ Begin
     Result := BuildSuccessResponse(RequestId,
         '{"designator":"' + EscapeJsonString(DesStr) + '",'
         + '"pads":[' + JsonItems + '],"pad_count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetComponentPads(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetComponentPadsForBoard(Board, Params, RequestId);
 End;
 
 {..............................................................................}
@@ -7251,9 +7281,11 @@ End;
 { PCB_GetBoardStatistics - Comprehensive board statistics                    }
 {..............................................................................}
 
-Function PCB_GetBoardStatistics(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. Deliberately does NOT   }
+{ Invalidate/Rebuild/Validate the outline (that mutates document state); the  }
+{ upstream wrapper below keeps the rebuild for its original callers.          }
+Function PCB_GetBoardStatisticsForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Obj : IPCB_Primitive;
     TrkObj : IPCB_Track;
@@ -7267,13 +7299,6 @@ Var
     TotalTraceLen, DX, DY : Double;
     BoardWidth, BoardHeight, BoardArea : Double;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     TrackCount := 0;
     ViaCount := 0;
     PadCount := 0;
@@ -7313,7 +7338,7 @@ Begin
     End;
     Board.BoardIterator_Destroy(Iterator);
 
-    // Board dimensions from outline
+    // Board dimensions from outline (read as-is; no rebuild in the core)
     BoardWidth := 0;
     BoardHeight := 0;
     BoardArea := 0;
@@ -7321,9 +7346,6 @@ Begin
         Outline := Board.BoardOutline;
         If Outline <> Nil Then
         Begin
-            Outline.Invalidate;
-            Outline.Rebuild;
-            Outline.Validate;
             BR := Outline.BoundingRectangle;
             BoardWidth := CoordToMils(BR.Right) - CoordToMils(BR.Left);
             BoardHeight := CoordToMils(BR.Top) - CoordToMils(BR.Bottom);
@@ -7361,6 +7383,30 @@ Begin
         + '"board_area_sq_mils":' + FloatToJsonStr(BoardArea) + ','
         + '"layer_count":' + IntToStr(LayerCount) + ','
         + '"board_name":"' + EscapeJsonString(ExtractFileName(Board.FileName)) + '"}');
+End;
+
+Function PCB_GetBoardStatistics(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+    Outline : IPCB_BoardOutline;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    { Original behavior for upstream callers: refresh the outline first. }
+    Try
+        Outline := Board.BoardOutline;
+        If Outline <> Nil Then
+        Begin
+            Outline.Invalidate;
+            Outline.Rebuild;
+            Outline.Validate;
+        End;
+    Except End;
+    Result := PCB_GetBoardStatisticsForBoard(Board, RequestId);
 End;
 
 {..............................................................................}

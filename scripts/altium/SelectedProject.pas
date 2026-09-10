@@ -270,7 +270,13 @@ Begin
         Or (Command = 'pcb.get_vias')
         Or (Command = 'pcb.get_polygons')
         Or (Command = 'pcb.get_unrouted_nets')
-        Or (Command = 'pcb.get_layer_primitive_counts');
+        Or (Command = 'pcb.get_layer_primitive_counts')
+        Or (Command = 'pcb.get_net_classes')
+        Or (Command = 'pcb.get_design_rules')
+        Or (Command = 'pcb.get_trace_lengths')
+        Or (Command = 'pcb.get_selected_objects')
+        Or (Command = 'pcb.get_component_pads')
+        Or (Command = 'pcb.get_board_statistics');
 End;
 
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
@@ -403,6 +409,23 @@ Begin
                 Reply := PCB_GetUnroutedNetsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_layer_primitive_counts' Then
                 Reply := PCB_GetLayerPrimitiveCountsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_net_classes' Then
+                Reply := PCB_GetNetClassesForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_design_rules' Then
+                Reply := PCB_GetDesignRulesForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_board_statistics' Then
+                Reply := PCB_GetBoardStatisticsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_trace_lengths' Then
+                Reply := PCB_GetTraceLengthsForBoard(Board,
+                    '{"net":"' + EscapeJsonString(ExtractJsonValue(Params, 'net')) + '"}',
+                    RequestId)
+            Else If Command = 'pcb.get_selected_objects' Then
+                { Forced default property set; caller-supplied lists are not forwarded. }
+                Reply := PCB_GetSelectedObjectsForBoard(Board, '{}', RequestId)
+            Else If Command = 'pcb.get_component_pads' Then
+                Reply := PCB_GetComponentPadsForBoard(Board,
+                    '{"designator":"' + EscapeJsonString(ExtractJsonValue(Params, 'designator')) + '"}',
+                    RequestId)
             Else
                 Reply := PCB_GetDiffPairRulesForBoard(Board, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
