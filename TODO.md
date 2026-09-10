@@ -142,6 +142,18 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   batch). Deploy a new runtime at the next stopped-Altium window and qualify
   live (172-designator batch equals the dump_parameters.py loop output).
   `dump_parameters.py` remains the fallback meanwhile.
+- [ ] **Candidate: read-only PCB-document reads** (requested during 22p layout
+  start, 2026-09-10). The shared bridge has no PCB-side tools: no component
+  X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
+  objects. Layout-phase validation currently goes through the operator-run
+  ODB++ OutJob (components + per-layer copper geometry; authoritative but
+  only as fresh as the last export) or partial offline PcbDoc parsing.
+  Candidate scope, same gate discipline as the schematic reads: selection-
+  scoped, read-only `pcb_get_component_placements` (designator, X/Y, rotation,
+  layer, footprint), then `pcb_get_diff_pairs`/rules enumeration, then track
+  geometry last (large payloads; needs limits + honesty reporting like the
+  extraction block). Implement on a non-CAD day; qualify against a
+  same-snapshot ODB export before use.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
