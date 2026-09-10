@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.09.10.3';
+    SCRIPT_VERSION = '2026.09.10.4';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
 
@@ -1725,6 +1725,27 @@ Begin
 
     V := ExtractJsonValue(Content, 'auto_shutdown_ms');
     If V <> '' Then Begin Try N := StrToInt(V); If N >= 0 Then AutoShutdownMs := N; Except End; End;
+
+    { Operator idle-timeout pin. The wheel's Python client rewrites            }
+    { mcp_config.json with its own defaults at connect time and repeatedly     }
+    { won the race against the client-side re-pin (twice on 2026-09-10, both   }
+    { times reverting the operator's 60-minute setting so the next bridge      }
+    { start read 10 minutes). This sidecar file is written once at runtime     }
+    { creation, is never touched by the wheel, and takes precedence over the   }
+    { racy JSON value - a stray default can no longer shorten a session.       }
+    Try
+        If FileExists(WorkspaceDir + 'idle-timeout-ms.txt') Then
+        Begin
+            V := Trim(ReadFileContent(WorkspaceDir + 'idle-timeout-ms.txt'));
+            If V <> '' Then
+            Begin
+                Try
+                    N := StrToInt(V);
+                    If N >= 60000 Then AutoShutdownMs := N;
+                Except End;
+            End;
+        End;
+    Except End;
 
     V := ExtractJsonValue(Content, 'yield_iterations');
     If V <> '' Then Begin Try N := StrToInt(V); If N > 0 Then YieldIterations := N; Except End; End;
