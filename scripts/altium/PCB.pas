@@ -1219,9 +1219,10 @@ End;
 { PCB_GetComponents - Get all components with position, rotation, layer       }
 {..............................................................................}
 
-Function PCB_GetComponents(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile: the caller resolves     }
+{ and owns the Board reference; this function only iterates and reports.      }
+Function PCB_GetComponentsForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Comp : IPCB_Component;
     BBox : TCoordRect;
@@ -1229,13 +1230,6 @@ Var
     First : Boolean;
     Count, HeightMils, BBoxX1, BBoxY1, BBoxX2, BBoxY2, BBoxW, BBoxH : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -1292,6 +1286,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"components":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetComponents(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetComponentsForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -3505,9 +3512,9 @@ End;
 { PCB_GetLayerStackup - Get full layer stack info                             }
 {..............................................................................}
 
-Function PCB_GetLayerStackup(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetLayerStackupForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     LayerStack : IPCB_LayerStack_V7;
     LayerObj : IPCB_LayerObject_V7;
     JsonItems, LayerName, DielectricType : String;
@@ -3515,13 +3522,6 @@ Var
     Count : Integer;
     CopperThickMils, DielectricHeightMils, DielectricConst : Double;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     LayerStack := Board.LayerStack_V7;
     If LayerStack = Nil Then
     Begin
@@ -3575,6 +3575,19 @@ Begin
     Result := BuildSuccessResponse(RequestId,
         '{"layers":[' + JsonItems + '],"layer_count":' + IntToStr(Count) + ','
         + '"board_name":"' + EscapeJsonString(ExtractFileName(Board.FileName)) + '"}');
+End;
+
+Function PCB_GetLayerStackup(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetLayerStackupForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -4085,9 +4098,12 @@ End;
 { PCB_GetBoardOutline - Get board outline vertices                            }
 {..............................................................................}
 
-Function PCB_GetBoardOutline(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile. Deliberately does NOT   }
+{ Invalidate/Rebuild/Validate the outline (that mutates document state); it   }
+{ reads the segments as they are. The upstream wrapper below keeps the        }
+{ rebuild for its original callers.                                           }
+Function PCB_GetBoardOutlineForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Outline : IPCB_BoardOutline;
     Seg : TPolySegment;
     BR : TCoordRect;
@@ -4095,25 +4111,11 @@ Var
     First : Boolean;
     I : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     Outline := Board.BoardOutline;
     If Outline = Nil Then
     Begin
         Result := BuildErrorResponse(RequestId, 'NO_OUTLINE', 'Board has no outline defined');
         Exit;
-    End;
-
-    Try
-        Outline.Invalidate;
-        Outline.Rebuild;
-        Outline.Validate;
-    Except
     End;
 
     // Bounding rectangle
@@ -4156,6 +4158,32 @@ Begin
         + ',"bottom":' + IntToStr(CoordToMils(BR.Bottom))
         + ',"right":' + IntToStr(CoordToMils(BR.Right))
         + ',"top":' + IntToStr(CoordToMils(BR.Top)) + '}}');
+End;
+
+Function PCB_GetBoardOutline(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+    Outline : IPCB_BoardOutline;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    { Original behavior for upstream callers: refresh the outline before      }
+    { reading. The shared profile calls the ForBoard core directly instead.   }
+    Outline := Board.BoardOutline;
+    If Outline <> Nil Then
+    Begin
+        Try
+            Outline.Invalidate;
+            Outline.Rebuild;
+            Outline.Validate;
+        Except
+        End;
+    End;
+    Result := PCB_GetBoardOutlineForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -6017,22 +6045,15 @@ End;
 { Returns design rules (not pair objects) of kind eRule_DifferentialPairsRouting }
 {..............................................................................}
 
-Function PCB_GetDiffPairRules(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetDiffPairRulesForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Rule : IPCB_Rule;
     JsonItems : String;
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -6063,6 +6084,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"diff_pair_rules":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetDiffPairRules(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetDiffPairRulesForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
@@ -9242,7 +9276,8 @@ End;
 { false means one half is still ratsnest-only).                              }
 {                                                                              }
 { Uses the PCB API IPCB_DifferentialPair interface.                           }
-Function PCB_GetDifferentialPairs(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetDifferentialPairsForBoard(Board : IPCB_Board; RequestId : String) : String;
 
     Function NetLengthMils(Net : IPCB_Net) : Double;
     Var
@@ -9293,7 +9328,6 @@ Function PCB_GetDifferentialPairs(Params : String; RequestId : String) : String;
     End;
 
 Var
-    Board : IPCB_Board;
     Iter : IPCB_BoardIterator;
     Pair : IPCB_DifferentialPair;
     PosLen, NegLen, Skew : Double;
@@ -9302,14 +9336,6 @@ Var
     First, BothRouted : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
-            'No PCB document focused');
-        Exit;
-    End;
-
     Items := '';
     First := True;
     Count := 0;
@@ -9362,6 +9388,20 @@ Begin
             JsonInt('count', Count) + ',' +
             JsonRaw('pairs', '[' + Items + ']')
         ));
+End;
+
+Function PCB_GetDifferentialPairs(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_BOARD',
+            'No PCB document focused');
+        Exit;
+    End;
+    Result := PCB_GetDifferentialPairsForBoard(Board, RequestId);
 End;
 
 

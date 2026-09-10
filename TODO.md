@@ -142,8 +142,26 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   batch). Deploy a new runtime at the next stopped-Altium window and qualify
   live (172-designator batch equals the dump_parameters.py loop output).
   `dump_parameters.py` remains the fallback meanwhile.
-- [ ] **Candidate: read-only PCB-document reads** (requested during 22p layout
-  start, 2026-09-10). The shared bridge has no PCB-side tools: no component
+- [ ] **Candidate: read-only PCB-document reads — IMPLEMENTED 2026-09-10,
+  native qualification pending.** First tranche built the same day it was
+  requested: the five upstream read functions split into `...ForBoard` cores
+  (wrappers preserve upstream behavior; the shared outline core drops the
+  Invalidate/Rebuild/Validate mutation), `ResolveSelectedBoard` in
+  SelectedProject.pas resolves the selected project's OWN PcbDoc only —
+  exactly one PcbDoc member, already open (fail-closed `PCB_NOT_OPEN`,
+  no auto-open/focus change, PCBServer touched only after an open .PcbDoc
+  proves the server is loaded) — and the dispatcher splices `pcb_doc` +
+  `pcb_modified` (live-state honesty) into every result. SCRIPT_VERSION
+  `2026.09.10.1`; companion clients grew five `pcb_*` tools with
+  `validate_pcb_read` shape checks, `bridge_read.py` subcommands
+  placements/outline/stackup/diffpairs with mm companions; 137 companion
+  tests pass, fork failed-set diff vs pre-change baseline empty. Runtime
+  `selected-readonly-pcb-20260910` created (23 files, manifest 6f11044a...),
+  workspace seeded. Remaining: deploy at an Altium-closed window, live
+  qualification (regression eight reads + placements vs same-snapshot ODB
+  export + outline/stackup/pairs live checks), then flip ACTIVE-RUNTIME.txt.
+  Original scoping note kept below for the record.
+  The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
   objects. Layout-phase validation currently goes through the operator-run
   ODB++ OutJob (components + per-layer copper geometry; authoritative but

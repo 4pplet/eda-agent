@@ -196,6 +196,79 @@ Begin
         + IntToStr(Project.DM_LogicalDocumentCount) + '}';
 End;
 
+{ PCB read scope: resolves the selected project's OWN PcbDoc as a live board.
+  Fail-closed: exactly one PcbDoc member, already open in the PCB editor (the
+  operator opens it - no auto-open, no focus change, unlike the upstream
+  GetPCBBoardAnywhere which prefers the focused tab and force-opens documents
+  across every project). PCBServer is only referenced once an open .PcbDoc
+  proves the PCB server module is registered (the hazard GetPCBBoardAnywhere
+  documents). PCB reads return LIVE editor state including unsaved edits;
+  pcb_modified in the result says which it was. }
+Function ResolveSelectedBoard(Project : IProject; Var PcbPath : String;
+    Var PcbModified : Boolean; Var ErrCode : String; Var ErrMsg : String) : IPCB_Board;
+Var
+    I : Integer;
+    D : IDocument;
+    Path : String;
+    S : IServerDocument;
+Begin
+    Result := Nil;
+    PcbPath := '';
+    PcbModified := True;
+    ErrCode := '';
+    ErrMsg := '';
+    For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        D := Project.DM_LogicalDocuments(I);
+        If D = Nil Then Continue;
+        If UpperCase(D.DM_DocumentKind) <> 'PCB' Then Continue;
+        Path := D.DM_FullPath;
+        If PcbPath <> '' Then
+        Begin
+            ErrCode := 'AMBIGUOUS_PCB';
+            ErrMsg := 'Selected project has more than one PcbDoc member';
+            PcbPath := '';
+            Exit;
+        End;
+        PcbPath := Path;
+    End;
+    If PcbPath = '' Then
+    Begin
+        ErrCode := 'NO_PCB_MEMBER';
+        ErrMsg := 'Selected project has no PcbDoc member';
+        Exit;
+    End;
+    If Not LooksAbsolutePath(PcbPath) Then
+    Begin
+        ErrCode := 'PCB_UNSAVED';
+        ErrMsg := 'Selected project PcbDoc has no saved identity: ' + PcbPath;
+        Exit;
+    End;
+    S := Client.GetDocumentByPath(PcbPath);
+    If S = Nil Then
+    Begin
+        ErrCode := 'PCB_NOT_OPEN';
+        ErrMsg := 'Open the selected project PcbDoc in Altium first: ' + PcbPath;
+        Exit;
+    End;
+    Try PcbModified := S.Modified; Except PcbModified := True; End;
+    Try Result := PCBServer.GetPCBBoardByPath(PcbPath); Except Result := Nil; End;
+    If Result = Nil Then
+    Begin
+        ErrCode := 'PCB_NOT_AVAILABLE';
+        ErrMsg := 'PCB editor did not resolve the selected PcbDoc: ' + PcbPath;
+    End;
+End;
+
+Function IsSelectedPcbReadCommand(Command : String) : Boolean;
+Begin
+    Result := (Command = 'pcb.get_component_placements')
+        Or (Command = 'pcb.get_board_outline')
+        Or (Command = 'pcb.get_layer_stackup')
+        Or (Command = 'pcb.get_differential_pairs')
+        Or (Command = 'pcb.get_diff_pair_rules');
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -203,6 +276,9 @@ Var
     ExpectedSession, ExpectedGeneration, ExpectedPath : String;
     LimitValue : Integer;
     Compiled : Boolean;
+    Board : IPCB_Board;
+    PcbPath, PcbErrCode, PcbErrMsg : String;
+    PcbModified : Boolean;
 Begin
     { This is the complete native allowlist in shared mode, not just MCP filtering. }
     If Command = 'application.ping' Then
@@ -226,7 +302,8 @@ Begin
        (Command <> 'project.get_compile_freshness') And
        (Command <> 'project.get_bom') And (Command <> 'project.get_nets') And
        (Command <> 'project.get_component_info') And
-       (Command <> 'project.get_component_info_batch') Then
+       (Command <> 'project.get_component_info_batch') And
+       (Not IsSelectedPcbReadCommand(Command)) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -298,7 +375,41 @@ Begin
                 + EscapeJsonString(ExtractJsonValue(Params, 'designators'))
                 + '","with_pin_nets":"false","with_parameters":"true"';
         SafeParams := SafeParams + '}';
-        If Command = 'project.get_documents' Then Body := SelectedDocumentsJSON(P)
+        If IsSelectedPcbReadCommand(Command) Then
+        Begin
+            Board := ResolveSelectedBoard(P, PcbPath, PcbModified, PcbErrCode, PcbErrMsg);
+            If Board = Nil Then
+            Begin
+                Result := BuildErrorResponse(RequestId, PcbErrCode, PcbErrMsg);
+                Exit;
+            End;
+            If Command = 'pcb.get_component_placements' Then
+                Reply := PCB_GetComponentsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_board_outline' Then
+                Reply := PCB_GetBoardOutlineForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_layer_stackup' Then
+                Reply := PCB_GetLayerStackupForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_differential_pairs' Then
+                Reply := PCB_GetDifferentialPairsForBoard(Board, RequestId)
+            Else
+                Reply := PCB_GetDiffPairRulesForBoard(Board, RequestId);
+            If ExtractJsonValue(Reply, 'success') <> 'true' Then
+            Begin
+                Result := Reply;
+                Exit;
+            End;
+            Body := ExtractJsonValue(Reply, 'data');
+            { Live-state honesty: splice the source document and its dirty
+              state into the result so a caller can tell saved from live. }
+            If Body = '{}' Then
+                Body := '{"pcb_doc":"' + EscapeJsonString(PcbPath)
+                    + '","pcb_modified":' + BoolToJsonStr(PcbModified) + '}'
+            Else If (Body <> '') And (Copy(Body, 1, 1) = '{') Then
+                Body := '{"pcb_doc":"' + EscapeJsonString(PcbPath)
+                    + '","pcb_modified":' + BoolToJsonStr(PcbModified) + ','
+                    + Copy(Body, 2, Length(Body) - 1);
+        End
+        Else If Command = 'project.get_documents' Then Body := SelectedDocumentsJSON(P)
         Else If Command = 'project.get_compile_freshness' Then Body := Freshness
         Else
         Begin

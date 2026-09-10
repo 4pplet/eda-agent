@@ -165,6 +165,19 @@ involve repeated Altium quit/restart cycles and the known direct-quit crash,
 and must never share a session with real design edits. Read-only use continues
 under the operating contract in the shared runbook meanwhile.
 
+- 2026-09-10 (continuation agent): **PCB-read tranche implemented during the
+  22p layout phase** (operator request: placement/diff-pair validation
+  without the OutJob loop). Five selection-scoped read-only PCB tools
+  (placements, board outline, layer stackup, differential pairs with routed
+  length/skew, diff-pair rules) as SCRIPT_VERSION 2026.09.10.1; the
+  focused-board/`GetPCBBoardAnywhere` targeting was replaced with
+  `ResolveSelectedBoard` (selected project's own PcbDoc, already open,
+  fail-closed) and PCB reads carry pcb_doc/pcb_modified live-state honesty.
+  Candidate runtime `selected-readonly-pcb-20260910` created and
+  integrity-checked; deployment + native qualification (incl. placements vs
+  same-snapshot ODB) pending at the next Altium-closed window. Companion
+  suite 137 pass; fork failed-set diff vs baseline empty. Details in TODO.md
+  and PLT-hw `tools/eda-agent/SHARED-PROJECTS.md`.
 - 2026-09-09 (continuation agent): offline BOM/review silent-empty defect
   fixed at source (93f5f4a) and the installed wheel rebuilt from that commit
   during a no-Altium window: old wheel preserved as
