@@ -165,7 +165,29 @@ involve repeated Altium quit/restart cycles and the known direct-quit crash,
 and must never share a session with real design edits. Read-only use continues
 under the operating contract in the shared runbook meanwhile.
 
-- 2026-09-10 (continuation agent): **PCB-read tranches implemented during the
+- 2026-09-10 END-OF-DAY ROLL-UP (continuation agent): five runtime
+  versions in one day, three natively qualified. ACTIVE =
+  `selected-readonly-pcbreads3-20260910` (2026.09.10.5, twenty-five
+  tools): the nine .2 PCB reads + six tranche-3 reads (rules, net
+  classes, trace lengths, component pads, selected objects, board stats)
+  + `proj_get_erc_messages` (first native ERC pull: 197 violations in 6
+  classes, triaged in PLT-hw reviews/2026-09-10-erc-triage.md - 191
+  noise, 6 for operator eyes). CANDIDATE =
+  `selected-readonly-audits-20260910` (2026.09.10.6, thirty-one tools):
+  six purity-reviewed layout audits, deploy at next restart. The pads
+  read caught U301 90 deg off the recommended orientation on first use
+  (operator fixed; re-verified pin-1-SW). Idle-timeout race ROOT-CAUSED
+  and fixed three ways (bridge_read finally re-pin, shared_server atexit,
+  and the wheel-proof workspace/idle-timeout-ms.txt sidecar preferred by
+  scripts .4+). Ratsnest interference report resolved: full-restart A/B
+  exonerated the loop; native Altium preference/N-mode class issue.
+  Working rule kept: compiled reads only at operator save points during
+  active board editing. Phase 2 kickoff (approval-gated Validation +
+  Release OutJobs) and library-read grant design are the next non-CAD
+  blocks; the systematic schematic checker
+  (PLT-hw tools/eda-agent/schematic_sanity.py) baselined clean after the
+  R229/R230 false-floating postmortem.
+- 2026-09-10 (continuation agent, earlier detail): **PCB-read tranches implemented during the
   22p layout phase** (operator request: placement/diff-pair validation
   without the OutJob loop, then copper-policy reads in the same
   Altium-closed window). Nine selection-scoped read-only PCB tools
