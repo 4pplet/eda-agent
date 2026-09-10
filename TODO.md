@@ -215,6 +215,15 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   that fix rides in the next runtime, the deployed copy is untouched
   (hash-manifested). New evidence for the timeout-anomaly item: the
   wheel's config rewrite can land after the connect-time re-pin.
+  **Race lost AGAIN same day (~10:10 bridge start read 600000; operator
+  hit the 10-minute auto-off mid-layout).** Root cause now settled as
+  the config-file race; mechanism confirmed twice. Mitigation deployed
+  (PLT-hw 68abebe): bridge_read re-pins in its finally block after every
+  client run, so the file is pinned whenever no client is running -
+  which is when bridge starts happen. Verified live post-run at 3600000.
+  The 2026-09-09 600s observations are explained by the same race. The
+  remaining proper fix (Pascal-side floor or per-request config re-read)
+  rides with the next runtime alongside the atexit hardening.
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
