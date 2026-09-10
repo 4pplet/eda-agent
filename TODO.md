@@ -183,8 +183,17 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   113 nets / 439 unrouted connections, internal layers hold only the two
   GND pours, and all four GND polygon pours report net='' (operator to
   check pour net assignment - possible real defect or nil-net read quirk).
-  Remaining before pointer flip: compiled bom/nets regression on the next
-  saved state (refused during live-dirty CAD, as designed).
+  **COMPLETE 2026-09-10: compiled bom/nets/parameters regression on the
+  saved state matched the 172/559/111-blank baseline exactly;
+  ACTIVE-RUNTIME.txt flipped to selected-readonly-pcb-20260910;
+  check_install 13/13.** The doctor also caught the idle-timeout pin
+  regressed to 600000 on the new runtime's workspace (seeded 3600000,
+  wheel rewrite won the race after apply_auto_shutdown) - re-pinned
+  manually, and the companion shared_server now ALSO re-pins at process
+  exit (atexit) so the file is left pinned for the next bridge start;
+  that fix rides in the next runtime, the deployed copy is untouched
+  (hash-manifested). New evidence for the timeout-anomaly item: the
+  wheel's config rewrite can land after the connect-time re-pin.
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
