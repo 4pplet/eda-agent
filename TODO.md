@@ -29,6 +29,19 @@ operator-confirmed normal quit after stopping passed. **Quit while running FAILE
 on that same patched revision**, with `ScriptingSystem.DLL` access violation at
 read address `0x78` and no end/abort log. Details are in the shutdown log below.
 
+- [ ] **Suspected live interference: stale ratsnest during CAD with the
+  loop running (reported by operator 2026-09-10 ~09:45).** Connection
+  lines with break markers not following component moves in the first
+  real PCB-editing session with a bridge loop active; operator suspects
+  onset coincides with MCP adoption. Candidate mechanisms: (a) the
+  polling loop starving the interactive engine's connection recalc,
+  (b) the compiled reads' DM_Compile at 09:31 pushing net updates into an
+  open PcbDoc (known Altium stale-line trigger), (c) native Altium
+  ratsnest staleness, coincidental. Connection DATA was self-consistent
+  at 09:26 (unrouted read validated). A/B procedure agreed: refresh
+  first, then move-test with the bridge stopped vs running. Until
+  resolved: prefer PCB reads over compiled reads during active board
+  editing, and note that compiled reads compile the open project.
 - [ ] **Idle-timeout pin anomaly (observed 2026-09-09 16:16):** the bridge
   session started 16:05:56 idle-timed-out after exactly 600.0 s (last request
   16:06:36.8, `_session_end reason=idle-timeout` 16:16:36.9) despite the
