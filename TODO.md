@@ -154,6 +154,21 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   geometry last (large payloads; needs limits + honesty reporting like the
   extraction block). Implement on a non-CAD day; qualify against a
   same-snapshot ODB export before use.
+  **Survey 2026-09-10: the native functions already exist upstream** —
+  PCB.pas carries PCB_GetComponents, PCB_GetComponentPads,
+  PCB_GetDifferentialPairs (pair objects) + PCB_GetDiffPairRules (rules),
+  PCB_GetTraceLengths, PCB_GetLayerStackup, PCB_GetBoardOutline,
+  PCB_GetPolygons, PCB_GetVias, PCB_GetUnroutedNets,
+  PCB_GetClearanceViolations, PCB_RunDRC, PCB_GetBoardStatistics. The real
+  adaptation work is (a) **selection scoping**: upstream functions target the
+  current/focused board, which our rules forbid — resolve the board from the
+  operator-selected project the way SelectedProject.pas does for schematic
+  commands, and refuse if the selected project's PcbDoc is not it; (b)
+  reviewing each exposed function read-only end-to-end (PCB_RunDRC is a
+  compute that touches document state — exclude it from the first pass);
+  (c) allow-list + Python validation + version bump + stopped-Altium deploy
+  + live qualification vs a same-snapshot ODB export. Comparable in shape
+  and effort to the 2026-09-09 item-3/item-4 batch.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
