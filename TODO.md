@@ -154,12 +154,21 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   `pcb_modified` (live-state honesty) into every result. SCRIPT_VERSION
   `2026.09.10.1`; companion clients grew five `pcb_*` tools with
   `validate_pcb_read` shape checks, `bridge_read.py` subcommands
-  placements/outline/stackup/diffpairs with mm companions; 137 companion
-  tests pass, fork failed-set diff vs pre-change baseline empty. Runtime
-  `selected-readonly-pcb-20260910` created (23 files, manifest 6f11044a...),
-  workspace seeded. Remaining: deploy at an Altium-closed window, live
-  qualification (regression eight reads + placements vs same-snapshot ODB
-  export + outline/stackup/pairs live checks), then flip ACTIVE-RUNTIME.txt.
+  placements/outline/stackup/diffpairs with mm companions.
+  **Tranche 2 same day (2026.09.10.2, replacing the undeployed .1 runtime):**
+  four more reads for copper-policy validation - pcb_get_vias,
+  pcb_get_polygons, pcb_get_unrouted_nets (all upstream pure-read splits)
+  and pcb_get_layer_primitive_counts, a NEW native reader (primitive counts
+  per layer+type via TStringList keyed buckets - the fixed-array return-slot
+  bug is documented at PCB_GetUnroutedNets - answering "do the internal GND
+  layers hold any routed copper" in one tiny payload). Validators enforce
+  bucket/total reconciliation and per-net unrouted sums. 141 companion tests
+  pass; fork failed-set diff vs baseline empty. Runtime
+  `selected-readonly-pcb-20260910` recreated at .2 (23 files), workspace
+  seeded. Remaining: deploy at an Altium-closed window, live qualification
+  (regression eight reads + placements vs same-snapshot ODB export +
+  outline/stackup/pairs/vias/polygons/unrouted/layercounts live checks),
+  then flip ACTIVE-RUNTIME.txt.
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule

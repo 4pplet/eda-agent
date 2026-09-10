@@ -6103,22 +6103,15 @@ End;
 { PCB_GetVias - Get all vias on the board with position, size, net, layers   }
 {..............................................................................}
 
-Function PCB_GetVias(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetViasForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Via : IPCB_Via;
     JsonItems, NetName : String;
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -6153,6 +6146,91 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"vias":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetVias(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetViasForBoard(Board, RequestId);
+End;
+
+{ Layer occupancy report for copper-policy checks (e.g. internal GND planes  }
+{ that must hold no routed primitives). Counts primitives per (layer, type); }
+{ a tiny payload with no truncation concerns. Read-only. TStringList keyed   }
+{ storage on purpose - function-local fixed arrays corrupt the return slot   }
+{ in DelphiScript (see PCB_GetUnroutedNets).                                 }
+Function PCB_GetLayerPrimitiveCountsForBoard(Board : IPCB_Board; RequestId : String) : String;
+Var
+    Iterator : IPCB_BoardIterator;
+    Obj : IPCB_Primitive;
+    Keys, Counts : TStringList;
+    LayerStr, TypeStr, JsonItems, Key : String;
+    I, FoundIdx, Total : Integer;
+    First : Boolean;
+Begin
+    Keys := TStringList.Create;
+    Counts := TStringList.Create;
+    Try
+        Total := 0;
+        Iterator := Board.BoardIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eViaObject,
+            ePadObject, eFillObject, ePolyObject, eRegionObject, eTextObject,
+            eComponentObject));
+        Iterator.AddFilter_LayerSet(AllLayers);
+        Iterator.AddFilter_Method(eProcessAll);
+        Obj := Iterator.FirstPCBObject;
+        While Obj <> Nil Do
+        Begin
+            Try LayerStr := GetLayerString(Obj.Layer); Except LayerStr := 'Unknown'; End;
+            If Obj.ObjectId = eTrackObject Then TypeStr := 'track'
+            Else If Obj.ObjectId = eArcObject Then TypeStr := 'arc'
+            Else If Obj.ObjectId = eViaObject Then TypeStr := 'via'
+            Else If Obj.ObjectId = ePadObject Then TypeStr := 'pad'
+            Else If Obj.ObjectId = eFillObject Then TypeStr := 'fill'
+            Else If Obj.ObjectId = ePolyObject Then TypeStr := 'polygon'
+            Else If Obj.ObjectId = eRegionObject Then TypeStr := 'region'
+            Else If Obj.ObjectId = eTextObject Then TypeStr := 'text'
+            Else If Obj.ObjectId = eComponentObject Then TypeStr := 'component'
+            Else TypeStr := 'other';
+            Key := LayerStr + '|' + TypeStr;
+            FoundIdx := Keys.IndexOf(Key);
+            If FoundIdx >= 0 Then
+                Counts[FoundIdx] := IntToStr(StrToIntDef(Counts[FoundIdx], 0) + 1)
+            Else
+            Begin
+                Keys.Add(Key);
+                Counts.Add('1');
+            End;
+            Inc(Total);
+            Obj := Iterator.NextPCBObject;
+        End;
+        Board.BoardIterator_Destroy(Iterator);
+        JsonItems := '';
+        First := True;
+        For I := 0 To Keys.Count - 1 Do
+        Begin
+            If Not First Then JsonItems := JsonItems + ',';
+            First := False;
+            JsonItems := JsonItems + '{"layer":"'
+                + EscapeJsonString(Copy(Keys[I], 1, Pos('|', Keys[I]) - 1))
+                + '","object_type":"'
+                + EscapeJsonString(Copy(Keys[I], Pos('|', Keys[I]) + 1, Length(Keys[I])))
+                + '","count":' + Counts[I] + '}';
+        End;
+        Result := BuildSuccessResponse(RequestId,
+            '{"buckets":[' + JsonItems + '],"bucket_count":' + IntToStr(Keys.Count)
+            + ',"primitive_total":' + IntToStr(Total) + '}');
+    Finally
+        Counts.Free;
+        Keys.Free;
+    End;
 End;
 
 {..............................................................................}
@@ -6534,9 +6612,9 @@ End;
 { PCB_GetUnroutedNets - Get nets with unrouted connections (ratsnest lines)  }
 {..............................................................................}
 
-Function PCB_GetUnroutedNets(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetUnroutedNetsForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Obj : IPCB_Primitive;
     JsonItems, NetName, CountStr : String;
@@ -6550,13 +6628,6 @@ Var
     { was wrong. See [[delphiscript_fixed_string_array_bug]].              }
     NetNames, NetCounts : TStringList;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     NetNames := TStringList.Create;
     NetCounts := TStringList.Create;
     Try
@@ -6617,6 +6688,19 @@ Begin
     End;
 End;
 
+Function PCB_GetUnroutedNets(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetUnroutedNetsForBoard(Board, RequestId);
+End;
+
 {..............................................................................}
 { PolygonAreaSqMils - Compute a polygon's outline area in SQUARE MILS via the  }
 { shoelace formula over its line vertices. Altium's IPCB_Polygon.AreaSize is   }
@@ -6662,9 +6746,9 @@ End;
 { PCB_GetPolygons - Get all polygon pours with layer, net, hatching, etc.    }
 {..............................................................................}
 
-Function PCB_GetPolygons(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile (see PCB_GetComponents). }
+Function PCB_GetPolygonsForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Polygon : IPCB_Polygon;
     JsonItems, NetName, LayerStr, HatchStr : String;
@@ -6674,13 +6758,6 @@ Var
     AreaSqMils, AreaMm2, BBoxMm2 : Double;
     BR : TCoordRect;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -6745,6 +6822,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"polygons":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetPolygons(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetPolygonsForBoard(Board, RequestId);
 End;
 
 {..............................................................................}

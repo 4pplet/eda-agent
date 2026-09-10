@@ -266,7 +266,11 @@ Begin
         Or (Command = 'pcb.get_board_outline')
         Or (Command = 'pcb.get_layer_stackup')
         Or (Command = 'pcb.get_differential_pairs')
-        Or (Command = 'pcb.get_diff_pair_rules');
+        Or (Command = 'pcb.get_diff_pair_rules')
+        Or (Command = 'pcb.get_vias')
+        Or (Command = 'pcb.get_polygons')
+        Or (Command = 'pcb.get_unrouted_nets')
+        Or (Command = 'pcb.get_layer_primitive_counts');
 End;
 
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
@@ -391,6 +395,14 @@ Begin
                 Reply := PCB_GetLayerStackupForBoard(Board, RequestId)
             Else If Command = 'pcb.get_differential_pairs' Then
                 Reply := PCB_GetDifferentialPairsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_vias' Then
+                Reply := PCB_GetViasForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_polygons' Then
+                Reply := PCB_GetPolygonsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_unrouted_nets' Then
+                Reply := PCB_GetUnroutedNetsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_layer_primitive_counts' Then
+                Reply := PCB_GetLayerPrimitiveCountsForBoard(Board, RequestId)
             Else
                 Reply := PCB_GetDiffPairRulesForBoard(Board, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
