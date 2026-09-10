@@ -165,10 +165,26 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   bucket/total reconciliation and per-net unrouted sums. 141 companion tests
   pass; fork failed-set diff vs baseline empty. Runtime
   `selected-readonly-pcb-20260910` recreated at .2 (23 files), workspace
-  seeded. Remaining: deploy at an Altium-closed window, live qualification
-  (regression eight reads + placements vs same-snapshot ODB export +
-  outline/stackup/pairs/vias/polygons/unrouted/layercounts live checks),
-  then flip ACTIVE-RUNTIME.txt.
+  seeded. **PCB reads NATIVELY QUALIFIED 2026-09-10** (deployed at the
+  morning Altium start, session 20260910092249830, 22p working project,
+  live/dirty PcbDoc): all nine tools returned validated results first run.
+  Placement parity vs the 09-08 ODB baseline: 172/172 designators, exact
+  positions except three genuinely-moved parts (R427 large move+rotate,
+  R423/S101 small nudges - real CAD deltas, not read errors);
+  **rotation convention confirmed: bridge reports Altium CCW degrees,
+  ODB stores the negation - 171/172 satisfy alt=(360-odb)%360, the one
+  exception being the really-rotated R427.** pcb_modified=true correctly
+  reported throughout (the dirty guard simultaneously refused compiled
+  schematic reads - both honesty paths exercised live). Live findings the
+  reads surfaced immediately: current CAD stackup is not the JLC 7628
+  values (28 mil core / 10.2 mil prepreg vs 8.3), the single
+  DiffPairsRouting rule is placeholder geometry (0.381/0.254 mm, not the
+  100R MIPI numbers), six pairs defined (D0-D3, CLK, USB D) all unrouted,
+  113 nets / 439 unrouted connections, internal layers hold only the two
+  GND pours, and all four GND polygon pours report net='' (operator to
+  check pour net assignment - possible real defect or nil-net read quirk).
+  Remaining before pointer flip: compiled bom/nets regression on the next
+  saved state (refused during live-dirty CAD, as designed).
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
