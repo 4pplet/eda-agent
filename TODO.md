@@ -235,6 +235,19 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   0/0; the atexit timeout re-pin rides in this runtime's client. Deploy
   at the next natural bridge restart; qualify the six live; flip the
   pointer.
+  **Tranches 3-5 NATIVELY QUALIFIED 2026-09-10 midday** (runtime
+  selected-readonly-pcbreads3-20260910, script 2026.09.10.5, session
+  20260910113737461, live 22p board): all seven new reads first-run valid
+  (rules 36, netclasses 1, tracelengths, boardstats, selected 0,
+  placements 172, pads U301 48 - the pads read immediately caught U301
+  placed 90 deg off the recommended orientation); compiled bom/nets
+  regression matched 172/559 on the saved state; **first ERC pull via
+  proj_get_erc_messages returned 197 violations in 6 classes, triaged in
+  PLT-hw reviews/2026-09-10-erc-triage.md (191 cosmetic/convention, 6
+  need operator eyes)**. ACTIVE-RUNTIME.txt flipped; check_install 13/13.
+  Known limitation recorded: short-descriptor only (no per-object detail,
+  no severity); tracelengths' empty-net bucket includes silk/mech lines
+  (AllLayers iterator upstream).
   Original scoping note kept below for the record.
   The shared bridge previously had no PCB-side tools: no component
   X/Y/rotation/layer, no tracks/vias/polygons, no differential-pair or rule
