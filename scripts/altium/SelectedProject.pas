@@ -313,6 +313,7 @@ Begin
        (Command <> 'project.get_bom') And (Command <> 'project.get_nets') And
        (Command <> 'project.get_component_info') And
        (Command <> 'project.get_component_info_batch') And
+       (Command <> 'project.get_messages') And
        (Not IsSelectedPcbReadCommand(Command)) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
@@ -333,7 +334,8 @@ Begin
     SafeParams := '{"project_path":"' + EscapeJsonString(SelectedPath) + '"';
     SelectedBusy := True;
     Try
-        Compiled := (Command = 'project.get_bom') Or (Command = 'project.get_nets');
+        Compiled := (Command = 'project.get_bom') Or (Command = 'project.get_nets')
+            Or (Command = 'project.get_messages');
         Freshness := SelectedFreshnessJSON(P);
         If Freshness = '' Then
         Begin
@@ -450,6 +452,7 @@ Begin
         Begin
             If Command = 'project.get_bom' Then Reply := Proj_GetBOM(SafeParams, RequestId)
             Else If Command = 'project.get_nets' Then Reply := Proj_GetNets(SafeParams, RequestId)
+            Else If Command = 'project.get_messages' Then Reply := Proj_GetMessages(SafeParams, RequestId)
             Else If Command = 'project.get_component_info_batch' Then Reply := Proj_GetComponentInfoBatch(SafeParams, RequestId)
             Else Reply := Proj_GetComponentInfo(SafeParams, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
