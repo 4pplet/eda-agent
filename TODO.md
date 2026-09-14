@@ -29,6 +29,24 @@ operator-confirmed normal quit after stopping passed. **Quit while running FAILE
 on that same patched revision**, with `ScriptingSystem.DLL` access violation at
 read address `0x78` and no end/abort log. Details are in the shutdown log below.
 
+- [ ] **P0 CONFIRMED live interference: Ctrl+Z swallowed while attached,
+  REPLAYED as a burst on detach (operator, 2026-09-14).** With the
+  bridge attached, Ctrl+Z does nothing (Edit-menu Undo works); when the
+  bridge detaches, the queued Ctrl+Z presses all fire at once. The
+  attached/detached A/B is the operator's own observation - this is
+  bridge-correlated, unlike the exonerated ratsnest case. DANGER: the
+  deferred undo burst can silently revert edits made after the ignored
+  presses - CAD-corruption class. Mechanism hypothesis: the script's
+  form/message loop intercepts accelerator keys (menu actions bypass
+  accelerators, hence menus work) and the message-queue backlog pumps
+  on script termination. Fix candidates for the next dev window: make
+  the bridge form non-focusable/KeyPreview-off or windowless-timer
+  based; verify no message filter holds WM_KEYDOWN; explicitly return
+  focus to the editor after every handled command; on shutdown, FLUSH
+  (discard) queued keyboard messages instead of pumping them. Operator
+  guidance until fixed (also in SHARED-PROJECTS.md): never Ctrl+Z while
+  attached (use the Edit menu); if pressed anyway, after detach check
+  the board and Ctrl+Y back any unwanted reverts before continuing.
 - [ ] **Suspected live interference: stale ratsnest during CAD with the
   loop running (reported by operator 2026-09-10 ~09:45).** Connection
   lines with break markers not following component moves in the first
