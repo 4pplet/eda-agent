@@ -337,6 +337,21 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   5. **Generic filtered primitive queries** (Gen_QueryObjects /
      ProcessPCBBoardObjects) — general fallback for object reads without
      dedicated tools; large-payload limits + honesty reporting required.
+- [ ] **Read-side gaps hit during the 2026-09-14 CAD session** (operator
+  asked to log improvements while using the tool; all read-only, all
+  ForBoard-pattern candidates for the next script deploy window):
+  1. **Rooms read (`pcb.get_rooms`)** — rule 10 scopes routing to Room
+     `CON401_ESCAPE`; no tool can verify a room exists or its extents.
+  2. **Object-classes read** — the "MIPI diff-pair class not found"
+     diagnosis had to go indirectly through the rules read; extend the
+     net-classes read to all class kinds (diff-pair classes with pair
+     membership, component classes) so class existence/membership is one
+     call.
+  3. **Component bounds in placements** — centers-only today; adding
+     per-component bounding boxes would enable client-side overlap and
+     zone-fit checks (e.g. cap-vs-connector-body during compaction).
+  4. Client-side `placements --diff` shipped in companion PLT-hw
+     2026-09-14 (338393c) — no Pascal change needed.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
