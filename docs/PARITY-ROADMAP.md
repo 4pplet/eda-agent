@@ -14,7 +14,7 @@ non-negotiable operating limits in [CURRENT-STATE.md](CURRENT-STATE.md) apply
 at every phase; the write gates are defined in
 [PROJECT-SELECTION-AND-WRITES.md](PROJECT-SELECTION-AND-WRITES.md).
 
-## Phase 0 — reliability substrate (current, partly open)
+## Phase 0: reliability substrate (current, partly open)
 
 The base everything compounds on. Items already tracked in TODO.md:
 qualify the 2026.09.10.2 PCB-read runtime; resolve the idle-timeout pin
@@ -23,7 +23,7 @@ cancellation/deadline semantics; clean-install qualification; CI wiring.
 A write path on top of an unreliable lifecycle is not negotiable, so this
 phase gates Phase 3+ hard (reads tolerate lifecycle roughness; writes don't).
 
-## Phase 1 — complete the read surface (during 22p layout)
+## Phase 1: complete the read surface (during 22p layout)
 
 All pure reads, no risk-model change. Consumers exist today.
 
@@ -37,16 +37,16 @@ All pure reads, no risk-model change. Consumers exist today.
    MPN-inconsistencies. Each function individually reviewed for
    select/highlight side effects before exposure. Serves the 22p
    layout-completion checklist and the MPN pass (verification side).
-3. **Library reads** — needs its own scoping design first: library paths are
+3. **Library reads**: needs its own scoping design first: library paths are
    OUTSIDE the selected project, so they need an explicit operator grant
    (a library analogue of Use-this-project), not a bolted-on path parameter.
    Serves footprint-vs-datasheet checks (R218 Kelvin lands, FH58 pin-1),
    replacing offline olefile parsing.
 
-## Phase 2 — approved artifact generation (computes, not CAD edits)
+## Phase 2: approved artifact generation (computes, not CAD edits)
 
 These write files or mildly mutate document state, so they sit behind an
-explicit per-call operator approval — never ambient:
+explicit per-call operator approval, never ambient:
 
 - **Proj_GenerateOutput / OutJob containers**: automates the ODB checkpoint
   export the PCB validation loop leans on; closes the freshness gap.
@@ -59,30 +59,30 @@ explicit per-call operator approval — never ambient:
 This is where the scoped tool starts beating upstream rather than trailing
 it: hashed, dated artifacts tied to a selection token.
 
-## Phase 3 — Gate 2: permission and approval infrastructure
+## Phase 3: Gate 2: permission and approval infrastructure
 
 Pure enabling work, no features: operator capability grants, exact-batch
 approval (the operator approves a listed set of changes, nothing else),
 audit/receipt records, native undo verification, partial-failure recovery.
 Blocks all writes; scheduled on non-CAD days per the standing decision.
 
-## Phase 4 — Gate 3: metadata writes (first and lowest-risk write)
+## Phase 4: Gate 3: metadata writes (first and lowest-risk write)
 
 Component parameter writes (MPN / LCSC / Value fields). The concrete
-consumer is the 111-component blank-parameter pass — but note honestly:
+consumer is the 111-component blank-parameter pass, but note honestly:
 that pass is on the pre-order critical path (week of 2026-09-14) and Gate 3
 will not be qualified by then, so this spin's MPN entry stays manual in
 Altium, agent-verified afterwards via the parameters read. Gate 3 serves
 the respin/HDMI board instead. Qualify on copies, save separately, verify
 by read-back plus native export diff.
 
-## Phase 5 — Gates 4-5: schematic writes
+## Phase 5: Gates 4-5: schematic writes
 
 Value/footprint assignment changes (the R218/R224-class ECO), then
 annotation/variants. Each on copies first with undo/reopen persistence
 tests, per the gate document.
 
-## Phase 6 — PCB writes, need-driven and last
+## Phase 6: PCB writes, need-driven and last
 
 The big upstream block, imported selectively:
 

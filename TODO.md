@@ -36,14 +36,32 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   attached/detached A/B is the operator's own observation - this is
   bridge-correlated, unlike the exonerated ratsnest case. DANGER: the
   deferred undo burst can silently revert edits made after the ignored
-  presses - CAD-corruption class. Mechanism hypothesis: the script's
-  form/message loop intercepts accelerator keys (menu actions bypass
-  accelerators, hence menus work) and the message-queue backlog pumps
-  on script termination. Fix candidates for the next dev window: make
-  the bridge form non-focusable/KeyPreview-off or windowless-timer
-  based; verify no message filter holds WM_KEYDOWN; explicitly return
-  focus to the editor after every handled command; on shutdown, FLUSH
-  (discard) queued keyboard messages instead of pumping them. Operator
+  presses - CAD-corruption class. Source-level analysis (2026-09-15)
+  excluded three candidates: no KeyPreview/TMessageFilter/WM_KEYDOWN
+  handler exists in any scripts/altium/*.pas, so nothing in our code
+  intercepts keys; the status form never calls SetFocus or Activate, it
+  only Shows (StatusForm.pas:682), so pure focus-steal cannot explain
+  the detach burst because keys typed into a form control would die
+  there; and loop cleanup does not pump UI events
+  (Dispatcher.pas:540-557), so the burst is not our final pump. Two
+  mechanisms remain, both Altium-side: (H1) Altium defers
+  accelerator-key processing while a script owns the message loop and
+  flushes at script end, which also explains why Edit-menu Undo works
+  because menus dispatch commands directly; or (H2) the script-context
+  Application.ProcessMessages only drains VCL-form messages, so
+  editor-bound keystrokes back up in the queue and flush when Altium's
+  normal loop resumes after detach. The attached loop is a tight
+  UI-thread pump (Dispatcher.pas:367, 477-531). Discriminator for the
+  next bench window: with the bridge attached, press harmless editor
+  keys (arrows/space to pan). If they respond immediately, only
+  accelerators are deferred (H1) and form/focus tweaks cannot fix it;
+  if they also lag until detach, the backlog is general (H2) and the
+  TTimer-based event-driven dispatch already deferred in SHUTDOWN.md
+  becomes the fix path. Remaining fix candidates for the next dev
+  window: make the bridge form non-focusable or windowless-timer based;
+  explicitly return focus to the editor after every handled command; on
+  shutdown, FLUSH (discard) queued keyboard messages instead of pumping
+  them. Operator
   guidance until fixed (also in SHARED-PROJECTS.md): never Ctrl+Z while
   attached (use the Edit menu); if pressed anyway, after detach check
   the board and Ctrl+Y back any unwanted reverts before continuing.
@@ -57,7 +75,7 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   open PcbDoc (known Altium stale-line trigger), (c) native Altium
   ratsnest staleness, coincidental. Connection DATA was self-consistent
   at 09:26 (unrouted read validated). **A/B RESULT (~10:00): issue
-  persists after a full Altium restart with NO bridge running — the
+  persists after a full Altium restart with NO bridge running: the
   polling loop is exonerated as the live cause.** Stale lines also
   survived PcbDoc close/reopen and Clean All Nets, so the state is in
   the saved file or is a native bug. Remaining bridge-related suspect is
@@ -79,11 +97,11 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   `apply_auto_shutdown`'s re-pin, or does a bridge restart read something
   other than the pinned file? Evidence: batch-20260909 `workspace/activity.log`.
 - [ ] **2026-09-09 wind-down evidence (positive):** deliberate stop at
-  16:05:47 (`reason=stop-requested`, 9 s later a fresh session served reads) —
+  16:05:47 (`reason=stop-requested`, 9 s later a fresh session served reads),
   first live helper-stop data point; and after the 16:16 idle-timeout exit,
   Altium was closed with **no crash in the Windows event log** (contrast the
   11:50:51 heap-corruption signature that followed an idle-timeout exit).
-  Only unrelated LiveKernelEvent WER entries (P1 124/1cc, 15:49:56) —
+  Only unrelated LiveKernelEvent WER entries (P1 124/1cc, 15:49:56):
   machine-level, not Altium. Count toward the shutdown matrix rows.
 - [ ] Complete [the shutdown matrix](docs/SHUTDOWN.md) on disposable CAD:
   new-version ping/read, explicit no-save stop, native Detach/Close, repeated
@@ -181,15 +199,15 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   batch). Deploy a new runtime at the next stopped-Altium window and qualify
   live (172-designator batch equals the dump_parameters.py loop output).
   `dump_parameters.py` remains the fallback meanwhile.
-- [ ] **Candidate: read-only PCB-document reads — IMPLEMENTED 2026-09-10,
+- [ ] **Candidate: read-only PCB-document reads: IMPLEMENTED 2026-09-10,
   native qualification pending.** First tranche built the same day it was
   requested: the five upstream read functions split into `...ForBoard` cores
   (wrappers preserve upstream behavior; the shared outline core drops the
   Invalidate/Rebuild/Validate mutation), `ResolveSelectedBoard` in
-  SelectedProject.pas resolves the selected project's OWN PcbDoc only —
-  exactly one PcbDoc member, already open (fail-closed `PCB_NOT_OPEN`,
-  no auto-open/focus change, PCBServer touched only after an open .PcbDoc
-  proves the server is loaded) — and the dispatcher splices `pcb_doc` +
+   SelectedProject.pas resolves the selected project's OWN PcbDoc only,
+   exactly one PcbDoc member, already open (fail-closed `PCB_NOT_OPEN`,
+   no auto-open/focus change, PCBServer touched only after an open .PcbDoc
+   proves the server is loaded), and the dispatcher splices `pcb_doc` +
   `pcb_modified` (live-state honesty) into every result. SCRIPT_VERSION
   `2026.09.10.1`; companion clients grew five `pcb_*` tools with
   `validate_pcb_read` shape checks, `bridge_read.py` subcommands
@@ -278,18 +296,18 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   geometry last (large payloads; needs limits + honesty reporting like the
   extraction block). Implement on a non-CAD day; qualify against a
   same-snapshot ODB export before use.
-  **Survey 2026-09-10: the native functions already exist upstream** —
+  **Survey 2026-09-10: the native functions already exist upstream**: 
   PCB.pas carries PCB_GetComponents, PCB_GetComponentPads,
   PCB_GetDifferentialPairs (pair objects) + PCB_GetDiffPairRules (rules),
   PCB_GetTraceLengths, PCB_GetLayerStackup, PCB_GetBoardOutline,
   PCB_GetPolygons, PCB_GetVias, PCB_GetUnroutedNets,
   PCB_GetClearanceViolations, PCB_RunDRC, PCB_GetBoardStatistics. The real
   adaptation work is (a) **selection scoping**: upstream functions target the
-  current/focused board, which our rules forbid — resolve the board from the
+  current/focused board, which our rules forbid: resolve the board from the
   operator-selected project the way SelectedProject.pas does for schematic
   commands, and refuse if the selected project's PcbDoc is not it; (b)
   reviewing each exposed function read-only end-to-end (PCB_RunDRC is a
-  compute that touches document state — exclude it from the first pass);
+  compute that touches document state, exclude it from the first pass);
   (c) allow-list + Python validation + version bump + stopped-Altium deploy
   + live qualification vs a same-snapshot ODB export. Comparable in shape
   and effort to the 2026-09-09 item-3/item-4 batch.
@@ -328,10 +346,10 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   caveat, pick-and-place/CPL cross-checkable against the live placements
   read, Gerbers/NC drill, schematic PDFs - the order package as one
   dated hashable artifact set). Same approval gate, per-container.
-- [ ] **Wider upstream survey (2026-09-10) — further read-side candidates**,
+- [ ] **Wider upstream survey (2026-09-10): further read-side candidates**,
   same caveats as above (unreviewed, mostly focused-document targeting,
   each needs read-only verification + selection scoping):
-  1. **Audit.pas suite (~30 prebuilt checks)** — highest value; maps
+  1. **Audit.pas suite (~30 prebuilt checks)**: highest value; maps
      directly onto the 22p layout-completion checklist and open passes:
      Audit_FindSignalViasWithoutReturn (return-path review),
      FindViaAntennas, FindBadConnections, FindFloating/UnmatchedPorts,
@@ -342,34 +360,34 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
      entry pass), ValidateComponentParams, PowerPortOrientation,
      VariantNotFitted. Verify each is pure-read (no select/highlight side
      effects) before exposure.
-  2. **Library geometry reads** — Lib_GetFootprints, Lib_GetFootprintPads,
+  2. **Library geometry reads**: Lib_GetFootprints, Lib_GetFootprintPads,
      Lib_GetLibraryGeometry: native footprint pad geometry, replacing the
      offline olefile binary parsing for footprint-vs-datasheet checks
      (R218 Kelvin lands, FH58SA pin-1 location for the pinout session).
-  3. **Proj_GenerateOutput / Proj_GetOutJobContainers** — could automate
+  3. **Proj_GenerateOutput / Proj_GetOutJobContainers**: could automate
      the ODB checkpoint refresh that PCB-side validation depends on. NOT
      read-only (writes output files, may compile): if exposed, behind an
      explicit per-call approval, never ambient.
-  4. **Proj_CrossProbe** — cooperative review aid (agent names a component,
+  4. **Proj_CrossProbe**: cooperative review aid (agent names a component,
      Altium highlights it for the operator). Verify it cannot modify.
   5. **Generic filtered primitive queries** (Gen_QueryObjects /
-     ProcessPCBBoardObjects) — general fallback for object reads without
+     ProcessPCBBoardObjects): general fallback for object reads without
      dedicated tools; large-payload limits + honesty reporting required.
 - [ ] **Read-side gaps hit during the 2026-09-14 CAD session** (operator
   asked to log improvements while using the tool; all read-only, all
   ForBoard-pattern candidates for the next script deploy window):
-  1. **Rooms read (`pcb.get_rooms`)** — rule 10 scopes routing to Room
+  1. **Rooms read (`pcb.get_rooms`)**: rule 10 scopes routing to Room
      `CON401_ESCAPE`; no tool can verify a room exists or its extents.
-  2. **Object-classes read** — the "MIPI diff-pair class not found"
+  2. **Object-classes read**: the "MIPI diff-pair class not found"
      diagnosis had to go indirectly through the rules read; extend the
      net-classes read to all class kinds (diff-pair classes with pair
      membership, component classes) so class existence/membership is one
      call.
-  3. **Component bounds in placements** — centers-only today; adding
+  3. **Component bounds in placements**: centers-only today; adding
      per-component bounding boxes would enable client-side overlap and
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
-     2026-09-14 (338393c) — no Pascal change needed.
+     2026-09-14 (338393c), no Pascal change needed.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
