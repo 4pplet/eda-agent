@@ -30,11 +30,17 @@ SHUTDOWN.md, do not restore the polling loop just to make the experiment pass.**
 | # | Question | How |
 |---|---|---|
 | **P1** | Does a form outlive the procedure that showed it? | `ShowStatusFormDiagnostic` (already written, ships this deploy window). Form still there after the script returns = VM survives the call |
-| **P2** | Does a **TTimer on that form still fire** after the return? | Add a timer to `StatusForm.dfm` with a log-only `OnTimer`. Watch the log grow with no script running |
-| **P3** | Does Stop / form-close / normal Altium quit stay clean with a live timer? | SHUTDOWN.md's existing shutdown probe procedure |
+| **P2** | Does a **TTimer on that form still fire** after the return? | `ShowStatusFormTimerProbe` (written 2026-09-23, ships this deploy window). Arms `tmr_Probe` at 1 s and returns; the tick count and elapsed seconds show in the form **caption**, readable in the taskbar while minimized |
+| **P3** | Does Stop / form-close / normal Altium quit stay clean with a live timer? | SHUTDOWN.md's existing shutdown probe procedure — but close the form while the P2 probe is still ticking first; that is §7's failure mode for free |
 
 **P1 is free** — it is already in this deploy window for the Ctrl+Z
-discrimination, and it answers both questions at once. **P2 is the real gate.**
+discrimination, and it answers both questions at once. **P2 is the real gate**,
+and it is now also free: the probe rides the same Altium stop/start cycle, so
+neither prerequisite costs a window of its own.
+
+Reporting elapsed seconds beside the count is deliberate — it makes P2 a rate
+measurement, so "fires but starved" comes back as its own answer rather than
+being scored as a pass.
 
 **If P2 fails**, the timer bridge is dead and the honest position is: keep the
 blocking loop, build flush-on-shutdown as a mitigation (subject to its own
@@ -133,6 +139,13 @@ timer, or a closed form leaves a live timer firing against freed controls.
 **That is the most likely crash in the whole redesign** and deserves its own
 qualification step.
 
+**Done ahead of the redesign, 2026-09-23.** `StatusFormClose` now disables
+`tmr_Probe` and `tmr_Spinner` before the form goes away, so the prescribed
+ordering is established while the only timers are a spinner and a probe and the
+blast radius is nil. `tmr_Spinner` was already exposed to this — closing the
+form mid-request left it enabled — so this is a latent fix, not just
+groundwork. Closing the form during the P2 probe exercises the path for real.
+
 ## 8. What would make this worse rather than better
 
 Stated up front so review can weigh it:
@@ -151,7 +164,8 @@ Stated up front so review can weigh it:
 ## 9. Sequencing
 
 1. **P1** — free, in the current deploy window (`ShowStatusFormDiagnostic`).
-2. **P2** — log-only timer on the form. Small, isolated, no MCP, no CAD.
+2. **P2** — also free, same window (`ShowStatusFormTimerProbe`, written
+   2026-09-23). Small, isolated, no MCP, no CAD, self-bounding at 120 ticks.
 3. Only then §3–§7, in a dedicated window, with §8's counter included.
 4. Full native acceptance as a new execution model.
 

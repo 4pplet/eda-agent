@@ -709,4 +709,11 @@ object StatusForm: TStatusForm
     Left = 340
     Top = 8
   end
+  object tmr_Probe: TTimer
+    Enabled = False
+    Interval = 1000
+    OnTimer = tmr_ProbeTimer
+    Left = 308
+    Top = 8
+  end
 end

@@ -65,6 +65,14 @@ Var
     LastPingMs       : Cardinal;
     OpenWebEnabled   : Boolean;
 
+    { P2 prerequisite probe (see eda-agent docs/DESIGN-event-driven-dispatch.md }
+    { section 2). Counts tmr_Probe firings so the operator can read the rate    }
+    { off the caption. Module-level because the handler carries no state of     }
+    { its own between ticks - which is exactly the migration the redesign       }
+    { needs, so this doubles as a rehearsal of section 4.                       }
+    ProbeTickCount   : Integer;
+    ProbeStartMs     : Cardinal;
+
 
 { Static UI constants. Modern dark palette intended for the StatusForm.   }
 { DelphiScript color literals are BGR-ordered Cardinals (8 hex digits      }
@@ -84,6 +92,12 @@ Const
 
     MAX_LOG_LINES       = 2000;
     SPINNER_FRAMES      = 4;
+
+    { P2 probe. 1 s is slow enough to read off a taskbar caption and fast    }
+    { enough to make starvation obvious; the cap bounds a probe the operator }
+    { walks away from, so a forgotten timer cannot outlive the session.      }
+    PROBE_INTERVAL_MS   = 1000;
+    PROBE_MAX_TICKS     = 120;
 
 
 { Ctrl+Z is deferred while the bridge holds the main thread, and the presses   }
@@ -626,6 +640,46 @@ Begin
 End;
 
 
+{ P2 probe tick. This handler is the whole experiment: if it runs at all      }
+{ after StartTimerProbe has RETURNED, then a TTimer on this form survives the }
+{ end of a script call, and the event-driven redesign is buildable. If it     }
+{ never fires, the redesign is dead and the honest fallback is the blocking   }
+{ loop plus the caption warning (DESIGN-event-driven-dispatch.md section 2).  }
+{                                                                             }
+{ Two readouts on purpose. The memo is the detailed record; the CAPTION is    }
+{ the one that matters, because it stays readable in the taskbar while the    }
+{ form is MINIMIZED - the same reason the Ctrl+Z warning lives there.         }
+{                                                                             }
+{ Reporting the ELAPSED seconds next to the count is what makes this a rate   }
+{ measurement rather than a yes/no: 30 ticks in 30 s means the interval is    }
+{ honoured, while 30 ticks in 300 s would say the timer fires but is being    }
+{ starved, which is a different finding with a different fix.                 }
+Procedure tmr_ProbeTimer(Sender : TObject);
+Var
+    ElapsedSec : Cardinal;
+Begin
+    ProbeTickCount := ProbeTickCount + 1;
+    ElapsedSec := (GetTickCount - ProbeStartMs) Div 1000;
+    Try
+        mmo_Log.Lines.Insert(0, 'probe tick ' + IntToStr(ProbeTickCount)
+            + '  at ' + IntToStr(ElapsedSec) + ' s');
+    Except End;
+    Try
+        StatusForm.Caption := 'P2 PROBE  ticks=' + IntToStr(ProbeTickCount)
+            + '  t=' + IntToStr(ElapsedSec) + 's' + KeyboardWarningSuffix(0);
+    Except End;
+
+    If ProbeTickCount >= PROBE_MAX_TICKS Then
+    Begin
+        Try tmr_Probe.Enabled := False; Except End;
+        Try
+            mmo_Log.Lines.Insert(0, 'probe auto-stopped at the '
+                + IntToStr(PROBE_MAX_TICKS) + '-tick cap');
+        Except End;
+    End;
+End;
+
+
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin
     Try
@@ -738,9 +792,44 @@ Begin
 End;
 
 
+{ Arm the P2 probe and RETURN immediately. Returning is the point: the whole }
+{ question is whether the timer keeps firing once this procedure is off the  }
+{ stack and no script is running. Defined after ShowStatusForm because the   }
+{ linter rejects a call that precedes its definition in the concatenation.   }
+{                                                                            }
+{ Nothing here touches CAD, writes a stop file, or starts the poll loop.     }
+Procedure StartTimerProbe(Dummy : Integer);
+Begin
+    ShowStatusForm(0);
+    ProbeTickCount := 0;
+    ProbeStartMs   := GetTickCount;
+    Try
+        mmo_Log.Lines.Insert(0, 'P2 probe armed - interval '
+            + IntToStr(PROBE_INTERVAL_MS) + ' ms, cap '
+            + IntToStr(PROBE_MAX_TICKS) + ' ticks. Caption shows the count.');
+    Except End;
+    Try
+        tmr_Probe.Interval := PROBE_INTERVAL_MS;
+        tmr_Probe.Enabled  := True;
+    Except End;
+    Try
+        StatusForm.Caption := 'P2 PROBE  armed' + KeyboardWarningSuffix(0);
+    Except End;
+End;
+
+
 Procedure StatusFormClose(Sender : TObject; Var Action : TCloseAction);
 Begin
     Try Running := False; Except End;
+    { Disable every timer BEFORE the form goes away. A live timer on a closed  }
+    { form fires against freed controls, which section 7 of                     }
+    { DESIGN-event-driven-dispatch.md calls the most likely crash in the whole  }
+    { redesign - so the ordering it prescribes is established here, while the   }
+    { only timers are a spinner and a probe and the blast radius is nil.        }
+    { tmr_Spinner was already exposed to this: closing the form mid-request     }
+    { left it enabled.                                                          }
+    Try tmr_Probe.Enabled := False; Except End;
+    Try tmr_Spinner.Enabled := False; Except End;
 End;
 
 

@@ -411,6 +411,39 @@ Begin
     ShowStatusForm(0);
 End;
 
+{..............................................................................}
+{ P2 PREREQUISITE PROBE for the event-driven redesign. Also parameterless so   }
+{ it lands in the Run Script dialog beside the P1 diagnostic above.            }
+{                                                                              }
+{ The redesign in docs/DESIGN-event-driven-dispatch.md turns StartMCPServer    }
+{ into "arm a TTimer and return", which is the only surviving fix for BOTH     }
+{ P0s - the shutdown crash and the deferred Ctrl+Z. All of it rests on one     }
+{ unverified assumption: that a TTimer on this form still fires after the      }
+{ script that armed it has returned. Section 2 calls P2 the real gate and      }
+{ forbids writing section 3 onward until it passes. This is that test, and     }
+{ nothing more.                                                                }
+{                                                                              }
+{ Read the answer off the FORM CAPTION, which keeps counting in the taskbar    }
+{ while the form is minimized:                                                 }
+{   - caption stays at "armed"        -> the timer never fires once the call   }
+{     returns. The redesign is DEAD; record it and keep the blocking loop,     }
+{     the caption warning, and flush-on-shutdown as the only mitigation.       }
+{   - count climbs ~1/s              -> P2 PASSES. The VM and the timer both   }
+{     outlive the call and the redesign is buildable.                          }
+{   - count climbs far slower than 1/s -> fires but starved. A real finding    }
+{     with a different fix; report the count and the elapsed seconds, both of  }
+{     which the caption shows.                                                 }
+{   - form vanishes on return        -> answers P1 instead: the VM does not    }
+{     outlive the call. Report it; P2 needs another shape.                     }
+{                                                                              }
+{ Self-bounding: the probe stops itself at PROBE_MAX_TICKS (120 s) and         }
+{ StatusFormClose disables it, so a probe walked away from cannot be left      }
+{ firing against a closed form. No loop, no stop file, no CAD touched.         }
+Procedure ShowStatusFormTimerProbe;
+Begin
+    StartTimerProbe(0);
+End;
+
 Procedure StartMCPServer;
 Var
     StopPath       : String;
