@@ -181,13 +181,19 @@ either way: stop the bridge before quitting Altium.
       softened later:** with the bridge attached, a Ctrl+Z press must undo
       *at that moment*, and detaching must produce **no burst at all**. "Fewer
       undos on detach" is a fail, not progress.
-    - **The failure mode is real and it bit during this very test:** the
-      22p `PcbDoc` was clean in git and reading `pcb_modified: false` at 18:16,
-      and was modified on disk at 19:13 during the Ctrl+Z run. A burst plus a
-      save is how deferred keypresses become committed board changes. This is
-      the concrete cost the operator warning exists to prevent, and it argues
-      for keeping CAD committed before any bridge session, not just before
-      deliberate Ctrl+Z tests.
+    - **How the test was driven, and a correction to an earlier reading of
+      it.** The operator used a via moved back and forth as the undoable
+      action — a good choice, since a moved via is obvious on sight and
+      trivially reversible. The 22p `PcbDoc` did go from clean-in-git
+      (`pcb_modified: false` at 18:16) to modified on disk at 19:13, but
+      **that was the deliberate via manipulation, not the undo burst.** An
+      earlier draft of this entry implied the burst had silently altered the
+      board; it did not, and no instance of that has actually been observed.
+    - **The hazard is still real, just unwitnessed:** a burst firing into a
+      board followed by a save is the mechanism by which deferred keypresses
+      would become persistent changes, and nothing about the measured
+      behaviour rules it out. Keep CAD committed before a bridge session —
+      cheap insurance, and it is what made this test safe to run at all.
   - **✅ RESOLVED TO A CAUSE CLASS 2026-09-23 (operator bench, current
     runtime). The minimize test came back: still dead.** Combined with the
     other observations, the hypothesis space is now closed:
