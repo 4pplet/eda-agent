@@ -29,6 +29,32 @@ operator-confirmed normal quit after stopping passed. **Quit while running FAILE
 on that same patched revision**, with `ScriptingSystem.DLL` access violation at
 read address `0x78` and no end/abort log. Details are in the shutdown log below.
 
+**2026-09-23 — reproduced on `2026.09.23.1`, and this time the CALL SITE is
+known.** Operator quit Altium with the bridge still attached. Identical fault
+(`ScriptingSystem.DLL`, read of `0x78`), and the debugger stopped on
+`Dispatcher.pas` **`If Client.IsQuitting Then`** inside `MCPHostAvailable`.
+Three things follow:
+
+- **`Client` is already destroyed when we ask it whether it is quitting.**
+  `0x78` is a field/vtable offset off a nil-or-freed interface, so the guard
+  dereferences the very object whose death it exists to detect. It cannot work
+  in its current form.
+- **The surrounding `Try/Except` does not catch it.** That call is already
+  wrapped, and the process still died — an access violation raised inside a
+  native DLL is not recoverable by DelphiScript's exception handling. The
+  source comment directly above the call predicted exactly this: *"These checks
+  cannot recover a VM destroyed inside that native call."* The prediction is
+  now measured rather than assumed.
+- **The shutdown guards deployed since 09-09 did not fix it**, which the
+  matrix should stop implying.
+
+**This re-frames §8 of `docs/DESIGN-event-driven-dispatch.md`**, which worried
+that a live timer at quit "may be a *new* crash surface, where today the answer
+is the blunt but effective stop-the-bridge-first". Quit-while-running already
+crashes today, so it is an *existing* surface, not a new one. **P3's bar is
+therefore "no worse than today", not "clean"** — and the operator rule stands
+either way: stop the bridge before quitting Altium.
+
 - [ ] **P0 CONFIRMED live interference: Ctrl+Z swallowed while attached,
   REPLAYED as a burst on detach (operator, 2026-09-14).** With the
   bridge attached, Ctrl+Z does nothing (Edit-menu Undo works); when the

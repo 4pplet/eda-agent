@@ -161,9 +161,17 @@ groundwork. Closing the form during the P2 probe exercises the path for real.
 
 Stated up front so review can weigh it:
 
-- **A live timer at Altium quit may be a *new* crash surface**, where today the
-  answer is the blunt but effective "stop the bridge first". P3 exists for this,
-  and the existing shutdown probe is the tool.
+- ~~**A live timer at Altium quit may be a *new* crash surface**~~ — **corrected
+  2026-09-23: it is an EXISTING surface.** Quitting Altium with the bridge
+  attached crashes *today*, on the polling loop, reproduced on `2026.09.23.1`:
+  `ScriptingSystem.DLL` access violation reading `0x78`, stopped on
+  `If Client.IsQuitting Then` in `MCPHostAvailable` — the guard dereferences the
+  already-freed `Client` it exists to test, and its `Try/Except` cannot catch an
+  AV raised inside a native call. So **P3's bar is "no worse than today", not
+  "clean"**, and a timer that is disabled before teardown may well be *better*
+  than a loop that keeps calling into a dying host. Do not let this item block
+  the redesign on a standard the current design also fails. The operator rule is
+  unchanged: stop the bridge before quitting Altium.
 - **Exceptions change shape.** Today one `Try/Except` wraps the whole loop and a
   failure ends the session. Per-tick handling means a repeating fault could log
   forever instead of stopping. Add a consecutive-failure counter that finalises
