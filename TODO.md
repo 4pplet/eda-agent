@@ -388,6 +388,42 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
      2026-09-14 (338393c), no Pascal change needed.
+- [ ] **Native DRC violation read (`pcb.get_drc_violations`) — the gap that bites
+  next.** `erc` covers compiled ERC and `audit` covers our six surfacing checks,
+  but **nothing reads native DRC**, and the 22p is about to enter the phase where
+  DRC is the check that matters: the rules ritual is 1/12 entered, room
+  `MIPI_CROSS` is new, and the (b1) lane crossing is routed against clearance,
+  width and via-style rules we can only read *as rules*, never as violations.
+  Today the loop is "operator runs DRC, reads the panel aloud". Pair it with the
+  already-logged **rooms read**, which the same work needs — rule 10 scopes to two
+  rooms now and no tool can confirm either exists.
+
+- [ ] **Parameter WRITES: the right first write capability, but gated on P0**
+  (operator asked 2026-09-23 whether the bridge should write parameters).
+  **Why this class specifically is defensible**, where geometry writes are not:
+  parameters are **non-topological** — they cannot change a net, a footprint, a
+  placement or any copper, so a wrong value cannot short or disconnect anything;
+  they are **verifiable by read-back** with `parameters --designator --fields`;
+  and their recovery path is **"write the correct value", not undo**, because the
+  intended value always exists in the source CSV. That last point is what makes
+  them separable from edits whose recovery genuinely depends on a working undo.
+  - **PREREQUISITE: close the Ctrl+Z P0 first.** Adding the first write capability
+    while undo is known-broken-and-replaying is the combination this TODO has been
+    warning about all along. P0 is the gate, not a parallel task.
+  - **Design, if it is built:** whitelist the writable fields (`Value`, `Comment`,
+    `LCSC Part #`, `LCSC MFG`, `MRF.Part`) and **refuse `Footprint`, `Library
+    Reference` and `Designator`** — a footprint change is a land-pattern change and
+    stays manual. Input is a **designator-keyed CSV committed to git** (never
+    positional, which is the failure mode of Altium's own grid paste). **Dry-run by
+    default**: print current -> proposed per field and require an explicit apply
+    flag. **Read back and assert** every written field afterwards, reporting any
+    that did not take. **Refuse on dirty docs** so a clean git revert point exists.
+    Operator-gated through Gates 0-5 as a new capability, never a config toggle.
+  - **Not worth building for the 22p BOM itself** (~96 MPNs): a Pascal tool plus a
+    runtime version plus qualification costs more than typing them once. It pays
+    off across the HDMI board and later spins, which is the case to make when P0
+    is closed.
+
 - [ ] **Read-side gaps hit during the 2026-09-22 P00 / BOM session** (operator
   asked again what would make the tool faster). **Items 1-4, 6 and 7 are
   CLIENT-SIDE — they need no Pascal and no script deploy window**, because the
