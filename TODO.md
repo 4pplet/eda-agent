@@ -65,6 +65,42 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   guidance until fixed (also in SHARED-PROJECTS.md): never Ctrl+Z while
   attached (use the Edit menu); if pressed anyway, after detach check
   the board and Ctrl+Y back any unwanted reverts before continuing.
+  - **Pump rates measured from the source, 2026-09-23 — and they argue the
+    obvious fix is a dead end.** `MCPYield` is exactly
+    `Application.ProcessMessages` plus stop checks, and the loop calls it at
+    two very different rates (defaults from `Main.pas InitDefaultConfig`):
+    - **Idle:** `PollIntervalIdleMs` 30 split across `YieldIterations` 5, so
+      **ProcessMessages roughly every 6 ms**.
+    - **Active:** `PollIntervalActiveMs` 10 with `YieldEveryNActive` 5, so
+      **ProcessMessages roughly every 50 ms**.
+    An 8x difference — but **starvation at either rate would delay a keystroke
+    by tens of milliseconds, not hold it until detach.** Queued input drains on
+    the next `ProcessMessages`; it does not accumulate for minutes. So
+    "yield more often" is very unlikely to be the fix, and building it would
+    spend a deploy-and-qualify cycle to learn that.
+  - **An inference that narrows it without a bench, stated with its
+    assumption.** Auto-shutdown is 10 minutes, so an attached bridge sits
+    **idle** for most of any CAD session — i.e. pumping every ~6 ms, which is
+    effectively continuous. If Stefan's Ctrl+Z presses mostly land in that
+    idle window (they almost certainly do; he is editing, not driving the
+    bridge), then keys are being swallowed *while the message queue is being
+    drained constantly*. That is not starvation. It points at **H2**:
+    `ProcessMessages` drains the VCL queue, but Altium dispatches Ctrl+Z
+    through its own accelerator/action path, which is not running while the
+    script owns the thread.
+  - **So sharpen the discriminator**: the arrows/space test above tells
+    accelerator-vs-general, which is useful, but the cheaper and more decisive
+    one is **idle vs active**. Press Ctrl+Z with the bridge attached and
+    quiet, then again while a long read is running. **Same behaviour in both =
+    pump rate is irrelevant = H2**, and every focus/yield-tuning fix is
+    excluded in one test. Different behaviour = starvation after all.
+  - **This also promotes flush-on-shutdown from one candidate among several to
+    the mitigation worth building first**, because it is the only one that
+    works whichever hypothesis wins: discarding queued key messages as the
+    loop exits turns a silent undo burst into keystrokes that were already
+    lost. Losing a keypress the operator knows was ignored is strictly safer
+    than replaying it into a board minutes later. Verify `PeekMessage` with
+    `PM_REMOVE` is reachable from DelphiScript before committing to it.
 - [ ] **Suspected live interference: stale ratsnest during CAD with the
   loop running (reported by operator 2026-09-10 ~09:45).** Connection
   lines with break markers not following component moves in the first
