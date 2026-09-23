@@ -376,8 +376,21 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
 - [ ] **Read-side gaps hit during the 2026-09-14 CAD session** (operator
   asked to log improvements while using the tool; all read-only, all
   ForBoard-pattern candidates for the next script deploy window):
-  1. **Rooms read (`pcb.get_rooms`)**: rule 10 scopes routing to Room
-     `CON401_ESCAPE`; no tool can verify a room exists or its extents.
+  1. ~~**Rooms read (`pcb.get_rooms`)**~~ **WIRED 2026-09-23 — it turned out to
+     need no new Pascal at all.** `PCB_GetRoomRules` already existed and was
+     already an MCP tool; what was missing is that it had **no `...ForBoard`
+     variant and no entry in `SelectedProject.pas`**, so the shared dropdown
+     path — the only path the runbook sanctions — could not reach it. Split out
+     `PCB_GetRoomRulesForBoard` the same way as the other reads, registered it,
+     and added the `rooms` client subcommand (extents in mm plus width/height,
+     `--designator` filters by name and refuses by listing what is present).
+     **Lesson worth keeping: this item was logged as a missing capability when
+     it was actually an unrouted one.** Check the shared dispatcher before
+     concluding a read does not exist.
+     - Caveat carried from the existing tool's own docstring: these are room
+       **rules** (confinement constraints), not physical `IPCB_Room` objects,
+       and the extents come from the rule's bounding rect.
+     - Still needs the same deploy/qualify window as the object-classes read.
   2. ~~**Object-classes read**~~ **WRITTEN 2026-09-23, NOT YET DEPLOYED OR
      QUALIFIED.** `PCB_GetObjectClassesForBoard` in `scripts/altium/PCB.pas`,
      registered on both dispatch paths, exposed as `pcb_get_object_classes`,

@@ -7349,9 +7349,12 @@ End;
 { Returns design rules of kind eRule_ConfinementConstraint, not physical rooms }
 {..............................................................................}
 
-Function PCB_GetRoomRules(Params : String; RequestId : String) : String;
+{ Core body shared with the selection-scoped profile, split out 2026-09-23 so }
+{ the shared dropdown path can read rooms too (it previously could not, which }
+{ is why a design rule scoped to a room could not be verified against the     }
+{ room's existence). Same split as PCB_GetNetClassesForBoard and friends.     }
+Function PCB_GetRoomRulesForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Rule : IPCB_Rule;
     Room : IPCB_ConfinementConstraint;
@@ -7360,13 +7363,6 @@ Var
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
-    If Board = Nil Then
-    Begin
-        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
-        Exit;
-    End;
-
     JsonItems := '';
     First := True;
     Count := 0;
@@ -7415,6 +7411,19 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"room_rules":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+End;
+
+Function PCB_GetRoomRules(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetRoomRulesForBoard(Board, RequestId);
 End;
 
 {..............................................................................}
