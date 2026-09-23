@@ -388,6 +388,42 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
      2026-09-14 (338393c), no Pascal change needed.
+- [ ] **Read-side gaps hit during the 2026-09-22 P00 / BOM session** (operator
+  asked again what would make the tool faster). **Items 1-4, 6 and 7 are
+  CLIENT-SIDE — they need no Pascal and no script deploy window**, because the
+  data already comes back in the `nets` and `parameters` payloads. That is the
+  cheap half of this list.
+  1. **`nets --designator U301`: component pin -> net, with the other members
+     of each net.** By far the most-used operation of the session — the MCU pin
+     map, the CON401 pad table, the strap tracing and the link-pair topology
+     were all this one query, hand-rolled in a scratchpad script each time.
+     Today's `--designator` only serves `pads` (PCB side); the schematic
+     equivalent does not exist.
+  2. **`nets --net VEEA`: full membership of one named net.** The `--net` flag
+     exists but only narrows `tracelengths`. Membership is the query that
+     settles "is this really the rail?" and it is the one the R229/R230
+     postmortem tells us to always run.
+  3. **`parameters --designator R218,R224 --fields Value,"LCSC Part #"`.**
+     `parameters` dumps all 172 components; every use today filtered it
+     client-side first.
+  4. **A BOM-gap rollup on `--blank-report`**: counts of complete /
+     missing-Value / missing-MPN, broken down by designator prefix. The raw
+     report has the data; the rollup ("62 complete, 47 missing Value, 96
+     missing MPN") was computed by hand and is what actually drives the work.
+  5. **Test-point / free-pad read (server-side, needs Pascal).** pcb-design
+     requires a labelled probe pad on every strap pin plus RESX, and **no
+     current tool can verify that** — it stayed "unverified" in the 2026-09-22
+     BRINGUP review for want of a read. Free pads and vias not owned by a
+     component are invisible today.
+  6. **A `bridge.cmd` / `bridge.ps1` wrapper that hard-codes the runtime venv
+     interpreter.** Bare `python` fails with `ModuleNotFoundError: mcp`, and
+     this is rediscovered every session — it is in agent memory precisely
+     because the tool does not prevent it. A two-line wrapper removes the whole
+     error class.
+  7. **Payload schema discoverability.** The `nets` payload keys pins by
+     `component`, not `designator` (which `--designator` implies elsewhere);
+     three script iterations went into finding that. Either align the naming or
+     add a `--schema` flag that prints one example record per subcommand.
 - [x] Cross-version runtime management (2026-09-09, companion PLT-hw):
   `SharedRuntime.load_any_version` keeps all integrity checks but tolerates
   another version family, used only by manage_shared_runtime
