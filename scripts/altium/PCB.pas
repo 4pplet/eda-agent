@@ -362,15 +362,21 @@ Var
     NetErr, CompErr, PairErr : Integer;
     IsNetClass, IsSuper, Truncated, AnyProbeErrors : Boolean;
 
+    { EVERY nested routine here takes Brd explicitly. DelphiScript nested      }
+    { routines CANNOT read the enclosing routine's parameters or locals - the  }
+    { compiler stops with "Can't access top level variable" (seen 2026-09-23   }
+    { on exactly this function). The two other nested routines in this repo    }
+    { comply only by accident, using nothing but their own parameters.         }
+
     { Count classes on the board. One iterator, created and destroyed here. }
-    Function CountClasses : Integer;
+    Function CountClasses(Brd : IPCB_Board) : Integer;
     Var
         Iter : IPCB_BoardIterator;
         Cls : IPCB_ObjectClass;
         N : Integer;
     Begin
         N := 0;
-        Iter := Board.BoardIterator_Create;
+        Iter := Brd.BoardIterator_Create;
         Try
             Iter.AddFilter_ObjectSet(MkSet(eClassObject));
             Iter.AddFilter_LayerSet(AllLayers);
@@ -382,13 +388,13 @@ Var
                 Cls := Iter.NextPCBObject;
             End;
         Finally
-            Board.BoardIterator_Destroy(Iter);
+            Brd.BoardIterator_Destroy(Iter);
         End;
         Result := N;
     End;
 
     { Return the Nth class (0-based), iterator destroyed before returning. }
-    Function ClassAt(Wanted : Integer) : IPCB_ObjectClass;
+    Function ClassAt(Brd : IPCB_Board; Wanted : Integer) : IPCB_ObjectClass;
     Var
         Iter : IPCB_BoardIterator;
         Cls, Hit : IPCB_ObjectClass;
@@ -396,7 +402,7 @@ Var
     Begin
         Hit := Nil;
         N := 0;
-        Iter := Board.BoardIterator_Create;
+        Iter := Brd.BoardIterator_Create;
         Try
             Iter.AddFilter_ObjectSet(MkSet(eClassObject));
             Iter.AddFilter_LayerSet(AllLayers);
@@ -413,7 +419,7 @@ Var
                 Cls := Iter.NextPCBObject;
             End;
         Finally
-            Board.BoardIterator_Destroy(Iter);
+            Brd.BoardIterator_Destroy(Iter);
         End;
         Result := Hit;
     End;
@@ -426,8 +432,9 @@ Var
     { below would otherwise turn "cannot probe this kind" into "found nothing", }
     { which reads as an empty class and is a silently wrong answer. Counting    }
     { the raises keeps the two distinguishable at the caller.                   }
-    Function CollectMembers(Cls : IPCB_ObjectClass; ObjSet : TSet;
-                            IsComponent : Boolean; Var HitCount : Integer;
+    Function CollectMembers(Brd : IPCB_Board; Cls : IPCB_ObjectClass;
+                            ObjSet : TSet; IsComponent : Boolean;
+                            MaxMembers : Integer; Var HitCount : Integer;
                             Var ProbeErrors : Integer) : String;
     Var
         Iter : IPCB_BoardIterator;
@@ -445,7 +452,7 @@ Var
             Result := '';
             Exit;
         End;
-        Iter := Board.BoardIterator_Create;
+        Iter := Brd.BoardIterator_Create;
         Try
             Iter.AddFilter_ObjectSet(ObjSet);
             Iter.AddFilter_LayerSet(AllLayers);
@@ -463,7 +470,7 @@ Var
                     If Hit Then
                     Begin
                         Inc(HitCount);
-                        If HitCount <= MaxMembersPerKind Then
+                        If HitCount <= MaxMembers Then
                         Begin
                             Nm := '';
                             { Components carry the designator on Name.Text;     }
@@ -484,7 +491,7 @@ Var
                 Item := Iter.NextPCBObject;
             End;
         Finally
-            Board.BoardIterator_Destroy(Iter);
+            Brd.BoardIterator_Destroy(Iter);
         End;
         Result := Acc;
     End;
@@ -495,12 +502,12 @@ Begin
     AnyProbeErrors := False;
     ClassCount := 0;
     Emitted := 0;
-    Try ClassCount := CountClasses; Except ClassCount := 0; End;
+    Try ClassCount := CountClasses(Board); Except ClassCount := 0; End;
 
     For Idx := 0 To ClassCount - 1 Do
     Begin
         ObjClass := Nil;
-        Try ObjClass := ClassAt(Idx); Except End;
+        Try ObjClass := ClassAt(Board, Idx); Except End;
         If ObjClass <> Nil Then
         Begin
             NetCount := 0;
@@ -517,12 +524,12 @@ Begin
             NetErr := 0;
             CompErr := 0;
             PairErr := 0;
-            Nets := CollectMembers(ObjClass, MkSet(eNetObject), False,
-                                   NetCount, NetErr);
-            Comps := CollectMembers(ObjClass, MkSet(eComponentObject), True,
-                                    CompCount, CompErr);
-            Pairs := CollectMembers(ObjClass, MkSet(eDifferentialPairObject),
-                                    False, PairCount, PairErr);
+            Nets := CollectMembers(Board, ObjClass, MkSet(eNetObject), False,
+                                   MaxMembersPerKind, NetCount, NetErr);
+            Comps := CollectMembers(Board, ObjClass, MkSet(eComponentObject), True,
+                                    MaxMembersPerKind, CompCount, CompErr);
+            Pairs := CollectMembers(Board, ObjClass, MkSet(eDifferentialPairObject),
+                                    False, MaxMembersPerKind, PairCount, PairErr);
             If (NetErr > 0) Or (CompErr > 0) Or (PairErr > 0) Then
                 AnyProbeErrors := True;
 
