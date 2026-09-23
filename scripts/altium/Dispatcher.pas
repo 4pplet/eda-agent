@@ -382,6 +382,35 @@ End;
 { workspace, or wait for auto-shutdown.                                      }
 {..............................................................................}
 
+{..............................................................................}
+{ DIAGNOSTIC ENTRY POINT for the Ctrl+Z P0. Parameterless on purpose, so it    }
+{ appears in the Run Script dialog next to StartMCPServer.                     }
+{                                                                              }
+{ Why it exists. On detach TWO things change at once: the polling loop exits   }
+{ AND HideStatusForm runs (see the shutdown path below). Every test so far has }
+{ changed both together, which is why "is it the running script or is it the   }
+{ form" has stayed open. Operator evidence 2026-09-23 already killed the       }
+{ message-starvation theory: Ctrl+Z fails even when the bridge is IDLE, where  }
+{ ProcessMessages runs about every 6 ms.                                       }
+{                                                                              }
+{ This shows the status form and RETURNS IMMEDIATELY. No loop, no script left  }
+{ running, no CAD touched. Then press Ctrl+Z in the editor:                    }
+{   - Undo still broken -> the FORM alone is responsible. VCL Show activates   }
+{     the window, so it becomes Screen.ActiveForm and shortcut dispatch is     }
+{     resolved against a form that has no Undo. Fix is form activation:        }
+{     show without activating, or hand activation straight back to Altium.     }
+{   - Undo fine -> the form is exonerated and the running script owning the    }
+{     thread is the cause. Fix is the flush-on-shutdown mitigation, or the     }
+{     event-driven TTimer dispatch deferred in SHUTDOWN.md.                    }
+{                                                                              }
+{ If the form disappears the moment this returns, that is itself the answer to }
+{ a different question (the VM does not outlive the call) - report it.         }
+{ Close the form by hand afterwards; nothing here registers a stop file.       }
+Procedure ShowStatusFormDiagnostic;
+Begin
+    ShowStatusForm(0);
+End;
+
 Procedure StartMCPServer;
 Var
     StopPath       : String;

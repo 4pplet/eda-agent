@@ -65,6 +65,31 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   guidance until fixed (also in SHARED-PROJECTS.md): never Ctrl+Z while
   attached (use the Edit menu); if pressed anyway, after detach check
   the board and Ctrl+Y back any unwanted reverts before continuing.
+  - **⚠ OPERATOR EVIDENCE 2026-09-23 (Stefan): Ctrl+Z fails with the bridge
+    IDLE too. That settles the starvation question — it is not starvation.**
+    Idle pumps `ProcessMessages` about every 6 ms (see the rates below), which
+    is effectively continuous, and the keystroke still does not land. The
+    message queue is being drained; the problem is **dispatch**, not backlog.
+    Every yield-tuning and poll-interval fix is therefore excluded, and the
+    idle-vs-active discriminator below is answered without needing the bench.
+  - **The remaining ambiguity, and the experiment that ends it.** On detach
+    **two things change at once**: the polling loop exits *and*
+    `HideStatusForm` runs (`Dispatcher.pas`, shutdown path). No test so far has
+    changed only one, which is the whole reason "running script" vs "the form"
+    has stayed open. `ShowStatusForm` takes a `Dummy` parameter, so it is
+    hidden from the Run Script dialog and the form could not be shown without
+    starting the loop.
+    **Added `ShowStatusFormDiagnostic` (parameterless, so it lists next to
+    `StartMCPServer`): shows the form and returns immediately — no loop, no
+    script left running, no CAD touched.** Then press Ctrl+Z in the editor:
+    - **Still broken → the FORM is responsible.** VCL `Show` activates the
+      window, making it `Screen.ActiveForm`, and shortcut dispatch resolves
+      against a form that has no Undo. Fix is activation: show without
+      activating (`SW_SHOWNOACTIVATE`), or return activation to Altium.
+    - **Fine → the form is exonerated**, the running script owning the thread
+      is the cause, and flush-on-shutdown / TTimer dispatch is the path.
+    - If the form vanishes when the call returns, that is its own finding.
+    **This rides the same deploy window as the class and room reads.**
   - **Pump rates measured from the source, 2026-09-23 — and they argue the
     obvious fix is a dead end.** `MCPYield` is exactly
     `Application.ProcessMessages` plus stop checks, and the loop calls it at
