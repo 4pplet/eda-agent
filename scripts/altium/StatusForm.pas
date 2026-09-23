@@ -86,6 +86,19 @@ Const
     SPINNER_FRAMES      = 4;
 
 
+{ Ctrl+Z is deferred while the bridge holds the main thread, and the presses   }
+{ REPLAY as an undo burst when it detaches (TODO P0, cause class established    }
+{ 2026-09-23: idle and minimized both still fail, menu undo works, presses are  }
+{ buffered not swallowed). Until the event-driven redesign lands, the only      }
+{ thing standing between that and a silently reverted board is the operator     }
+{ remembering. This goes in the CAPTION on purpose: the title bar is readable   }
+{ in the taskbar while the form is MINIMIZED, which is exactly when the         }
+{ constraint is easiest to forget. A label inside the form is not.              }
+Function KeyboardWarningSuffix(Dummy : Integer) : String;
+Begin
+    Result := '  ***  NO Ctrl+Z - use Edit menu  ***';
+End;
+
 Procedure RefreshSelectedLabel(Dummy : Integer);
 Var
     P : IProject;
@@ -96,14 +109,15 @@ Begin
     Begin
         lbl_SelectedProject.Caption := 'READ ONLY - no project selected';
         lbl_SelectedProject.Hint := 'Choose a project, then click Use this project.';
-        StatusForm.Caption := 'No project selected - EDA (READ ONLY)';
+        StatusForm.Caption := 'No project selected - EDA (READ ONLY)' + KeyboardWarningSuffix(0);
     End
     Else
     Begin
         lbl_SelectedProject.Caption := 'Selected: ' + ExtractFileName(SelectedPath)
             + #13#10 + 'READ ONLY - hover here for the full path';
         lbl_SelectedProject.Hint := SelectedPath;
-        StatusForm.Caption := ExtractFileName(SelectedPath) + ' - EDA (READ ONLY)';
+        StatusForm.Caption := ExtractFileName(SelectedPath) + ' - EDA (READ ONLY)'
+            + KeyboardWarningSuffix(0);
     End;
 End;
 
@@ -680,7 +694,7 @@ Begin
         Try StatusForm.Top  := NewTop;  Except End;
 
         If Not StatusForm.Visible Then StatusForm.Show;
-        Try StatusForm.Caption := 'EDA Agent MCP'; Except End;
+        Try StatusForm.Caption := 'EDA Agent MCP' + KeyboardWarningSuffix(0); Except End;
         Try lbl_Version.Caption := 'v' + SCRIPT_VERSION; Except End;
         Try pnl_StatusDot.Color := COLOR_ACCENT_GREEN; Except End;
         Try lbl_Status.Caption := 'idle'; Except End;
@@ -693,13 +707,21 @@ Begin
         Begin
             lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
                 + #13#10 + 'Unavailable: edits, saves, output jobs';
+            { Hint only, not Caption: the label is a fixed two-line control     }
+            { from the form resource, so a third caption line would clip and an }
+            { invisible warning is worse than none. Hints expand freely.        }
             lbl_Permissions.Hint := 'Requires an explicitly selected project. '
-                + 'Compile may create cache/report files. Editing permissions are not implemented.';
+                + 'Compile may create cache/report files. Editing permissions are not implemented.'
+                + #13#10 + 'KEYBOARD UNDO IS DEFERRED while this bridge is attached: '
+                + 'Ctrl+Z does nothing now and the presses REPLAY as an undo burst on detach. '
+                + 'Use the Edit menu, which works normally. If you pressed it anyway, '
+                + 'check the board after detaching and Ctrl+Y back any unwanted reverts.';
             { Children have already been DPI-scaled by the native form loader.
               Use their bounds and the scaled button/label gap, not raw pixels. }
             pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height
                 + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height);
-            StatusForm.Caption := 'EDA Agent - selected project (READ ONLY)';
+            StatusForm.Caption := 'EDA Agent - selected project (READ ONLY)'
+                + KeyboardWarningSuffix(0);
             RefreshProjectChoices(Nil);
         End;
         { Non-shared mode retains the DFM's naturally scaled header height. }
