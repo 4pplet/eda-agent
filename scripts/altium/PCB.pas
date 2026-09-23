@@ -342,29 +342,109 @@ End;
 {    proven in this file) and reports what actually came back. Real membership }
 {    is the ground truth, and this is robust to the enum as well as cheaper to }
 {    reason about.                                                             }
+{ NOTE ON STRUCTURE - why this is two passes and an index walk rather than   }
+{ the obvious nested loop. Nothing in this script nests one BoardIterator    }
+{ inside another, and the one proven membership routine                      }
+{ (PCB_AddTestpointsForNetClass) deliberately DESTROYS its class iterator    }
+{ before creating the net iterator it probes with, holding only the class    }
+{ reference across the boundary. That reference stays valid; the iterator is }
+{ what must not overlap. This follows that pattern exactly: count the        }
+{ classes, then for each index re-find that one class, destroy the class     }
+{ iterator, and only then probe. Classes number in the tens, so the repeated }
+{ class walk is free, and no two board iterators are ever live at once.      }
 Function PCB_GetObjectClassesForBoard(Board : IPCB_Board; RequestId : String) : String;
 Const
     MaxMembersPerKind = 400;
 Var
-    ClassIter, MemberIter : IPCB_BoardIterator;
     ObjClass : IPCB_ObjectClass;
-    Obj : IPCB_Primitive;
     JsonItems, Nets, Comps, Pairs, ItemName : String;
-    NetCount, CompCount, PairCount, Count : Integer;
-    FirstClass, Truncated : Boolean;
+    NetCount, CompCount, PairCount, ClassCount, Idx, Emitted : Integer;
+    NetErr, CompErr, PairErr : Integer;
+    IsNetClass, IsSuper, Truncated, AnyProbeErrors : Boolean;
 
-    { Probe one object set and return a JSON array of member names. }
-    Function CollectMembers(Cls : IPCB_ObjectClass; ObjSet : TObjectSet;
-                            Kind : Integer; Var HitCount : Integer) : String;
+    { Count classes on the board. One iterator, created and destroyed here. }
+    Function CountClasses : Integer;
+    Var
+        Iter : IPCB_BoardIterator;
+        Cls : IPCB_ObjectClass;
+        N : Integer;
+    Begin
+        N := 0;
+        Iter := Board.BoardIterator_Create;
+        Try
+            Iter.AddFilter_ObjectSet(MkSet(eClassObject));
+            Iter.AddFilter_LayerSet(AllLayers);
+            Iter.AddFilter_Method(eProcessAll);
+            Cls := Iter.FirstPCBObject;
+            While Cls <> Nil Do
+            Begin
+                Inc(N);
+                Cls := Iter.NextPCBObject;
+            End;
+        Finally
+            Board.BoardIterator_Destroy(Iter);
+        End;
+        Result := N;
+    End;
+
+    { Return the Nth class (0-based), iterator destroyed before returning. }
+    Function ClassAt(Wanted : Integer) : IPCB_ObjectClass;
+    Var
+        Iter : IPCB_BoardIterator;
+        Cls, Hit : IPCB_ObjectClass;
+        N : Integer;
+    Begin
+        Hit := Nil;
+        N := 0;
+        Iter := Board.BoardIterator_Create;
+        Try
+            Iter.AddFilter_ObjectSet(MkSet(eClassObject));
+            Iter.AddFilter_LayerSet(AllLayers);
+            Iter.AddFilter_Method(eProcessAll);
+            Cls := Iter.FirstPCBObject;
+            While Cls <> Nil Do
+            Begin
+                If N = Wanted Then
+                Begin
+                    Hit := Cls;
+                    Break;
+                End;
+                Inc(N);
+                Cls := Iter.NextPCBObject;
+            End;
+        Finally
+            Board.BoardIterator_Destroy(Iter);
+        End;
+        Result := Hit;
+    End;
+
+    { Probe one object set. TSet is the proven parameter type here (see       }
+    { CollectSelectedPCBPrims); TObjectSet is not declared in this host.      }
+    { ProbeErrors matters more than it looks. IsMember is only PROVEN against   }
+    { a net (PCB_AddTestpointsForNetClass); whether this host accepts a         }
+    { component or a differential pair is untested. If it raises, the Except    }
+    { below would otherwise turn "cannot probe this kind" into "found nothing", }
+    { which reads as an empty class and is a silently wrong answer. Counting    }
+    { the raises keeps the two distinguishable at the caller.                   }
+    Function CollectMembers(Cls : IPCB_ObjectClass; ObjSet : TSet;
+                            IsComponent : Boolean; Var HitCount : Integer;
+                            Var ProbeErrors : Integer) : String;
     Var
         Iter : IPCB_BoardIterator;
         Item : IPCB_Primitive;
+        Comp : IPCB_Component;
         Acc, Nm : String;
-        IsFirst : Boolean;
+        IsFirst, Hit : Boolean;
     Begin
         Acc := '';
         IsFirst := True;
         HitCount := 0;
+        ProbeErrors := 0;
+        If Cls = Nil Then
+        Begin
+            Result := '';
+            Exit;
+        End;
         Iter := Board.BoardIterator_Create;
         Try
             Iter.AddFilter_ObjectSet(ObjSet);
@@ -373,22 +453,28 @@ Var
             Item := Iter.FirstPCBObject;
             While Item <> Nil Do
             Begin
+                Hit := False;
                 Try
-                    If Cls.IsMember(Item) Then
+                    Hit := Cls.IsMember(Item);
+                Except
+                    Inc(ProbeErrors);
+                End;
+                Try
+                    If Hit Then
                     Begin
                         Inc(HitCount);
                         If HitCount <= MaxMembersPerKind Then
                         Begin
                             Nm := '';
-                            { Designator for components, Name for nets and pairs. }
-                            If Kind = 1 Then
+                            { Components carry the designator on Name.Text;     }
+                            { nets and differential pairs expose Name directly. }
+                            If IsComponent Then
                             Begin
-                                Try Nm := Item.Name.Text; Except Nm := ''; End;
+                                Comp := Item;
+                                Try Nm := Comp.Name.Text; Except Nm := ''; End;
                             End
                             Else
-                            Begin
                                 Try Nm := Item.Name; Except Nm := ''; End;
-                            End;
                             If Not IsFirst Then Acc := Acc + ',';
                             IsFirst := False;
                             Acc := Acc + '"' + EscapeJsonString(Nm) + '"';
@@ -405,55 +491,67 @@ Var
 
 Begin
     JsonItems := '';
-    FirstClass := True;
-    Count := 0;
     Truncated := False;
+    AnyProbeErrors := False;
+    ClassCount := 0;
+    Emitted := 0;
+    Try ClassCount := CountClasses; Except ClassCount := 0; End;
 
-    ClassIter := Board.BoardIterator_Create;
-    Try
-        ClassIter.AddFilter_ObjectSet(MkSet(eClassObject));
-        ClassIter.AddFilter_LayerSet(AllLayers);
-        ClassIter.AddFilter_Method(eProcessAll);
-
-        ObjClass := ClassIter.FirstPCBObject;
-        While ObjClass <> Nil Do
+    For Idx := 0 To ClassCount - 1 Do
+    Begin
+        ObjClass := Nil;
+        Try ObjClass := ClassAt(Idx); Except End;
+        If ObjClass <> Nil Then
         Begin
-            Try
-                Nets := CollectMembers(ObjClass, MkSet(eNetObject), 0, NetCount);
-                Comps := CollectMembers(ObjClass, MkSet(eComponentObject), 1, CompCount);
-                Pairs := CollectMembers(ObjClass, MkSet(eDifferentialPairObject), 2, PairCount);
+            NetCount := 0;
+            CompCount := 0;
+            PairCount := 0;
+            ItemName := '';
+            IsNetClass := False;
+            IsSuper := False;
 
-                If (NetCount > MaxMembersPerKind) Or (CompCount > MaxMembersPerKind)
-                   Or (PairCount > MaxMembersPerKind) Then Truncated := True;
+            Try ItemName := ObjClass.Name; Except End;
+            Try IsSuper := ObjClass.SuperClass; Except End;
+            Try IsNetClass := (ObjClass.MemberKind = eClassMemberKind_Net); Except End;
 
-                ItemName := '';
-                Try ItemName := ObjClass.Name; Except End;
+            NetErr := 0;
+            CompErr := 0;
+            PairErr := 0;
+            Nets := CollectMembers(ObjClass, MkSet(eNetObject), False,
+                                   NetCount, NetErr);
+            Comps := CollectMembers(ObjClass, MkSet(eComponentObject), True,
+                                    CompCount, CompErr);
+            Pairs := CollectMembers(ObjClass, MkSet(eDifferentialPairObject),
+                                    False, PairCount, PairErr);
+            If (NetErr > 0) Or (CompErr > 0) Or (PairErr > 0) Then
+                AnyProbeErrors := True;
 
-                If Not FirstClass Then JsonItems := JsonItems + ',';
-                FirstClass := False;
+            If (NetCount > MaxMembersPerKind) Or (CompCount > MaxMembersPerKind)
+               Or (PairCount > MaxMembersPerKind) Then Truncated := True;
 
-                JsonItems := JsonItems
-                    + '{"name":"' + EscapeJsonString(ItemName) + '"'
-                    + ',"super_class":' + BoolToJsonStr(ObjClass.SuperClass)
-                    + ',"is_net_class":'
-                    + BoolToJsonStr(ObjClass.MemberKind = eClassMemberKind_Net)
-                    + ',"net_count":' + IntToStr(NetCount)
-                    + ',"component_count":' + IntToStr(CompCount)
-                    + ',"diff_pair_count":' + IntToStr(PairCount)
-                    + ',"nets":[' + Nets + ']'
-                    + ',"components":[' + Comps + ']'
-                    + ',"diff_pairs":[' + Pairs + ']'
-                    + '}';
-                Inc(Count);
-            Except End;
-            ObjClass := ClassIter.NextPCBObject;
+            If JsonItems <> '' Then JsonItems := JsonItems + ',';
+            JsonItems := JsonItems
+                + '{"name":"' + EscapeJsonString(ItemName) + '"'
+                + ',"super_class":' + BoolToJsonStr(IsSuper)
+                + ',"is_net_class":' + BoolToJsonStr(IsNetClass)
+                + ',"net_count":' + IntToStr(NetCount)
+                + ',"component_count":' + IntToStr(CompCount)
+                + ',"diff_pair_count":' + IntToStr(PairCount)
+                + ',"probe_errors":{"nets":' + IntToStr(NetErr)
+                + ',"components":' + IntToStr(CompErr)
+                + ',"diff_pairs":' + IntToStr(PairErr) + '}'
+                + ',"nets":[' + Nets + ']'
+                + ',"components":[' + Comps + ']'
+                + ',"diff_pairs":[' + Pairs + ']'
+                + '}';
+            Inc(Emitted);
         End;
-    Finally
-        Board.BoardIterator_Destroy(ClassIter);
     End;
 
     Result := BuildSuccessResponse(RequestId,
-        '{"object_classes":[' + JsonItems + '],"count":' + IntToStr(Count)
+        '{"object_classes":[' + JsonItems + '],"count":' + IntToStr(Emitted)
+        + ',"classes_seen":' + IntToStr(ClassCount)
+        + ',"any_probe_errors":' + BoolToJsonStr(AnyProbeErrors)
         + ',"member_names_truncated":' + BoolToJsonStr(Truncated)
         + ',"max_members_per_kind":' + IntToStr(MaxMembersPerKind)
         + ',"membership_source":"probed via IsMember; the declared MemberKind is'
