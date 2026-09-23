@@ -90,6 +90,23 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
       is the cause, and flush-on-shutdown / TTimer dispatch is the path.
     - If the form vanishes when the call returns, that is its own finding.
     **This rides the same deploy window as the class and room reads.**
+  - **⚠ A test available TODAY, no deploy needed — run this first.**
+    `ShowStatusFormDiagnostic` needs the new runtime, but activation can be
+    changed on the CURRENT build without it. **Do not close the status form to
+    try this: `StatusFormClose` sets `Running := False`, so closing it stops
+    the bridge and changes both variables again.** Minimizing does not.
+    1. Bridge attached and **idle**. **Minimize** the status form.
+    2. Click into the PCB canvas so Altium certainly has focus.
+    3. Press Ctrl+Z.
+    - **Undo works while minimized → activation is the mechanism.** The form
+      was holding it. Fix is `SW_SHOWNOACTIVATE` / returning activation, and
+      `ShowStatusFormDiagnostic` then just confirms it.
+    - **Undo still dead → the form is NOT holding focus**, since a minimized
+      window is not the active one. That kills the activation theory without
+      a deploy and leaves the running script owning the thread — build
+      flush-on-shutdown and skip the activation work entirely.
+    - Also worth recording: whether Ctrl+Z fails when the PCB canvas was
+      *just clicked*. If it does, the form is demonstrably not where focus is.
   - **Pump rates measured from the source, 2026-09-23 — and they argue the
     obvious fix is a dead end.** `MCPYield` is exactly
     `Application.ProcessMessages` plus stop checks, and the loop calls it at
