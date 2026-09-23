@@ -857,6 +857,22 @@ Begin
     { left it enabled.                                                          }
     Try tmr_Probe.Enabled := False; Except End;
     Try tmr_Spinner.Enabled := False; Except End;
+
+    { tmr_MCP is deliberately LEFT RUNNING for one more tick, which contradicts }
+    { DESIGN section 7's "StatusFormClose must also disable the timer". That    }
+    { note assumed closing FREES the form. It does not here: the pre-redesign   }
+    { teardown called HideStatusForm(0) AFTER this handler had run, in          }
+    { production, without crashing - so the close hides and the controls        }
+    { survive. Setting Action := caHide explicitly would be better still, but   }
+    { caHide is declared nowhere in this host and an undeclared identifier is a }
+    { compile-time fatal, so the VCL default is what we rely on.                }
+    {                                                                           }
+    { Disabling it here would be actively WRONG: FinaliseMCPServer lives in     }
+    { Dispatcher.pas and cannot be called from this file, so no tick would ever }
+    { run it - stranding the session with orphan IPC files and no _session_end. }
+    { Running := False above makes the very next tick finalise, and finalise    }
+    { disables the timer FIRST exactly as section 7 prescribes. Exposure is one }
+    { tick, 10-30 ms, against a form that still exists.                         }
 End;
 
 
