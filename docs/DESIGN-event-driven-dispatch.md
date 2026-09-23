@@ -42,11 +42,22 @@ Reporting elapsed seconds beside the count is deliberate — it makes P2 a rate
 measurement, so "fires but starved" comes back as its own answer rather than
 being scored as a pass.
 
-**If P2 fails**, the timer bridge is dead and the honest position is: keep the
-blocking loop, build flush-on-shutdown as a mitigation (subject to its own
-caveat in TODO — verify with the 5-press count whether buffering is
-message-level or command-level), keep the caption warning, and record that
-keyboard dispatch cannot be fixed from inside a DelphiScript bridge.
+**If P2 fails**, the timer bridge is dead. The fallback is thinner than this
+document originally claimed, so state it accurately:
+
+Flush-on-shutdown **is not available**. It was specified as
+`PeekMessage`/`PM_REMOVE`, and `Project.pas:2145` already records that
+DelphiScript blocks `external` DLL imports — user32 is unreachable, so the
+flush cannot be written here at all. That also retires the 5-press count, which
+existed only to decide whether to build it (TODO P0 carries the full reasoning,
+including why the test would not have discriminated anyway).
+
+What actually remains if P2 fails: keep the blocking loop, keep the caption
+warning, and probe **`Application.OnMessage` via a DFM-loaded
+`TApplicationEvents`** — untested, and the one candidate that needs no external
+import, since Ctrl state can be tracked from the messages themselves. If that
+fails too, the honest conclusion is that keyboard dispatch cannot be fixed from
+inside a DelphiScript bridge, and the operator warning is the permanent answer.
 
 ## 3. Architecture
 

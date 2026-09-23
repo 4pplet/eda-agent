@@ -138,16 +138,43 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
     structure moves into timer ticks, and the shutdown path is the delicate
     part — so scope it deliberately.
 
-  - **Mitigation A, flush queued input on shutdown — cheap, but verify it can
-    work first.** It removes the CAD-corruption hazard (a burst firing into a
-    board) without fixing the keyboard. **Its effectiveness depends on where
-    the buffering lives, which we have not established:** if the presses sit in
-    the Windows message queue, `PeekMessage`/`PM_REMOVE` clears them; if
-    Altium is queueing recognised *commands* rather than raw keys, flushing
-    key messages will not touch them. **Cheap test that settles it: press
-    Ctrl+Z a known number of times (say 5) while attached, detach, and count
-    the undos.** Exactly 5 means faithful queueing — likely command-level, and
-    a message flush may miss it. Fewer or none means message-level.
+  - ~~**Mitigation A, flush queued input on shutdown.**~~ **DEAD as specified —
+    unbuildable, established 2026-09-23 from the repo, no bench time needed.**
+    The mitigation was `PeekMessage`/`PM_REMOVE` over the key messages before
+    the script ends. Every one of those lives in **user32**, and
+    `Project.pas:2145` already records the blocker from the screenshot work:
+    *"DelphiScript blocks `external` DLL imports, so user32/gdi32 calls aren't
+    reachable from a script."* `GetKeyState` is out for the same reason. So the
+    flush cannot be written in this environment at all — it was never gated on
+    *where* the buffering lives.
+    - **Consequence: the 5-press count is demoted from a decision to a
+      curiosity.** It existed only to choose whether to build Mitigation A, and
+      that choice is gone. Do not spend bench time on it. **P2 is now the only
+      thing standing between us and knowing whether this is fixable.**
+    - **Its logic was also weak, worth recording so it is not revived
+      unexamined.** "Exactly 5 means command-level" does not follow: five raw
+      `WM_KEYDOWN` sitting in the thread queue also dispatch as five undos. The
+      "exactly 5" branch is consistent with *both* levels and discriminates
+      nothing. Only *fewer* than 5 would have been informative, by showing
+      coalescing.
+
+  - **Mitigation A', the surviving candidate if P2 fails — `OnMessage` hook,
+    UNTESTED.** Recorded now so a failed P2 does not leave an empty page.
+    VCL's `Application.OnMessage` fires *before* dispatch and takes a `Handled`
+    var param, so swallowing the press is possible without ever removing it
+    from the queue by hand — no user32, no `external`.
+    - **Why it is plausible:** the Ctrl state does not need `GetKeyState`
+      either. The hook sees `WM_KEYDOWN`/`WM_KEYUP` for `VK_CONTROL` ($11) go
+      past, so it can track a `CtrlDown` boolean itself and swallow `VK_Z`
+      ($5A) while that flag is set. Constants as literals, since an undeclared
+      identifier is fatal here.
+    - **Why it may still die:** it needs `TApplicationEvents` to load from the
+      DFM the way `TTimer` does — wiring `OnMessage` at runtime means assigning
+      a procedure reference, which DelphiScript handles badly. The DFM route is
+      the proven one (`tmr_Spinner`, and now `tmr_Probe`), so probe it that way
+      or not at all.
+    - **Do not build this before P2 reports.** If P2 passes, the redesign fixes
+      the keyboard properly and this is unnecessary work on a dead end.
 
   - **Mitigation B, make the hazard visible — trivial, do it regardless.** The
     failure mode needs the operator to *forget* that a press was ignored. The
