@@ -393,6 +393,18 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   CLIENT-SIDE — they need no Pascal and no script deploy window**, because the
   data already comes back in the `nets` and `parameters` payloads. That is the
   cheap half of this list.
+  > **1-4 SHIPPED and verified against a live board 2026-09-23** (companion
+  > PLT-hw `d74f3ec`, suite 149 -> 161). `nets --designator R404` returned both
+  > pins with co-members; `nets --net VEEA` returned all five members;
+  > `nets --designator NOPE` refused with the "check against `bom`" message;
+  > `parameters --designator R218,R404 --fields Value --blank-report` filtered to
+  > two rows while the rollup still covered all 172. **Remaining: 5 (test-point
+  > read, needs Pascal), 6 (venv wrapper), 7 (schema discoverability).**
+  >
+  > Note when reading the rollup: `complete` counts rows with *every*
+  > `--check-fields` filled, so it moves with that list — 62 against
+  > `Value` + `LCSC Part #`, 61 once the default `MRF.Part` is included. Not a
+  > discrepancy; say which field set a number came from.
   1. **`nets --designator U301`: component pin -> net, with the other members
      of each net.** By far the most-used operation of the session — the MCU pin
      map, the CON401 pad table, the strap tracing and the link-pair topology
