@@ -90,7 +90,52 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
       is the cause, and flush-on-shutdown / TTimer dispatch is the path.
     - If the form vanishes when the call returns, that is its own finding.
     **This rides the same deploy window as the class and room reads.**
-  - **⚠ A test available TODAY, no deploy needed — run this first.**
+  - **✅ RESOLVED TO A CAUSE CLASS 2026-09-23 (operator bench, current
+    runtime). The minimize test came back: still dead.** Combined with the
+    other observations, the hypothesis space is now closed:
+
+    | Observation | Eliminates |
+    |---|---|
+    | Fails while **idle** (~6 ms pumping) | Message-queue starvation. Yield tuning, poll intervals — all dead |
+    | Fails while the form is **minimized** | Form activation / `Screen.ActiveForm`. `SW_SHOWNOACTIVATE` and focus-returning fixes — all dead |
+    | **Menu** undo works throughout | The undo command, the action system, and Altium's UI generally. Nothing is frozen |
+    | Presses **replay on detach** | "Swallowed" / consumed. They are **buffered**, faithfully, and flush when the script ends |
+
+    **Cause class: the script owning the main thread defers keyboard-to-command
+    dispatch.** `Application.ProcessMessages` is not a substitute for Altium's
+    own message loop for this path. Nothing about the form, the focus, or the
+    poll rate can fix it — **only not blocking the thread can.**
+
+  - **So the real fix is the event-driven redesign, not a tweak.** Replace the
+    blocking `StartMCPServer` loop with **TTimer-driven dispatch** (already
+    deferred once in SHUTDOWN.md): the script returns, Altium's own message
+    loop runs continuously, and the keyboard behaves normally because nothing
+    is blocked. This is the only option the evidence leaves standing as an
+    actual fix. It is real work — the whole poll/yield/stop/auto-shutdown
+    structure moves into timer ticks, and the shutdown path is the delicate
+    part — so scope it deliberately.
+
+  - **Mitigation A, flush queued input on shutdown — cheap, but verify it can
+    work first.** It removes the CAD-corruption hazard (a burst firing into a
+    board) without fixing the keyboard. **Its effectiveness depends on where
+    the buffering lives, which we have not established:** if the presses sit in
+    the Windows message queue, `PeekMessage`/`PM_REMOVE` clears them; if
+    Altium is queueing recognised *commands* rather than raw keys, flushing
+    key messages will not touch them. **Cheap test that settles it: press
+    Ctrl+Z a known number of times (say 5) while attached, detach, and count
+    the undos.** Exactly 5 means faithful queueing — likely command-level, and
+    a message flush may miss it. Fewer or none means message-level.
+
+  - **Mitigation B, make the hazard visible — trivial, do it regardless.** The
+    failure mode needs the operator to *forget* that a press was ignored. The
+    status form already updates every tick; a permanent, prominent line like
+    "KEYBOARD UNDO DISABLED WHILE ATTACHED - use Edit menu" converts a silent
+    trap into a visible constraint. It does not fix anything and should not
+    delay the redesign, but it costs almost nothing and addresses the half of
+    the failure that is human.
+
+  - ~~**A test available TODAY, no deploy needed — run this first.**~~ **DONE,
+    result above.**
     `ShowStatusFormDiagnostic` needs the new runtime, but activation can be
     changed on the CURRENT build without it. **Do not close the status form to
     try this: `StatusFormClose` sets `Running := False`, so closing it stops
