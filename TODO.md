@@ -115,7 +115,31 @@ either way: stop the bridge before quitting Altium.
     - **Fine → the form is exonerated**, the running script owning the thread
       is the cause, and flush-on-shutdown / TTimer dispatch is the path.
     - If the form vanishes when the call returns, that is its own finding.
-    **This rides the same deploy window as the class and room reads.**
+
+  - **✅ P1 ANSWERED 2026-09-23 (operator, live on the 22p): UNDO WORKS.**
+    `ShowStatusFormDiagnostic` run with no bridge attached; the form was up and
+    the script had returned; a silkscreen nudge in the PcbDoc was undone by
+    **Ctrl+Z normally**. Also settles the sub-question: **the form DID outlive
+    the call that showed it**, so the script VM survives a return — the
+    prerequisite P2 depends on.
+
+    **Two consequences, both load-bearing:**
+    1. **The form is exonerated, and every activation-based fix is DEAD.** Do
+       not build `SW_SHOWNOACTIVATE`, do not hand activation back to Altium, do
+       not touch `FormStyle`/`fsStayOnTop` for this. The form is shown,
+       activated and on top during the passing test. That whole branch is
+       closed — it was the cheap fix, and it is not available.
+    2. **The running script owning the main thread is CONFIRMED as the cause**,
+       not merely the surviving hypothesis. The discrimination is now complete:
+       fails idle (not starvation), fails minimized (not focus), menu undo
+       works (not the action system), presses replay on detach (buffered, not
+       swallowed), and **the form alone is harmless (not the form)**. Nothing
+       is left but "a script holding the thread defers keyboard-to-command
+       dispatch", and the only cure is not holding it.
+
+    **This makes P2 the whole ballgame.** The redesign is no longer one of
+    several candidate fixes; it is the only remaining one that addresses the
+    cause, with the untested `OnMessage` hook as the sole fallback.
   - **✅ RESOLVED TO A CAUSE CLASS 2026-09-23 (operator bench, current
     runtime). The minimize test came back: still dead.** Combined with the
     other observations, the hypothesis space is now closed:
