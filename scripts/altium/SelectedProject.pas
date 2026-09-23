@@ -272,6 +272,8 @@ Begin
         Or (Command = 'pcb.get_unrouted_nets')
         Or (Command = 'pcb.get_layer_primitive_counts')
         Or (Command = 'pcb.get_net_classes')
+        Or (Command = 'pcb.get_object_classes')
+        Or (Command = 'pcb.get_room_rules')
         Or (Command = 'pcb.get_design_rules')
         Or (Command = 'pcb.get_trace_lengths')
         Or (Command = 'pcb.get_selected_objects')
@@ -455,6 +457,15 @@ Begin
             Else If Command = 'pcb.audit_mirrored_text' Then
                 Reply := Audit_FindMirroredPcbTextForBoard(Board, '{}', RequestId)
             Else
+                { DANGER: this is a bare fallback, not a branch for a named    }
+                { command. Any command that passes IsSelectedPcbReadCommand    }
+                { without an explicit branch above lands HERE and silently      }
+                { returns DIFF-PAIR RULES under the caller's requested name -   }
+                { a wrong answer, not an error. When adding a read, add BOTH    }
+                { the allowlist entry and an explicit branch; the allowlist     }
+                { alone is worse than neither. Worth replacing with an explicit }
+                { pcb.get_diff_pair_rules test plus an unknown-command error,   }
+                { but not mid-deploy-window.                                    }
                 Reply := PCB_GetDiffPairRulesForBoard(Board, RequestId);
             If ExtractJsonValue(Reply, 'success') <> 'true' Then
             Begin
