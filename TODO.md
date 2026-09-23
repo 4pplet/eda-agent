@@ -129,8 +129,22 @@ either way: stop the bridge before quitting Altium.
        not touch `FormStyle`/`fsStayOnTop` for this. The form is shown,
        activated and on top during the passing test. That whole branch is
        closed — it was the cheap fix, and it is not available.
+    **Honest weighting of what P1 added** (operator raised it, and it is a fair
+    challenge): undo has always worked with nothing attached, so the *new*
+    state here was narrow — the form shown, activated and on top **without the
+    script running**, which had never been possible before because
+    `ShowStatusForm`'s `Dummy` parameter hides it from the Run Script dialog.
+    And the activation theory was already implausible from the earlier
+    minimized result, since a minimized window is not the active one. So the
+    Ctrl+Z half of P1 converted a strong inference into a direct measurement
+    rather than discovering anything. **The half that was genuinely
+    load-bearing is the other one: the form outlived the call**, which was a
+    listed open outcome and is the precondition P2 would have been meaningless
+    without.
+
     2. **The running script owning the main thread is CONFIRMED as the cause**,
-       not merely the surviving hypothesis. The discrimination is now complete:
+       now by direct elimination rather than inference. The discrimination is
+       complete:
        fails idle (not starvation), fails minimized (not focus), menu undo
        works (not the action system), presses replay on detach (buffered, not
        swallowed), and **the form alone is harmless (not the form)**. Nothing
