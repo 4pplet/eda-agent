@@ -106,6 +106,20 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
     own message loop for this path. Nothing about the form, the focus, or the
     poll rate can fix it — **only not blocking the thread can.**
 
+  - **Feasibility checked 2026-09-23 before scoping the redesign.**
+    `StatusForm.dfm` is a real Delphi form resource and the form already binds
+    handlers by name (`StatusFormClose`), so **a TTimer can be added as a form
+    component with its `OnTimer` bound the same way** — which matters, because
+    creating a timer and assigning an event handler purely at runtime is not
+    something DelphiScript can be relied on to do. There is no `TTimer`
+    anywhere in the project today, so this is new ground.
+    **Consequence for scoping: the redesign touches the .dfm, not only Pascal**,
+    and every local the loop carries across iterations (`IdleCount`,
+    `CurrentSleep`, `LastActivityMs`, `ActiveTickCount`, `HadRequest`,
+    `LoopFailed`) has to become module state that survives between ticks. The
+    post-loop shutdown block becomes a separate finalise path triggered when
+    `Running` goes false. **Design it before coding it** — the shutdown path is
+    the delicate part and already has its own P0 section above.
   - **So the real fix is the event-driven redesign, not a tweak.** Replace the
     blocking `StartMCPServer` loop with **TTimer-driven dispatch** (already
     deferred once in SHUTDOWN.md): the script returns, Altium's own message
