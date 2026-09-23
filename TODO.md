@@ -120,6 +120,15 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
     post-loop shutdown block becomes a separate finalise path triggered when
     `Running` goes false. **Design it before coding it** — the shutdown path is
     the delicate part and already has its own P0 section above.
+  - **DESIGN WRITTEN 2026-09-23:
+    [docs/DESIGN-event-driven-dispatch.md](docs/DESIGN-event-driven-dispatch.md)**
+    — architecture, the state-migration table, re-entrancy guard, finalise
+    order, and what could make it worse. **Gated on a staged prerequisite: P1
+    (does a form outlive the call that showed it) is free and already rides
+    this deploy window via `ShowStatusFormDiagnostic`; P2 (does a TTimer on
+    that form still FIRE after the return) is the real gate.** If P2 fails the
+    timer bridge is dead and the honest fallback is the blocking loop plus
+    flush-on-shutdown. Do not code past the gate.
   - **So the real fix is the event-driven redesign, not a tweak.** Replace the
     blocking `StartMCPServer` loop with **TTimer-driven dispatch** (already
     deferred once in SHUTDOWN.md): the script returns, Altium's own message
