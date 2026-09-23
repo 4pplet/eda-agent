@@ -799,22 +799,49 @@ End;
 {                                                                            }
 { Nothing here touches CAD, writes a stop file, or starts the poll loop.     }
 Procedure StartTimerProbe(Dummy : Integer);
+Var
+    Armed : Boolean;
 Begin
     ShowStatusForm(0);
     ProbeTickCount := 0;
     ProbeStartMs   := GetTickCount;
-    Try
-        mmo_Log.Lines.Insert(0, 'P2 probe armed - interval '
-            + IntToStr(PROBE_INTERVAL_MS) + ' ms, cap '
-            + IntToStr(PROBE_MAX_TICKS) + ' ticks. Caption shows the count.');
-    Except End;
+
+    { Read Enabled BACK rather than trusting the assignment. Everything here   }
+    { is wrapped in Try/Except, so a missing or unloadable tmr_Probe would     }
+    { otherwise fail silently and leave the caption reading 'armed' forever -  }
+    { which the runbook interprets as "the timer never fires, the redesign is  }
+    { dead". A tooling failure must not be able to masquerade as an            }
+    { engineering verdict, so the two outcomes get different captions.         }
+    Armed := False;
     Try
         tmr_Probe.Interval := PROBE_INTERVAL_MS;
         tmr_Probe.Enabled  := True;
+        Armed := tmr_Probe.Enabled;
     Except End;
-    Try
-        StatusForm.Caption := 'P2 PROBE  armed' + KeyboardWarningSuffix(0);
-    Except End;
+
+    If Armed Then
+    Begin
+        Try
+            mmo_Log.Lines.Insert(0, 'P2 probe armed - interval '
+                + IntToStr(PROBE_INTERVAL_MS) + ' ms, cap '
+                + IntToStr(PROBE_MAX_TICKS) + ' ticks. Caption shows the count.');
+        Except End;
+        Try
+            StatusForm.Caption := 'P2 PROBE  armed' + KeyboardWarningSuffix(0);
+        Except End;
+    End
+    Else
+    Begin
+        Try
+            mmo_Log.Lines.Insert(0, 'P2 probe FAILED TO ARM - tmr_Probe is '
+                + 'missing or would not enable. This is NOT a P2 result; '
+                + 'check that StatusForm.dfm carries the tmr_Probe object.');
+        Except End;
+        Try
+            StatusForm.Caption := 'P2 PROBE  FAILED TO ARM - not a result'
+                + KeyboardWarningSuffix(0);
+        Except End;
+    End;
 End;
 
 
