@@ -422,6 +422,30 @@ def register_pcb_tools(mcp):
         return result
 
     @mcp.tool()
+    async def pcb_get_object_classes() -> dict[str, Any]:
+        """Get every object class on the active PCB, with resolved membership.
+
+        Answers what pcb_get_net_classes cannot: whether a differential-pair or
+        component class exists and what is actually in it. Membership is probed
+        with IPCB_ObjectClass.IsMember against nets, components and differential
+        pairs, because MemberCount/MemberName[] are not exposed in DelphiScript.
+
+        The declared MemberKind is reported only as "is_net_class": the
+        component and differential-pair kind constants are undeclared in this
+        DelphiScript host, and referencing one is a compile-time failure. Class
+        membership is therefore reported from what probing actually returned,
+        not from the declared kind.
+
+        Returns:
+            Dictionary with "object_classes" (each with name, super_class,
+            is_net_class, per-kind counts and member name arrays), "count",
+            and "member_names_truncated" when a class exceeded the name cap.
+        """
+        bridge = get_bridge()
+        result = await bridge.send_command_async("pcb.get_object_classes", {})
+        return result
+
+    @mcp.tool()
     async def pcb_create_net_class(
         name: str,
         nets: str,

@@ -419,6 +419,8 @@ Begin
                 Reply := PCB_GetLayerPrimitiveCountsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_net_classes' Then
                 Reply := PCB_GetNetClassesForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_object_classes' Then
+                Reply := PCB_GetObjectClassesForBoard(Board, RequestId)
             Else If Command = 'pcb.get_design_rules' Then
                 Reply := PCB_GetDesignRulesForBoard(Board, RequestId)
             Else If Command = 'pcb.get_board_statistics' Then

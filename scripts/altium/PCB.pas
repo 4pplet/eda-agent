@@ -319,6 +319,162 @@ Begin
 End;
 
 {..............................................................................}
+{ PCB_GetObjectClasses - EVERY class kind, with resolved membership            }
+{..............................................................................}
+
+{ Why this exists alongside PCB_GetNetClasses: that one reports net classes    }
+{ only, and reports no members. A caller asking "does the MIPI differential-   }
+{ pair class exist, and does it hold the five pairs?" could not be answered at }
+{ all, and had to be inferred indirectly from the design rules.                }
+{                                                                              }
+{ Two DelphiScript constraints shape this, both verified against this file:    }
+{                                                                              }
+{ 1. MemberCount / MemberName[] are not exposed on IPCB_ObjectClass (see the   }
+{    note on PCB_GetNetClassesForBoard). But IsMember(Obj) IS available and is }
+{    already used by PCB_AddTestpointsForNetClass, so membership is resolved   }
+{    by probing candidate objects rather than by asking the class.             }
+{ 2. Only eClassMemberKind_Net is referenced anywhere in this script.          }
+{    eClassMemberKind_Component and eClassMemberKind_DifferentialPair are NOT, }
+{    and an undeclared constant is a COMPILE-TIME failure in DelphiScript that }
+{    would take the whole dispatcher down. So the declared kind is never used  }
+{    to decide what to probe: every class is probed against all three object   }
+{    sets (eNetObject / eComponentObject / eDifferentialPairObject, all three  }
+{    proven in this file) and reports what actually came back. Real membership }
+{    is the ground truth, and this is robust to the enum as well as cheaper to }
+{    reason about.                                                             }
+Function PCB_GetObjectClassesForBoard(Board : IPCB_Board; RequestId : String) : String;
+Const
+    MaxMembersPerKind = 400;
+Var
+    ClassIter, MemberIter : IPCB_BoardIterator;
+    ObjClass : IPCB_ObjectClass;
+    Obj : IPCB_Primitive;
+    JsonItems, Nets, Comps, Pairs, ItemName : String;
+    NetCount, CompCount, PairCount, Count : Integer;
+    FirstClass, Truncated : Boolean;
+
+    { Probe one object set and return a JSON array of member names. }
+    Function CollectMembers(Cls : IPCB_ObjectClass; ObjSet : TObjectSet;
+                            Kind : Integer; Var HitCount : Integer) : String;
+    Var
+        Iter : IPCB_BoardIterator;
+        Item : IPCB_Primitive;
+        Acc, Nm : String;
+        IsFirst : Boolean;
+    Begin
+        Acc := '';
+        IsFirst := True;
+        HitCount := 0;
+        Iter := Board.BoardIterator_Create;
+        Try
+            Iter.AddFilter_ObjectSet(ObjSet);
+            Iter.AddFilter_LayerSet(AllLayers);
+            Iter.AddFilter_Method(eProcessAll);
+            Item := Iter.FirstPCBObject;
+            While Item <> Nil Do
+            Begin
+                Try
+                    If Cls.IsMember(Item) Then
+                    Begin
+                        Inc(HitCount);
+                        If HitCount <= MaxMembersPerKind Then
+                        Begin
+                            Nm := '';
+                            { Designator for components, Name for nets and pairs. }
+                            If Kind = 1 Then
+                            Begin
+                                Try Nm := Item.Name.Text; Except Nm := ''; End;
+                            End
+                            Else
+                            Begin
+                                Try Nm := Item.Name; Except Nm := ''; End;
+                            End;
+                            If Not IsFirst Then Acc := Acc + ',';
+                            IsFirst := False;
+                            Acc := Acc + '"' + EscapeJsonString(Nm) + '"';
+                        End;
+                    End;
+                Except End;
+                Item := Iter.NextPCBObject;
+            End;
+        Finally
+            Board.BoardIterator_Destroy(Iter);
+        End;
+        Result := Acc;
+    End;
+
+Begin
+    JsonItems := '';
+    FirstClass := True;
+    Count := 0;
+    Truncated := False;
+
+    ClassIter := Board.BoardIterator_Create;
+    Try
+        ClassIter.AddFilter_ObjectSet(MkSet(eClassObject));
+        ClassIter.AddFilter_LayerSet(AllLayers);
+        ClassIter.AddFilter_Method(eProcessAll);
+
+        ObjClass := ClassIter.FirstPCBObject;
+        While ObjClass <> Nil Do
+        Begin
+            Try
+                Nets := CollectMembers(ObjClass, MkSet(eNetObject), 0, NetCount);
+                Comps := CollectMembers(ObjClass, MkSet(eComponentObject), 1, CompCount);
+                Pairs := CollectMembers(ObjClass, MkSet(eDifferentialPairObject), 2, PairCount);
+
+                If (NetCount > MaxMembersPerKind) Or (CompCount > MaxMembersPerKind)
+                   Or (PairCount > MaxMembersPerKind) Then Truncated := True;
+
+                ItemName := '';
+                Try ItemName := ObjClass.Name; Except End;
+
+                If Not FirstClass Then JsonItems := JsonItems + ',';
+                FirstClass := False;
+
+                JsonItems := JsonItems
+                    + '{"name":"' + EscapeJsonString(ItemName) + '"'
+                    + ',"super_class":' + BoolToJsonStr(ObjClass.SuperClass)
+                    + ',"is_net_class":'
+                    + BoolToJsonStr(ObjClass.MemberKind = eClassMemberKind_Net)
+                    + ',"net_count":' + IntToStr(NetCount)
+                    + ',"component_count":' + IntToStr(CompCount)
+                    + ',"diff_pair_count":' + IntToStr(PairCount)
+                    + ',"nets":[' + Nets + ']'
+                    + ',"components":[' + Comps + ']'
+                    + ',"diff_pairs":[' + Pairs + ']'
+                    + '}';
+                Inc(Count);
+            Except End;
+            ObjClass := ClassIter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(ClassIter);
+    End;
+
+    Result := BuildSuccessResponse(RequestId,
+        '{"object_classes":[' + JsonItems + '],"count":' + IntToStr(Count)
+        + ',"member_names_truncated":' + BoolToJsonStr(Truncated)
+        + ',"max_members_per_kind":' + IntToStr(MaxMembersPerKind)
+        + ',"membership_source":"probed via IsMember; the declared MemberKind is'
+        + ' reported as is_net_class only, because the other kind constants are'
+        + ' undeclared in DelphiScript"}');
+End;
+
+Function PCB_GetObjectClasses(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetObjectClassesForBoard(Board, RequestId);
+End;
+
+{..............................................................................}
 { PCB_CreateNetClass - Create a net class from a list of net names            }
 { Params: name=<class_name>, nets=<comma-separated net names>                }
 {..............................................................................}
@@ -12933,6 +13089,7 @@ Begin
         'bind_pad_nets':           Result := PCB_BindPadNets(Params, RequestId);
         'delete_nets':             Result := PCB_DeleteNets(Params, RequestId);
         'get_net_classes':         Result := PCB_GetNetClasses(Params, RequestId);
+        'get_object_classes':      Result := PCB_GetObjectClasses(Params, RequestId);
         'create_net_class':        Result := PCB_CreateNetClass(Params, RequestId);
         'get_design_rules':        Result := PCB_GetDesignRules(Params, RequestId);
         'get_rule_properties':     Result := PCB_GetRuleProperties(Params, RequestId);

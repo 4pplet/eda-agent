@@ -378,11 +378,31 @@ read address `0x78` and no end/abort log. Details are in the shutdown log below.
   ForBoard-pattern candidates for the next script deploy window):
   1. **Rooms read (`pcb.get_rooms`)**: rule 10 scopes routing to Room
      `CON401_ESCAPE`; no tool can verify a room exists or its extents.
-  2. **Object-classes read**: the "MIPI diff-pair class not found"
-     diagnosis had to go indirectly through the rules read; extend the
-     net-classes read to all class kinds (diff-pair classes with pair
-     membership, component classes) so class existence/membership is one
-     call.
+  2. ~~**Object-classes read**~~ **WRITTEN 2026-09-23, NOT YET DEPLOYED OR
+     QUALIFIED.** `PCB_GetObjectClassesForBoard` in `scripts/altium/PCB.pas`,
+     registered on both dispatch paths, exposed as `pcb_get_object_classes`,
+     with the client subcommand `objectclasses` in companion PLT-hw
+     (`--designator` filters by class name and refuses with the list of
+     classes present).
+     - **Two DelphiScript constraints drove the design, both verified against
+       the existing file rather than assumed.** `MemberCount`/`MemberName[]`
+       are unavailable — but `IsMember(Obj)` is, and
+       `PCB_AddTestpointsForNetClass` already uses it, so membership is
+       **probed** rather than asked for. And only `eClassMemberKind_Net` is
+       referenced anywhere in the script: `eClassMemberKind_Component` and
+       `..._DifferentialPair` are **not**, and an undeclared constant is a
+       **compile-time failure that would take the whole dispatcher down**. So
+       the declared kind never decides what to probe — every class is probed
+       against all three object sets (all three proven in-file) and reports
+       what actually came back.
+     - **What qualification must check, since none of this is testable
+       offline** (the simulator does not model object classes, so only the
+       client-side summariser has unit tests — 5 of them): that the script
+       still **compiles**; that `pcb.get_object_classes` returns the five MIPI
+       pairs once that class exists; that a board with **no** classes returns
+       `count: 0` rather than erroring; and the per-class probe cost on a real
+       board, since it is O(classes x objects) — 172 components and 114 nets
+       should be trivial, but measure rather than assume.
   3. **Component bounds in placements**: centers-only today; adding
      per-component bounding boxes would enable client-side overlap and
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
