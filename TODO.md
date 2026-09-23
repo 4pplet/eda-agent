@@ -140,6 +140,36 @@ either way: stop the bridge before quitting Altium.
     **This makes P2 the whole ballgame.** The redesign is no longer one of
     several candidate fixes; it is the only remaining one that addresses the
     cause, with the untested `OnMessage` hook as the sole fallback.
+
+  - **✅ P2 ANSWERED 2026-09-23, SAME SESSION: THE TIMER FIRES. The redesign is
+    buildable and `docs/DESIGN-event-driven-dispatch.md` §3–§7 are unblocked.**
+    `ShowStatusFormTimerProbe` armed a 1 s `TTimer` and returned; it kept
+    ticking with no script running. Measured **externally** rather than by eye,
+    by sampling the form's window caption — `GetWindowText` against another
+    process reads the cached caption without sending a message, so the probe
+    could not be perturbed or hung by the act of measuring it:
+    - **1.00 ticks/s**, 40 ticks over 40.0 s of wall clock — exactly the
+      configured interval, not merely "firing".
+    - **While MINIMIZED**, which is the state Ctrl+Z fails in, so the timer
+      path is unaffected by the thing that breaks the keyboard path.
+    - **No drift or starvation:** the form's own elapsed counter advanced 40 s
+      against 40 s external. Had it fired but been starved, this is where it
+      would have shown, and it is why the probe reports elapsed beside count.
+    - **Self-bounding verified:** stopped exactly at the 120-tick cap and the
+      caption stayed frozen across a further 25 s.
+
+    **Both P0s now have one shared fix with its prerequisite met.** Keyboard
+    dispatch is deferred because a script holds the thread (P1), and a timer
+    can carry the work without holding it (P2). The `OnMessage` fallback
+    (Mitigation A′) is no longer needed and should not be built.
+
+    **Still required before merging the rework**, and not excused by P2: the
+    §6 re-entrancy guard, §8's consecutive-failure counter, the
+    `StatusFormClose` teardown ordering (already landed), and a full native
+    acceptance pass — every existing acceptance result was obtained against the
+    polling loop, so this is a new execution model, not a diff.
+
+    **P3 is the only prerequisite left.**
   - **✅ RESOLVED TO A CAUSE CLASS 2026-09-23 (operator bench, current
     runtime). The minimize test came back: still dead.** Combined with the
     other observations, the hypothesis space is now closed:

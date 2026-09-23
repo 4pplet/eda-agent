@@ -21,6 +21,36 @@ dispatch.** `Application.ProcessMessages` is not a substitute for Altium's own
 message loop on that path. Only *not blocking the thread* fixes it — which is
 exactly what this redesign does. Two P0s, one piece of work.
 
+## ✅ 2026-09-23: P1 and P2 BOTH PASS — §3 onward is unblocked
+
+**P2, the gate on this entire document, passes.** `ShowStatusFormTimerProbe`
+armed a 1 s `TTimer` and returned; the timer kept firing with no script
+running. Measured externally by sampling the form's window caption
+(`GetWindowText` against another process reads the cached caption without
+sending a message, so the measurement cannot hang Altium or perturb what it
+measures):
+
+| | |
+|---|---|
+| Rate | **1.00 ticks/s** — 40 ticks over 40.0 s wall clock, exactly the configured interval |
+| Window state | **MINIMIZED** — the same state in which Ctrl+Z fails |
+| Drift | The form's own elapsed counter advanced 40 s against 40 s of external wall clock: **no starvation, no drift** |
+| Self-stop | Halted exactly at the 120-tick cap and stayed frozen across a further 25 s |
+
+**P1 passed the same session:** Ctrl+Z worked normally with the form shown and
+the script returned, so the form is exonerated *and* the VM demonstrably
+outlives the call. Both prerequisites in §2 are therefore satisfied.
+
+**What this licenses:** §3–§7 may be built. The timer model works on this host.
+**What it does not license:** skipping §8's re-entrancy guard, the
+consecutive-failure counter, or the fresh acceptance pass — a passing P2 says
+the mechanism exists, not that the migration is correct.
+
+**P3 remains open** and is now the only prerequisite left: close the form while
+a probe is ticking, and re-run the shutdown probe. Note §8 has already been
+corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
+today", not "clean".
+
 ## 2. Hard prerequisite — do not write §3 until this passes
 
 SHUTDOWN.md already states it: *"First verify callbacks survive startup
