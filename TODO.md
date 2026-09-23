@@ -170,6 +170,24 @@ either way: stop the bridge before quitting Altium.
     polling loop, so this is a new execution model, not a diff.
 
     **P3 is the only prerequisite left.**
+
+  - **BEFORE-baseline recorded on `2026.09.23.1` (operator, 2026-09-23), the
+    revision the rework will be compared against.** With the bridge attached:
+    **Ctrl+Z does nothing; on detach every buffered press fires at once, and
+    the keyboard works normally again immediately afterwards.** Unchanged from
+    the 09-14 observation, so the new runtime altered nothing here — which is
+    what makes it a usable baseline rather than just a re-confirmation.
+    - **Acceptance criterion for the rework, stated now so it cannot be
+      softened later:** with the bridge attached, a Ctrl+Z press must undo
+      *at that moment*, and detaching must produce **no burst at all**. "Fewer
+      undos on detach" is a fail, not progress.
+    - **The failure mode is real and it bit during this very test:** the
+      22p `PcbDoc` was clean in git and reading `pcb_modified: false` at 18:16,
+      and was modified on disk at 19:13 during the Ctrl+Z run. A burst plus a
+      save is how deferred keypresses become committed board changes. This is
+      the concrete cost the operator warning exists to prevent, and it argues
+      for keeping CAD committed before any bridge session, not just before
+      deliberate Ctrl+Z tests.
   - **✅ RESOLVED TO A CAUSE CLASS 2026-09-23 (operator bench, current
     runtime). The minimize test came back: still dead.** Combined with the
     other observations, the hypothesis space is now closed:
