@@ -11,7 +11,7 @@ The `.1` named-profile observations remain in [the shutdown log](SHUTDOWN.md).
 
 **Direct quit while the bridge runs:** three consecutive quits under timer
 dispatch (2026-09-24) produced no access violation, where the previous build
-reproduced one reliably — see [the shutdown log](SHUTDOWN.md) for which builds
+reproduced one reliably; see [the shutdown log](SHUTDOWN.md) for which builds
 those were, deliberately not repeated here so this document names exactly one
 version. `FinaliseMCPServer` does not run on an Altium exit, so no
 `_session_end` is written: Altium tears the script engine down without a final

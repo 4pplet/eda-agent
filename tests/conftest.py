@@ -381,6 +381,31 @@ def _isolate_workspace_pointer(tmp_path_factory):
 
 
 def pytest_configure(config):
+    # FAIL FAST when pytest-asyncio is absent.
+    #
+    # MEASURED 2026-09-24: without it, pyproject's `asyncio_mode = "auto"`
+    # is an unrecognised ini option and every `async def` test fails with
+    # "async def functions are not natively supported" - 276 failures
+    # across 40 modules on this repo. pytest says so only as a
+    # PytestConfigWarning buried in the warnings summary, so the visible
+    # signal is a wall of red in unrelated modules that reads exactly like
+    # a real regression. It cost ~25 minutes and a bisect to identify as a
+    # missing declared dev dependency (pyproject: "pytest-asyncio>=0.21").
+    #
+    # A missing test dependency must not be able to masquerade as broken
+    # code. This turns it into one line naming the fix.
+    # Checking the plugin directly, not the ini value: when the plugin is
+    # absent the option is unregistered, so config.getini("asyncio_mode")
+    # would itself raise and bury the real message.
+    if not config.pluginmanager.hasplugin("asyncio"):
+        raise pytest.UsageError(
+            "pytest-asyncio is NOT installed, but pyproject sets "
+            "asyncio_mode = \"auto\". Every async test would fail with "
+            "'async def functions are not natively supported', which looks "
+            "like a code regression and is not one. Install the declared "
+            "dev dependency:\n"
+            '    python -m pip install "pytest-asyncio>=0.21"')
+
     config.addinivalue_line(
         "markers",
         "network: test genuinely needs the internet; exempt from the "

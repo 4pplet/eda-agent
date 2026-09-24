@@ -38,7 +38,7 @@ nor prove safety of every command handler's own UI yields. If quitting while
 running still crashes, investigate host lifecycle integration/event-driven
 dispatch instead of adding sleeps or swallowing more exceptions.
 
-## 2026-09-24: the AV did not reproduce under timer dispatch — three quits
+## 2026-09-24: the AV did not reproduce under timer dispatch, across three quits
 
 The 2026-09-08 investigation below ended by recommending "event-driven dispatch
 instead of adding sleeps". That was built (see
@@ -47,7 +47,7 @@ stopped reproducing.
 
 | Quit | Script | Error dialog | `_session_end` | Orphan IPC files |
 |---|---|---|---|---|
-| baseline | `2026.09.23.1` | **AV, reliably** | no | — |
+| baseline | previous build | **AV, reliably** | no | not recorded |
 | #1 | `2026.09.24.2` | none, operator-confirmed | no | 0 |
 | #2 | `2026.09.24.3` | none, operator-confirmed | no | 0 |
 | #3 | `2026.09.24.4` | *operator confirmation pending* | no | 0 |
@@ -55,7 +55,7 @@ stopped reproducing.
 **What changed:** the blocking poll loop is gone. Nothing sleeps and nothing
 calls `Application.ProcessMessages`; each timer tick services one request and
 returns. The 2026-09-08 note above guessed the AV came from "querying host
-state after script/project teardown has begun" — under timer dispatch there is
+state after script/project teardown has begun"; under timer dispatch there is
 no long-lived call frame alive at teardown to do that querying.
 
 **`FinaliseMCPServer` does not run on an Altium exit, and that is not a
@@ -67,7 +67,7 @@ is what the marker would have been evidence *for*.
 
 **The caveat worth keeping:** "did not reproduce" over three trials is weaker
 than "fixed". The baseline reproduced reliably, so three clean quits is a real
-change in behaviour — but the native object lifetime that produced the original
+change in behaviour, but the native object lifetime that produced the original
 AV was never identified, only avoided.
 
 ## Normal shutdown (all projects)
