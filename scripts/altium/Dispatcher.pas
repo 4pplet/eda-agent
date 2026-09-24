@@ -711,7 +711,10 @@ Begin
         If MCPTimerObj = Nil Then MCPTimerObj := TTimer.Create(Nil);
         MCPTimerObj.Enabled  := False;
         MCPTimerObj.Interval := IntervalMs;
-        MCPTimerObj.OnTimer  := tmr_MCPTimer;
+        { @ is required: without it DelphiScript CALLS tmr_MCPTimer instead of }
+        { taking its address, and the call is invalid because the handler needs}
+        { a Sender - reported as "Invalid procedure usage" (2026-09-24).       }
+        MCPTimerObj.OnTimer  := @tmr_MCPTimer;
         MCPTimerObj.Enabled  := True;
         Result := MCPTimerObj.Enabled;
     Except End;
