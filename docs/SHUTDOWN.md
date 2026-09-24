@@ -50,7 +50,7 @@ stopped reproducing.
 | baseline | previous build | **AV, reliably** | no | not recorded |
 | #1 | `2026.09.24.2` | none, operator-confirmed | no | 0 |
 | #2 | `2026.09.24.3` | none, operator-confirmed | no | 0 |
-| #3 | `2026.09.24.4` | *operator confirmation pending* | no | 0 |
+| #3 | `2026.09.24.4` | none, operator-confirmed | no | 0 |
 
 **What changed:** the blocking poll loop is gone. Nothing sleeps and nothing
 calls `Application.ProcessMessages`; each timer tick services one request and
@@ -65,10 +65,17 @@ down without granting a final tick. Detach writes it every time
 orphan `request_`/`response_`/`progress_` files across all three quits, which
 is what the marker would have been evidence *for*.
 
+**Status: this P0 is CLOSED** as of quit #3, operator-confirmed 2026-09-24.
+Three consecutive quits with the bridge attached, no error dialog in any of
+them, against a baseline that reproduced the access violation reliably.
+
 **The caveat worth keeping:** "did not reproduce" over three trials is weaker
-than "fixed". The baseline reproduced reliably, so three clean quits is a real
-change in behaviour, but the native object lifetime that produced the original
-AV was never identified, only avoided.
+than "fixed". Three clean quits is a real change in behaviour, but the native
+object lifetime that produced the original AV was never identified, only
+avoided. If the AV ever returns, this is the note that says where to look:
+something reacquired a host object after teardown began, and timer dispatch
+removed the long-lived call frame that used to do it rather than fixing the
+lifetime itself.
 
 ## Normal shutdown (all projects)
 

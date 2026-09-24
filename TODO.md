@@ -255,11 +255,30 @@ either way: stop the bridge before quitting Altium.
       - **Do not close this P0 on one quit.** The AV is a race against
         Altium's teardown ordering and a 10 ms tick can miss the window on any
         given run. Repeat the quit 2-3 times before claiming anything.
-      - If it does hold, the likely reason is simply that the script no longer
-        holds the main thread through teardown - the same root cause as the
-        Ctrl+Z P0, fixed by the same change, which is what
-        DESIGN-event-driven-dispatch.md section 1 predicted when it said "two
-        P0s, one piece of work".
+      - **✅ QUIT #3, 2026-09-24, script `2026.09.24.4`: THE SHUTDOWN P0 IS
+        CLOSED.** Operator confirmed no error dialog (*"was there an error
+        dialog when Altium exited? - no"*). Session opened 14:08:52 with
+        `_tick_first` 38 ms later, served requests until 14:26:54, then the log
+        stops. **0 orphan IPC files.** Three consecutive quits, on three
+        runtimes, against a baseline that reproduced the AV reliably. The bar
+        set two entries above - "repeat the quit 2-3 times" - is met.
+      - **The missing `_session_end` is explained and is NOT a defect.**
+        Altium tears the script engine down without granting a final tick, so
+        the finaliser cannot run on exit. It runs on every Detach
+        (`reason=stop-requested`, observed the same day at 14:08:30). Nothing
+        leaks: zero orphan `request_`/`response_`/`progress_` files across all
+        three quits, which is the property the marker would have been evidence
+        *for*. Graceful teardown on exit is not achievable from inside the
+        script and is not worth further work.
+      - The reason it holds is the one predicted: the script no longer holds
+        the main thread through teardown - the same root cause as the Ctrl+Z
+        P0, fixed by the same change, which is what
+        DESIGN-event-driven-dispatch.md section 1 meant by "two P0s, one piece
+        of work".
+      - **Residual risk, recorded not hidden:** "did not reproduce over three
+        trials" is weaker than "fixed". The native object lifetime behind the
+        original AV was never identified, only avoided. If it returns, look for
+        something reacquiring a host object after teardown begins.
     - **P3 is still NOT done** - closing the *form* with its X while ticks run
       is a narrower case than quitting Altium and has not been exercised.
     - **Qualification is INCOMPLETE.** Gate 4's compiled reads (`nets`,
