@@ -28,6 +28,8 @@ Var
     MCPLoopFailed        : Boolean;   { was LoopFailed, read by finalise       }
     MCPInTick            : Boolean;   { re-entrancy guard, section 6           }
     MCPFaultStreak       : Integer;   { consecutive tick faults, section 8     }
+    MCPTickCount         : Integer;   { ticks since arm; the first one is      }
+                                      { logged, see tmr_MCPTimer              }
     { ActiveTickCount and I are deliberately GONE: the first only rationed      }
     { ProcessMessages calls and the second drove the Sleep sub-loop. Neither    }
     { call exists any more, and not calling them is the entire fix.             }
@@ -484,7 +486,7 @@ End;
 {..............................................................................}
 Procedure FinaliseMCPServer(Dummy : Integer);
 Begin
-    Try tmr_MCP.Enabled := False; Except End;
+    DisableMCPTimer(0);
     Running := False;
 
     If Not MCPLoopFailed Then
@@ -534,6 +536,19 @@ Begin
     MCPInTick := True;
     Try
         Try
+            { Log the FIRST tick and nothing after. Under timer dispatch a      }
+            { handler that never binds produces a form that is up, a session    }
+            { that logged _session_start, and total silence - indistinguishable }
+            { by eye from a dozen other failures. This one line separates       }
+            { "armed but never fired" from "firing and something else is        }
+            { wrong", which is the first question to ask of any tick problem.   }
+            Inc(MCPTickCount);
+            If MCPTickCount = 1 Then
+                Try
+                    AppendLog(FormatLogStamp(0) + ',0,_tick_first,interval='
+                        + IntToStr(MCPCurrentInterval));
+                Except End;
+
             If Not Running Then
             Begin
                 FinaliseMCPServer(0);
@@ -623,10 +638,7 @@ Begin
 
             { Adaptive pacing survives as an INTERVAL change, which is strictly }
             { better than sleeping: the thread is genuinely free between ticks. }
-            Try
-                If tmr_MCP.Interval <> MCPCurrentInterval Then
-                    tmr_MCP.Interval := MCPCurrentInterval;
-            Except End;
+            SetMCPTimerInterval(MCPCurrentInterval);
 
             { A clean tick clears the streak, so only CONSECUTIVE faults count. }
             MCPFaultStreak := 0;
@@ -658,6 +670,7 @@ Begin
     MCPLoopFailed := False;
     MCPInTick := False;
     MCPFaultStreak := 0;
+    MCPTickCount := 0;
     If Not MCPHostAvailable(0) Then Exit;
 
     InitDefaultConfig(0);
@@ -698,17 +711,12 @@ Begin
     { ARM AND RETURN. Returning is the fix: Altium's own message loop resumes,  }
     { nothing holds the thread, and the keyboard behaves normally. Everything   }
     { the loop used to do now happens in tmr_MCPTimer.                          }
-    Try
-        tmr_MCP.Interval := MCPCurrentInterval;
-        tmr_MCP.Enabled  := True;
-    Except End;
-
-    { Read Enabled back rather than trusting the assignment - the same trap the }
-    { P2 probe hit. Everything here is wrapped in Try/Except, so a missing or   }
-    { unloadable tmr_MCP would otherwise leave a session that has logged        }
-    { _session_start, set Running := True and will never serve a request: a     }
-    { bridge that looks up and is dead. Fail loudly instead.                    }
-    If Not tmr_MCP.Enabled Then
+    { ArmMCPTimer returns whether the timer is ACTUALLY enabled afterwards,     }
+    { read back rather than assumed - the same trap the P2 probe hit. Without   }
+    { that check a missing control leaves a session that logged _session_start, }
+    { set Running := True, and will never serve a request: a bridge that looks  }
+    { up and is dead. Fail loudly instead.                                      }
+    If Not ArmMCPTimer(MCPCurrentInterval) Then
     Begin
         MCPLoopFailed := True;
         MCPStopReason := 'timer-arm-failed';

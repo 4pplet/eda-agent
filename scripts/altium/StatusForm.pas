@@ -680,6 +680,45 @@ Begin
 End;
 
 
+{ MCP timer accessors =======================================================  }
+{                                                                              }
+{ tmr_MCP carries the whole bridge under timer dispatch, but it is armed and    }
+{ paced from Dispatcher.pas - and a DFM control identifier is only in scope in  }
+{ the .pas PAIRED WITH THE .dfm. Touching tmr_MCP from Dispatcher.pas compiles  }
+{ nowhere: "Undeclared identifier: tmr_MCP" (hit live 2026-09-23, and the form  }
+{ itself loaded fine, which is what makes it a scope problem rather than a bad  }
+{ DFM). This is precisely why Dispatcher.pas has always reached the form        }
+{ through UpdateStatsLine / ShowStatusForm / HideStatusForm and never through a }
+{ control. These three keep that rule intact.                                   }
+
+{ Returns whether the timer is ACTUALLY enabled afterwards, read back rather    }
+{ than assumed - a missing control would otherwise leave a session that logged  }
+{ _session_start and will never serve a request.                                }
+Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
+Begin
+    Result := False;
+    Try
+        tmr_MCP.Interval := IntervalMs;
+        tmr_MCP.Enabled  := True;
+        Result := tmr_MCP.Enabled;
+    Except End;
+End;
+
+Procedure DisableMCPTimer(Dummy : Integer);
+Begin
+    Try tmr_MCP.Enabled := False; Except End;
+End;
+
+{ Adaptive pacing: the interval replaces the old Sleep. Only written when it   }
+{ changes, so a steady state is not re-assigning the property every tick.      }
+Procedure SetMCPTimerInterval(IntervalMs : Integer);
+Begin
+    Try
+        If tmr_MCP.Interval <> IntervalMs Then tmr_MCP.Interval := IntervalMs;
+    Except End;
+End;
+
+
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin
     Try
@@ -873,6 +912,10 @@ Begin
     { Running := False above makes the very next tick finalise, and finalise    }
     { disables the timer FIRST exactly as section 7 prescribes. Exposure is one }
     { tick, 10-30 ms, against a form that still exists.                         }
+    {                                                                           }
+    { The one-way visibility is also why this cannot be solved by calling       }
+    { finalise from here: Dispatcher.pas may call into StatusForm.pas, never    }
+    { the reverse.                                                              }
 End;
 
 
