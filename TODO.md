@@ -822,6 +822,47 @@ either way: stop the bridge before quitting Altium.
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
      2026-09-14 (338393c), no Pascal change needed.
+- [ ] **Expose the DRC RUNNER, and report which rules a run actually checked.**
+  Two halves, and the second is the one that matters.
+  - **The runner.** `PCB_RunDRCForBoard` was split on 2026-09-24 and then
+    REVERTED unbuilt, deliberately: the split alone does nothing, and
+    committing it would have made source `2026.09.24.4` differ from the
+    deployed `2026.09.24.4`, which is precisely the stale-compile hazard the
+    version pin exists to catch. Redo it as one complete change - split, both
+    `SelectedProject.pas` gates, `PCB_READ_COMMANDS` (cap is **100** here, not
+    the reader's 200), the tool and a `rundrc` subcommand - when it is
+    actually going to be deployed. Honesty is already fixed: `drc_confirmed`
+    is report FRESHNESS as of `2026.09.24.4`.
+  - **Policy note to settle first:** a DRC run writes a `.DRC` report into the
+    project folder and **marks the PcbDoc modified** (measured 2026-09-24:
+    `pcb_modified` went true after the operator's native run). That is the
+    same class as `erc`, which compiles and is already permitted, but it does
+    stretch what "selected-project-read-only" covers. Operator call.
+  - **THE RULE-COVERAGE GAP, and it is the more valuable half.** MEASURED
+    2026-09-24: a fresh native DRC returned 220 violations and **`RoutingVias`
+    appeared ZERO times in the report** - it was not enabled in the run. So an
+    absent violation means "not checked", not "compliant", and the violation
+    objects alone cannot tell the two apart. This is the same shape as the
+    `zero_is_not_a_pass` trap one level up: a clean-looking result that is
+    actually silence.
+    - **Baseline from that run, 220 total, for comparison after stage 6:**
+      95 Minimum Solder Mask Sliver, 89 Silk To Solder Mask Clearance, 15 Net
+      Antennae, 12 Un-Routed Net (GND, expected - pours not started), 7 Hole
+      Size, 1 Silk To Silk, 1 Board Outline Clearance. Clearance, Width,
+      Short-Circuit, Hole-To-Hole, Power Plane, Modified Polygon and Height
+      all returned 0.
+      - **The 7 Hole Size violations (3.5mm > 2.54mm) are the PCB MOUNTING
+        HOLES** (operator, 2026-09-24). Expected, not a defect; the stock
+        2.54 mm max is what is wrong, not the holes. Either scope a rule
+        exception or accept them as known - do not chase them.
+      - **1 Board Outline Clearance collision is NOT explained** and is worth
+        a look before the order.
+    - The `.DRC` report DOES list every rule processed with its count
+      (`Processing Rule : Clearance Constraint (Gap=0.15mm) (All),(All)` then
+      `Rule Violations :0`), so the fix is to parse it alongside the violation
+      objects and return `rules_checked`. Until that exists, **never read a
+      zero from `violations` as a pass without checking the report by hand.**
+
 - [x] **Native DRC violation read — BUILT 2026-09-24, awaiting its deploy
   window.** Shipped as `pcb.get_clearance_violations` / `bridge_read violations`
   in script `2026.09.24.3`. It turned out to be **wiring, not new code**:
