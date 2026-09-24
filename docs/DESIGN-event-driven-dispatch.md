@@ -51,6 +51,49 @@ a probe is ticking, and re-run the shutdown probe. Note §8 has already been
 corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
 today", not "clean".
 
+## ⛔ 2026-09-24: §3–§7 ARE WRITTEN AND CANNOT BE WIRED. Parked on branch `timer-dispatch`
+
+The code exists and is lint-clean. **The timer cannot be connected to its
+handler in this file layout**, and four compile attempts closed every route.
+This is not a coding problem; it is a structural one, and §9's sequencing was
+wrong to treat wiring as trivial.
+
+| Route | Result |
+|---|---|
+| Handler in `Dispatcher.pas`, timer as a **DFM component** | `Undeclared identifier: tmr_MCP` — a DFM control is in scope only in the `.pas` paired with the `.dfm` |
+| Handler in `Dispatcher.pas`, **DFM names the handler** | Binds to **nothing, silently**. Timer enables, `_session_start` logs, no tick ever runs. A DFM event resolves against the paired unit's procedures, like a real Delphi DFM against published methods |
+| Timer created in code, `OnTimer := tmr_MCPTimer` | `Invalid procedure usage` — DelphiScript **calls** the identifier instead of referencing it |
+| Same, `OnTimer := @tmr_MCPTimer` | `Expression expected but @ found` — **`@` is not a supported operator** |
+
+**Runtime event assignment is unavailable, and the DFM route requires the
+handler to live in `StatusForm.pas`.** It cannot: it calls
+`ProcessSingleRequest`, and `Main.pas` states the rule outright — *"the Altium
+project compiles files in DesignN order and a callee must come earlier than its
+caller."*
+
+### The only remaining path: restructure the file order
+
+The handler must live in `StatusForm.pas`, so everything it calls must be
+defined **before** `StatusForm.pas`. Today the dependency is circular:
+`ProcessSingleRequest` calls `SetInFlight`, `AppendLogLine` and
+`ResetInFlight`, which touch form controls and must stay in `StatusForm.pas`.
+
+**Break the cycle by hoisting the UI calls out of `ProcessSingleRequest`** so
+it returns what happened instead of reporting it, letting the caller — the tick
+handler, in `StatusForm.pas` — do the UI updates. Then the dispatch core moves
+ahead of `StatusForm.pas` and the DFM timer binds normally.
+
+That is surgery on the hot request path and needs its own session, its own
+review, and the full acceptance pass §8 already demands. **Do not attempt it as
+a follow-on to a debugging session.**
+
+### What still stands
+
+P1 and P2 both passed and are not invalidated: a `TTimer` on that form **does**
+fire after the script returns, at 1.00 ticks/s, minimized. The mechanism works;
+only the wiring is blocked. The blocking loop remains in production on `main`,
+and `selected-readonly-classes-20260923` is the qualified runtime.
+
 ## 2. Hard prerequisite — do not write §3 until this passes
 
 SHUTDOWN.md already states it: *"First verify callbacks survive startup

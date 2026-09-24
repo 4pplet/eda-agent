@@ -680,22 +680,6 @@ Begin
 End;
 
 
-{ NOTE: the MCP dispatch timer is deliberately NOT on this form and not in     }
-{ this file. Two DelphiScript scope rules, both learned the hard way on        }
-{ 2026-09-23/24, make the DFM route impossible for it:                         }
-{   1. A DFM control identifier is only in scope in the .pas paired with the   }
-{      .dfm - "Undeclared identifier: tmr_MCP" from Dispatcher.pas, while the  }
-{      form itself loaded fine.                                                }
-{   2. A DFM event handler binds only to a procedure in that same paired .pas, }
-{      exactly as a real Delphi DFM resolves against the form class's          }
-{      published methods. A handler named in the DFM but defined elsewhere     }
-{      binds to NOTHING, SILENTLY: the timer enables, no error is raised, and  }
-{      no tick ever runs.                                                      }
-{ The dispatch handler must call ProcessSingleRequest, which is defined after  }
-{ this file, so it cannot live here - and therefore its timer cannot be a DFM  }
-{ component. Dispatcher.pas owns a TTimer it creates itself. See MCPTimerObj.  }
-{ tmr_Spinner and tmr_Probe stay here because their handlers legitimately do.  }
-
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin
     Try
@@ -873,26 +857,6 @@ Begin
     { left it enabled.                                                          }
     Try tmr_Probe.Enabled := False; Except End;
     Try tmr_Spinner.Enabled := False; Except End;
-
-    { tmr_MCP is deliberately LEFT RUNNING for one more tick, which contradicts }
-    { DESIGN section 7's "StatusFormClose must also disable the timer". That    }
-    { note assumed closing FREES the form. It does not here: the pre-redesign   }
-    { teardown called HideStatusForm(0) AFTER this handler had run, in          }
-    { production, without crashing - so the close hides and the controls        }
-    { survive. Setting Action := caHide explicitly would be better still, but   }
-    { caHide is declared nowhere in this host and an undeclared identifier is a }
-    { compile-time fatal, so the VCL default is what we rely on.                }
-    {                                                                           }
-    { Disabling it here would be actively WRONG: FinaliseMCPServer lives in     }
-    { Dispatcher.pas and cannot be called from this file, so no tick would ever }
-    { run it - stranding the session with orphan IPC files and no _session_end. }
-    { Running := False above makes the very next tick finalise, and finalise    }
-    { disables the timer FIRST exactly as section 7 prescribes. Exposure is one }
-    { tick, 10-30 ms, against a form that still exists.                         }
-    {                                                                           }
-    { The one-way visibility is also why this cannot be solved by calling       }
-    { finalise from here: Dispatcher.pas may call into StatusForm.pas, never    }
-    { the reverse.                                                              }
 End;
 
 
