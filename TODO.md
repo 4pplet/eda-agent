@@ -234,8 +234,11 @@ either way: stop the bridge before quitting Altium.
         on every stable metric matching.
     - **Shutdown, 2026-09-24: the AV did not reproduce, and that is one
       observation, not a fix.** Operator quit Altium with the bridge attached
-      (*"closing altium with mcp running now also seem to work"*). No crash
-      dialog reported, and **0 orphan IPC files** left behind.
+      (*"closing altium with mcp running now also seem to work"*), and
+      confirmed on follow-up that there was **no error dialog at all**
+      (*"no error when closing altium"*). That distinction was asked for
+      deliberately: "no dialog" and "a dialog I dismissed" are different
+      results. **0 orphan IPC files** left behind.
       - **But `FinaliseMCPServer` never ran.** Session 2 opened 12:10:24, last
         entry 12:12:09, then the log simply stops - no `_session_end` and no
         `_session_aborted`. Altium exited and took the script with it before a
