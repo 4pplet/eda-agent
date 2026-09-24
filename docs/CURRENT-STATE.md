@@ -15,13 +15,36 @@ baselines; no installed package/runtime redeployment accompanied publication.
 - Fork: `4pplet/eda-agent`, based on `1b60105cbe0c4bd557007b87bc04dda2fd4ef9a1`.
   This publication checkpoint contains the local integration changes; use its
   actual Git revision, not the old base alone, to reproduce them.
-- Altium 23.3.1; shared scripts `2026.09.08.2`; eight bounded read tools.
-  Runtime: `C:\Users\stefan-local\AppData\Local\PLT\eda-agent\shared\selected-readonly-permissions-20260909`.
-  Manifest SHA-256:
-  `e3dd10e76af730af55700e8e8c9f563c0a24d63ddcf2d382a5c243abff39bd88` (23 files).
+- Altium 23.3.1; shared scripts `2026.09.24.4`; 34 bounded read tools.
+  Runtime: `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-readonly-drc2-20260924`.
+  **Runtime paths are written with the environment variable on purpose.** An
+  absolute path here names one machine's private storage, which
+  `test_no_client_design_data.py` refuses. Use the variable in committed docs;
+  expand it when pasting a command.
+- Historical: scripts `2026.09.08.2` with eight read tools ran from
+  `selected-readonly-permissions-20260909`, manifest SHA-256
+  `e3dd10e76af730af55700e8e8c9f563c0a24d63ddcf2d382a5c243abff39bd88`
+  (23 files). Superseded; kept because the hash identifies that checkpoint.
 - The older `shared/selected-readonly-v1` runtime and named `.1` profiles remain
-  untouched fallbacks. The installed Python wheel is older than the fork source.
-  Committing source does not update the wheel or loaded/deployed scripts.
+  untouched fallbacks. **Committing source does not update the wheel or
+  loaded/deployed scripts**; that separation is the standing trap here.
+- **Wheel reinstalled from source 2026-09-24, fixing a real defect.** Its
+  bundled `eda_agent/scripts/` had drifted to 14 files while
+  `pyproject.toml`'s force-include list names 15: `SelectedProject.pas` was
+  never shipped, yet the bundled `Altium_API.PrjScr` referenced it. So
+  `eda-agent install-scripts` produced a script project that **could not
+  compile**: it pointed at a file the wheel did not contain.
+  - The packaging config was correct all along; the wheel simply predated the
+    line that added the file. `pip install --no-deps --force-reinstall .`
+    fixed it permanently. Python sources were byte-identical before and
+    after, so only data files changed.
+  - **PLT's deployed runtimes were never affected**: `create_shared_runtime.py`
+    copies from the repo checkout and generates its own PrjScr, so it never
+    reads the wheel's bundled scripts. This broke the `install-scripts` path
+    only.
+  - `tests/test_regression.py::TestInstallScriptsIncludesDfm` is what catches
+    this, and it was already failing, invisible inside the 276 failures that
+    a missing `pytest-asyncio` was producing at the time.
 - Generic Python wrappers/provisioning currently live in companion
   [PLT-hw tooling](https://github.com/4pplet/PLT-hw/tree/main/tools/eda-agent).
   Moving them into this package is pending. Until then both checkouts are needed.
