@@ -815,8 +815,20 @@ either way: stop the bridge before quitting Altium.
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
      2026-09-14 (338393c), no Pascal change needed.
-- [ ] **Native DRC violation read (`pcb.get_drc_violations`) — the gap that bites
-  next.** `erc` covers compiled ERC and `audit` covers our six surfacing checks,
+- [x] **Native DRC violation read — BUILT 2026-09-24, awaiting its deploy
+  window.** Shipped as `pcb.get_clearance_violations` / `bridge_read violations`
+  in script `2026.09.24.3`. It turned out to be **wiring, not new code**:
+  `PCB_GetClearanceViolations` had been in `PCB.pas` all along with no
+  `...ForBoard` split and no dispatcher entry — exactly the rooms-read pattern,
+  and exactly what the memory note warns to check before writing anything.
+  **The reader is exposed and the runner is NOT**: `PCB_RunDRC` calls
+  `RunProcess('PCB:DesignRuleCheck')`, which raises the Design Rule Checker
+  modal and once wedged the bridge for 30+ minutes; a modal is unrecoverable
+  from the Python side. The operator runs DRC natively, the bridge reads what
+  it left behind. Three tests hold that line, one of them reading `PCB.pas`
+  itself so the reader stays a read. Original entry follows.
+- [x] ~~**Native DRC violation read (`pcb.get_drc_violations`) — the gap that bites
+  next.**~~ `erc` covers compiled ERC and `audit` covers our six surfacing checks,
   but **nothing reads native DRC**, and the 22p is about to enter the phase where
   DRC is the check that matters: the rules ritual is 1/12 entered, room
   `MIPI_CROSS` is new, and the (b1) lane crossing is routed against clearance,
