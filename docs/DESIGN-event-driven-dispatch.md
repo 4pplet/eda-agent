@@ -1,13 +1,15 @@
 # Design: event-driven dispatch (replacing the blocking poll loop)
 
-**Status: BUILT, wired as an EXPERIMENT, awaiting its first Altium run.**
-§2's prerequisites P1 and P2 both passed (2026-09-23); P3 is still open but is a
-"no worse than today" check, not a gate. §3–§7 are implemented on branch
-`timer-dispatch-dfm` as script `2026.09.24.2`.
+**Status: FIXED AND VERIFIED LIVE 2026-09-24.** The Ctrl+Z P0 is closed.
+Script `2026.09.24.2` ran in Altium against the 22p: with the bridge attached a
+press undid at that moment, and detaching produced **no burst at all** - both
+halves of the acceptance criterion, neither softened. P1, P2 and the ordering
+question all answered; P3 and gate 4's remaining reads are still open, so the
+runtime is **not yet activated**.
 
-**The wiring is not known to work.** It rests on a forward cross-unit call whose
-legality is unverified, and the 2026-09-24 section below retracts an earlier
-claim that it was proven. Read that retraction before relying on anything here.
+The 2026-09-24 section below records the ordering answer: forward cross-unit
+calls **do** resolve across PrjScr documents, so "a callee must come earlier
+than its caller" binds only `build.py`'s concatenated monolith.
 
 ## 1. Why this is now the fix rather than one option
 
@@ -57,11 +59,16 @@ a probe is ticking, and re-run the shutdown probe. Note §8 has already been
 corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
 today", not "clean".
 
-## ⏳ 2026-09-24: the wiring blocker is UNVERIFIED, and this build tests it
+## ✅ 2026-09-24: the wiring blocker was never real - measured, not argued
 
-**Read the correction at the end of this section before citing anything in it.**
-An earlier version of this section declared the blocker disproved. That was
-published on a mistake and is retracted.
+**Result first: the forward call works.** `StatusForm.pas` is document 11 of
+the deployed runtime and `Dispatcher.pas` is 14. The script compiled, started,
+and logged `_tick_first` 67 ms after `_session_start`. So a DFM event handler
+*can* reach the dispatcher, and route 3 was viable the whole time.
+
+The history below is kept because the way this was got wrong twice is worth
+more than the answer. One reading declared the blocker real without testing it;
+a second declared it disproved on counter-examples read from the wrong file.
 
 What is true — the DFM scope rules, each bought with a failed Altium compile:
 

@@ -100,17 +100,24 @@ Const
     PROBE_MAX_TICKS     = 120;
 
 
-{ Ctrl+Z is deferred while the bridge holds the main thread, and the presses   }
-{ REPLAY as an undo burst when it detaches (TODO P0, cause class established    }
-{ 2026-09-23: idle and minimized both still fail, menu undo works, presses are  }
-{ buffered not swallowed). Until the event-driven redesign lands, the only      }
-{ thing standing between that and a silently reverted board is the operator     }
-{ remembering. This goes in the CAPTION on purpose: the title bar is readable   }
-{ in the taskbar while the form is MINIMIZED, which is exactly when the         }
-{ constraint is easiest to forget. A label inside the form is not.              }
+{ THE Ctrl+Z WARNING IS GONE BECAUSE THE BUG IS FIXED, not because it was      }
+{ tidied away. Verified live on 2026-09-24 against 2026.09.24.2: with the      }
+{ bridge attached a press undoes AT THAT MOMENT, and detaching produces no     }
+{ burst at all - both halves of the acceptance criterion recorded on           }
+{ 2026-09-23 before any code was written. Timer dispatch no longer holds the   }
+{ main thread, so keyboard-to-command dispatch is never deferred.              }
+{                                                                              }
+{ Leaving the warning up would have been worse than useless: an operator who   }
+{ learns the caption lies about one thing stops trusting it about the others.  }
+{                                                                              }
+{ IF THE BLOCKING LOOP IS EVER RESTORED, PUT THIS BACK. The caption is where   }
+{ it belongs - readable in the taskbar while the form is MINIMIZED, which is   }
+{ exactly when the constraint is easiest to forget, and a label inside the     }
+{ form is not. Kept as a function rather than deleted so restoring it is one   }
+{ line, and so every call site stays wired.                                    }
 Function KeyboardWarningSuffix(Dummy : Integer) : String;
 Begin
-    Result := '  ***  NO Ctrl+Z - use Edit menu  ***';
+    Result := '';
 End;
 
 Procedure RefreshSelectedLabel(Dummy : Integer);
@@ -842,10 +849,9 @@ Begin
             { invisible warning is worse than none. Hints expand freely.        }
             lbl_Permissions.Hint := 'Requires an explicitly selected project. '
                 + 'Compile may create cache/report files. Editing permissions are not implemented.'
-                + #13#10 + 'KEYBOARD UNDO IS DEFERRED while this bridge is attached: '
-                + 'Ctrl+Z does nothing now and the presses REPLAY as an undo burst on detach. '
-                + 'Use the Edit menu, which works normally. If you pressed it anyway, '
-                + 'check the board after detaching and Ctrl+Y back any unwanted reverts.';
+                + #13#10 + 'Keyboard undo works normally while this bridge is attached '
+                + '(fixed 2026-09-24 by timer dispatch; it was deferred on every '
+                + 'earlier runtime, and the presses replayed as a burst on detach).';
             { Children have already been DPI-scaled by the native form loader.
               Use their bounds and the scaled button/label gap, not raw pixels. }
             pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height

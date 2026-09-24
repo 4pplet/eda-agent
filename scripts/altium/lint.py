@@ -948,8 +948,9 @@ def lint_file(path: str) -> list[Finding]:
     return findings
 
 
-# ONE deliberate forward call, suppressed here because it is an OPEN
-# EXPERIMENT rather than a mistake. Keyed (calling file, called routine).
+# ONE deliberate forward call. VERIFIED WORKING 2026-09-24, so this is a
+# recorded result rather than an open experiment. Keyed (calling file,
+# called routine).
 #
 # tmr_MCPTimer is the DFM-bound OnTimer handler for tmr_MCP, and two
 # DelphiScript scope rules pin it to StatusForm.pas: a DFM control
@@ -960,16 +961,16 @@ def lint_file(path: str) -> list[Finding]:
 # StatusForm.pas, callee must be in Dispatcher.pas, StatusForm.pas comes
 # first. That is a genuine cycle: no ordering satisfies both.
 #
-# So the arrangement is only viable if forward cross-unit calls resolve in
-# the script project - which is UNVERIFIED. It is being settled by running
-# it: if the rule holds, the script fails at start with "Undeclared
-# identifier: MCPTimerTick" and the DFM route is closed for good.
+# THE ANSWER, measured on 2026-09-24 against script 2026.09.24.2 in the
+# deployed runtime (StatusForm.pas document 11, Dispatcher.pas document 14):
+# the script started clean and logged _tick_first 67 ms later. So FORWARD
+# CROSS-UNIT CALLS RESOLVE in the Altium script project, and "a callee must
+# come earlier than its caller" does NOT apply across PrjScr documents.
 #
-# READ THIS BEFORE TREATING THE ENTRY AS SETTLED. While it exists, lint is
-# silent about a call that breaks build.py's monolith for certain and may
-# break the deployed runtime too. Remove it the moment the experiment
-# returns: on a pass, replace it with a comment recording the result; on a
-# failure, the code it exempts has to go anyway.
+# It still applies, absolutely, to build.py's concatenated Altium_MCP.pas,
+# which is one file with no forward declarations. That is the only thing
+# this entry now suppresses, and it is why the rule stays an error for every
+# other call: the monolith is a supported build target.
 #
 # Do NOT add to this list to silence an ordinary forward call. Move the
 # callee instead - every other case in this codebase can be.

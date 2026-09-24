@@ -185,42 +185,49 @@ either way: stop the bridge before quitting Altium.
 
     **P3 is the only prerequisite left.**
 
-  - **⏳ 2026-09-24: THE REWORK IS WIRED AS AN EXPERIMENT. Whether it can work
-    is still unverified — see the retraction below.** Branch
-    `timer-dispatch-dfm`, script `2026.09.24.2`, lint clean, 66 source-level
-    tests green. Awaiting its first Altium run.
-    - **RETRACTION, same day.** This entry first said the ordering blocker was
-      disproved, citing `StatusForm.pas`→`SelectedProject.pas` and
-      `Dispatcher.pas`→`Audit.pas` as live forward calls. **Both citations were
-      wrong.** They were read off the eda-agent checkout's `Altium_API.PrjScr`,
-      which is IDE-only and sets `ReorderDocumentsOnCompile=1`. The shared
-      runtime **generates** a different one (`create_shared_runtime.py:36-41`)
-      with an explicit dependency order ending `... Audit(9),
-      SelectedProject(10), StatusForm.pas(11), StatusForm.dfm(12),
-      SelfTest(13), Dispatcher.pas(14)`. In that order both cited calls are
-      ordinary **backward** calls. The two `StatusForm` ones also sit behind
-      `If Not SELECTED_PROJECT_READ_ONLY Then Exit`, so they never execute in
-      that profile either. Two independent reasons they prove nothing.
-    - **So the premise is UNVERIFIED, not false.** No counter-example, and
-      nothing confirming it. `ReorderDocumentsOnCompile=0` beside a hand-pinned
-      dependency order is weak evidence the original author believed it. This
-      build is the experiment: `Undeclared identifier: MCPTimerTick` at script
-      start means the rule is real and the DFM route is closed **for good** —
-      the cycle is unsatisfiable under a strict order, because `StatusForm.pas`
-      must hold both the handler (needing `Dispatcher`, later) and the UI
-      helpers `Dispatcher` calls (earlier).
-    - **The genuine finding that survives.** There are TWO `Altium_API.PrjScr`
-      files with different document orders, and the repo's is not the one that
-      compiles. `lint.py`'s `PAS_FILES` matches the DEPLOYED order, so its
-      cross-file rule was validating the right thing all along. New test
+  - **✅✅ 2026-09-24: THE Ctrl+Z P0 IS FIXED. Operator-verified live on script
+    `2026.09.24.2`.** Both halves of the acceptance criterion recorded on
+    2026-09-23 before any code was written:
+    - **"a press must undo at that moment"** — operator: *"ctrlz works!"*
+    - **"detaching must produce no burst at all"** — operator: *"nothing moved
+      when detatching, no queded undos since they happen"*
+
+    Nothing was softened. The second half is the one that killed every earlier
+    candidate fix, and it passed clean.
+    - **The ordering question is SETTLED, and the rule does not apply.**
+      `StatusForm.pas` is document 11 of the deployed runtime and
+      `Dispatcher.pas` is 14; the forward call compiled and ran, logging
+      `_tick_first` 67 ms after `_session_start`. So "a callee must come
+      earlier than its caller" is real **only** for `build.py`'s concatenated
+      `Altium_MCP.pas`, never across PrjScr documents. Two earlier answers to
+      this were wrong in opposite directions; the live test cost 30 seconds
+      and should have been run on 2026-09-23.
+    - **Pacing is not a regression.** `pcb.get_object_classes` took 4281 ms
+      under timer dispatch against 3985/3922/3922/4125 ms on the blocking
+      loop — one sample against four, with a dirty board. The runbook's
+      "well under a second" expectation was simply wrong; this read is ~4 s on
+      both runtimes.
+    - **The caption warning is REMOVED** (`KeyboardWarningSuffix` now returns
+      empty, kept as a function so restoring it is one line). An operator who
+      learns the caption lies about one thing stops trusting it about the
+      others. Script bumped to `2026.09.24.3` for that change.
+    - **Guards that earned their place.** `_tick_first` is what turned "is it
+      running?" into a one-line answer, and the DFM-binding test would have
+      caught the silent failure that cost a cycle. Keep both.
+    - **NOT closed by this:** the shutdown crash (quit-while-attached still
+      AVs), and `Library.pas`'s three `Application.ProcessMessages` calls
+      inside handlers, which this test did not exercise.
+    - **Qualification is INCOMPLETE.** Gate 4's compiled reads (`nets`,
+      `erc`, `bom`), `rooms`, `rules --expect` and `audit` have not been run
+      against `2026.09.24.2`, and P3 is still open. `ACTIVE-RUNTIME.txt`
+      therefore still points at `selected-readonly-classes-20260923` and must
+      not be moved until they pass.
+    - **The genuine finding from the earlier wrong turn.** There are TWO
+      `Altium_API.PrjScr` files with different orders and the repo's is not
+      the one that compiles. `lint.py`'s `PAS_FILES` matches the DEPLOYED
+      order, so its cross-file rule was validating the right thing all along.
       `test_manage_shared_runtime.py::DeployedCompileOrderTests` pins the
       deployed sequence and fails if the two lists drift apart.
-    - **The lesson, plainly.** A claim was checked against the wrong artifact
-      and reported as verified, compounding an error that began as folklore in
-      a source comment. Before citing a counter-example: confirm it lives in
-      the artifact that actually runs, and that the code path actually
-      executes. A call guarded by a constant that is False in that profile
-      proves nothing at all.
     - **Guards added, because rule 3 fails SILENTLY.**
       `test_pas_project_consistency.py` now fails if any `StatusForm.dfm`
       handler names a procedure `StatusForm.pas` does not define — verified to
