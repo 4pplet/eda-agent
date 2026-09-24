@@ -3,11 +3,25 @@
 For the latest scoped test results and remaining work, read the
 [current-state handoff](CURRENT-STATE.md) first.
 
-Current local source/shared candidate: `2026.09.08.2`. Its eight-tool read-only
-surface and project dropdown await native qualification; use the companion
+Current local source/shared candidate: **`2026.09.24.4`**, deployed as
+`selected-readonly-drc2-20260924` with a 34-tool read-only surface. Use the
+companion
 [shared acceptance checklist](../../PLT-hw/tools/eda-agent/SHARED-PROJECTS.md).
 The `.1` named-profile observations remain in [the shutdown log](SHUTDOWN.md).
-The selector does not fix direct quit while the bridge runs.
+
+**Direct quit while the bridge runs:** three consecutive quits under timer
+dispatch (2026-09-24) produced no access violation, where the previous build
+reproduced one reliably — see [the shutdown log](SHUTDOWN.md) for which builds
+those were, deliberately not repeated here so this document names exactly one
+version. `FinaliseMCPServer` does not run on an Altium exit, so no
+`_session_end` is written: Altium tears the script engine down without a final
+timer tick. Detach writes it every time. No orphan IPC files in any of the
+three.
+
+**This document's version numbers below are the sole part kept current by a
+test** (`test_version_is_consistent.py`). Treat the rest of the prose as dated:
+the feature checklist is inherited and much of it predates the read-only
+selected-project profile entirely.
 
 The inherited broad feature checklist below is not evidence of qualification or
 permission to enable writes. Run only separately authorized tests on disposable
@@ -153,7 +167,7 @@ objects you can delete afterwards.
 app_ping
 ```
 
-Expect `altium_script_version` = `2026.09.08.1`, `version_match` =
+Expect `altium_script_version` = `2026.09.24.4`, `version_match` =
 `true`, and `mcp_server_version` = `0.5.0`.
 
 Those are two different versions and they fail differently.
