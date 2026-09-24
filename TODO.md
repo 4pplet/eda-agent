@@ -217,11 +217,45 @@ either way: stop the bridge before quitting Altium.
     - **NOT closed by this:** the shutdown crash (quit-while-attached still
       AVs), and `Library.pas`'s three `Application.ProcessMessages` calls
       inside handlers, which this test did not exercise.
+    - **Gate 4 read re-qualification: PASSED 2026-09-24** on script
+      `2026.09.24.2`, board saved (`dirty_doc_count: 0`). Every stable metric
+      matches its baseline exactly: `erc` **187**, `bom` **172**, `rooms`
+      **0**, `rules --expect` **1 matched / 3 mismatched / 8 missing**,
+      `objectclasses` **18 classes, 11 counts_unreliable**,
+      `nets --designator R404` PA0/LNSW[0]. All six `audit` checks ran in
+      78-1437 ms - that is the one exercising `Library.pas`, the path this fix
+      does NOT touch, so it was the one that mattered.
+      - Three audit numbers moved against the **2026-09-14** checkpoint, all
+        downward: via_antennas 16 -> 12, signal_vias_without_return 72 -> 53,
+        pads_near_edge 2 -> 0. That baseline is ten days and a lot of layout
+        old, so these are near-certainly real board changes, not read
+        differences. **A strict A/B - the same board read through the old
+        runtime - was NOT done**; it costs a full script swap. The case rests
+        on every stable metric matching.
+    - **Shutdown, 2026-09-24: the AV did not reproduce, and that is one
+      observation, not a fix.** Operator quit Altium with the bridge attached
+      (*"closing altium with mcp running now also seem to work"*). No crash
+      dialog reported, and **0 orphan IPC files** left behind.
+      - **But `FinaliseMCPServer` never ran.** Session 2 opened 12:10:24, last
+        entry 12:12:09, then the log simply stops - no `_session_end` and no
+        `_session_aborted`. Altium exited and took the script with it before a
+        tick could finalise. So the state moved from "AV + no end log" to "no
+        AV + no end log": the crash symptom is gone, graceful teardown is not
+        achieved.
+      - **Do not close this P0 on one quit.** The AV is a race against
+        Altium's teardown ordering and a 10 ms tick can miss the window on any
+        given run. Repeat the quit 2-3 times before claiming anything.
+      - If it does hold, the likely reason is simply that the script no longer
+        holds the main thread through teardown - the same root cause as the
+        Ctrl+Z P0, fixed by the same change, which is what
+        DESIGN-event-driven-dispatch.md section 1 predicted when it said "two
+        P0s, one piece of work".
+    - **P3 is still NOT done** - closing the *form* with its X while ticks run
+      is a narrower case than quitting Altium and has not been exercised.
     - **Qualification is INCOMPLETE.** Gate 4's compiled reads (`nets`,
-      `erc`, `bom`), `rooms`, `rules --expect` and `audit` have not been run
-      against `2026.09.24.2`, and P3 is still open. `ACTIVE-RUNTIME.txt`
-      therefore still points at `selected-readonly-classes-20260923` and must
-      not be moved until they pass.
+      Gate 4 has now passed (above), but P3 has not run and the shutdown
+      result needs repeating. `ACTIVE-RUNTIME.txt` therefore still points at
+      `selected-readonly-classes-20260923`.
     - **The genuine finding from the earlier wrong turn.** There are TWO
       `Altium_API.PrjScr` files with different orders and the repo's is not
       the one that compiles. `lint.py`'s `PAS_FILES` matches the DEPLOYED
