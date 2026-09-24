@@ -6202,9 +6202,13 @@ End;
 { response says so via drc_triggered / note.                                 }
 {..............................................................................}
 
-Function PCB_GetClearanceViolations(Params : String; RequestId : String) : String;
+{ Split ForBoard/wrapper so the shared selected-project dispatcher can call    }
+{ this against the board it has already resolved and revalidated, rather than  }
+{ letting GetPCBBoardAnywhere wander. Same shape as the trace-lengths and      }
+{ room-rules reads.                                                            }
+Function PCB_GetClearanceViolationsForBoard(Board : IPCB_Board; Params : String;
+                                            RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Violation : IPCB_Violation;
     FilterNet, ViolDesc, ViolName : String;
@@ -6212,7 +6216,6 @@ Var
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
     If Board = Nil Then
     Begin
         Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
@@ -6259,6 +6262,19 @@ Begin
         + '"note":"Existing violations only -- no DRC was run. 0 does not mean '
         + 'the board passes if DRC has never been run on it.",'
         + '"violations":[' + JsonItems + ']}');
+End;
+
+Function PCB_GetClearanceViolations(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetClearanceViolationsForBoard(Board, Params, RequestId);
 End;
 
 {..............................................................................}
