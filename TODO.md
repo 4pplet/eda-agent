@@ -245,6 +245,13 @@ either way: stop the bridge before quitting Altium.
         tick could finalise. So the state moved from "AV + no end log" to "no
         AV + no end log": the crash symptom is gone, graceful teardown is not
         achieved.
+      - **QUIT #2, 2026-09-24, script `2026.09.24.3`: same result.** Operator
+        confirmed the bridge was active at exit and there was no error dialog
+        (*"no error and MCP was active when exiting"*). The session log again
+        stops mid-stream - last entry a `pcb.get_clearance_violations` at
+        13:13:06 - with no `_session_end` and no `_session_aborted`. So the
+        signature is stable across two runtimes and two quits: **no AV, no
+        graceful finalise.**
       - **Do not close this P0 on one quit.** The AV is a race against
         Altium's teardown ordering and a 10 ms tick can miss the window on any
         given run. Repeat the quit 2-3 times before claiming anything.
