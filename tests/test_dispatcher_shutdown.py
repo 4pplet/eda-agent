@@ -160,7 +160,7 @@ class DispatcherShutdownTests(unittest.TestCase):
         in Main.pas AND the pin in the client (PLT-hw
         tools/eda-agent/project_server.py), then update the literal here.
         """
-        self.assertIn("SCRIPT_VERSION = '2026.09.24.1';", source("Main.pas"))
+        self.assertIn("SCRIPT_VERSION = '2026.09.24.2';", source("Main.pas"))
 
 
 if __name__ == "__main__":

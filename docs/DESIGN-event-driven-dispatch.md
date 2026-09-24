@@ -3,7 +3,7 @@
 **Status: BUILT and wired, awaiting its first Altium run.** §2's prerequisites
 P1 and P2 both passed (2026-09-23); P3 is still open but is a "no worse than
 today" check, not a gate. §3–§7 are implemented on branch `timer-dispatch-dfm`
-as script `2026.09.24.1`. See the 2026-09-24 correction below for why the
+as script `2026.09.24.2`. See the 2026-09-24 correction below for why the
 wiring that was declared impossible turned out not to be.
 
 ## 1. Why this is now the fix rather than one option

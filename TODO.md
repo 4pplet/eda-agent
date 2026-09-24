@@ -187,7 +187,7 @@ either way: stop the bridge before quitting Altium.
 
   - **✅ 2026-09-24: THE REWORK IS WIRED. The blocker was a rule we had
     misread, not a limit of the host.** Branch `timer-dispatch-dfm`, script
-    `2026.09.24.1`, lint clean, 64 source-level tests green. Awaiting its
+    `2026.09.24.2`, lint clean, 64 source-level tests green. Awaiting its
     first Altium run.
     - **What was wrong.** The parked `timer-dispatch` branch concluded that a
       DFM event handler "cannot exist" because it would have to call
