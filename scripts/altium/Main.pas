@@ -159,9 +159,19 @@ End;
 { appear in Altium object names, filters, or property strings, so it's         }
 { unambiguous even when a single operation's property list contains '|'.       }
 {                                                                               }
-{ Defined in Main.pas so Library.pas and Generic.pas can both use them,       }
-{ the Altium project compiles files in DesignN order (Main -> ... -> Library   }
-{ -> ... -> Generic) and a callee must come earlier than its caller.           }
+{ Defined in Main.pas so Library.pas and Generic.pas can both use them.       }
+{                                                                              }
+{ This used to claim the Altium project compiles in DesignN order and that a   }
+{ callee must therefore come earlier than its caller. THAT IS A RULE ABOUT A   }
+{ DIFFERENT ARTIFACT. It holds for build.py's concatenated Altium_MCP.pas,     }
+{ which is one file with no forward declarations - and which is gitignored and }
+{ is NOT a document in Altium_API.PrjScr. Across the PrjScr's own documents    }
+{ the order does not matter: StatusForm.pas calls CurrentSelectedProject in    }
+{ SelectedProject.pas (the last document), and ProcessCommand in Dispatcher.pas}
+{ calls HandleAuditCommand in Audit.pas (a later document under either reading }
+{ of the file), both in production. Keeping shared helpers early is still good }
+{ practice and keeps the monolith build honest; it is not a constraint the     }
+{ script project imposes. Mistaking it for one cost the Ctrl+Z fix a week.     }
 {..............................................................................}
 
 Function NextBatchOp(Var Remaining : String) : String;

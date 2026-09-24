@@ -185,6 +185,56 @@ either way: stop the bridge before quitting Altium.
 
     **P3 is the only prerequisite left.**
 
+  - **✅ 2026-09-24: THE REWORK IS WIRED. The blocker was a rule we had
+    misread, not a limit of the host.** Branch `timer-dispatch-dfm`, script
+    `2026.09.24.1`, lint clean, 64 source-level tests green. Awaiting its
+    first Altium run.
+    - **What was wrong.** The parked `timer-dispatch` branch concluded that a
+      DFM event handler "cannot exist" because it would have to call
+      `ProcessSingleRequest`, defined in a later-listed document, and that
+      *"Dispatcher.pas may call into StatusForm.pas, never the reverse."*
+      **Calls across PrjScr documents resolve regardless of order.** Two live
+      proofs in the runtime qualified 2026-09-23: `StatusForm.pas` calls
+      `CurrentSelectedProject` in `SelectedProject.pas`, the **last**
+      document; and `ProcessCommand` in `Dispatcher.pas` calls
+      `HandleAuditCommand` in `Audit.pas`, a later one. Both under either
+      reading of the PrjScr.
+    - **Where the false rule came from.** "A callee must come earlier than its
+      caller" is real — for `build.py`'s concatenated `Altium_MCP.pas`, which
+      is gitignored and is **not** a document in `Altium_API.PrjScr`.
+      `lint.py`'s `PAS_FILES` encodes that concatenation order, which differs
+      from the PrjScr's, which is exactly why neither counter-example ever
+      tripped the linter.
+    - **The avoidable part, plainly.** After the silent-binding failure the
+      next experiment should have been a handler *in* `StatusForm.pas` calling
+      *into* `Dispatcher.pas` — the one combination never tried. Instead two
+      more compile cycles went into runtime event assignment and then into a
+      runtime-created timer. The premise was inherited from a source comment
+      and never checked against the code sitting in front of it, which is the
+      actual lesson: an ordering claim is cheap to verify by grep.
+    - **Guards added, because rule 3 fails SILENTLY.**
+      `test_pas_project_consistency.py` now fails if any `StatusForm.dfm`
+      handler names a procedure `StatusForm.pas` does not define — verified to
+      fail when deliberately broken. `MCPTimerTick` logs `_tick_first`, so
+      "armed but never fired" is distinguishable from "fired and something
+      else broke". `test_dispatcher_shutdown.py` asserts `Dispatcher.pas`
+      contains **zero** `Application.ProcessMessages`.
+    - **`MCPYield` deleted.** Nothing called it under timer dispatch, and it
+      wrapped the file's only message-pump call — an unused helper for the
+      exact operation that causes this P0 is a landmine, not dead weight.
+    - **Residual, NOT fixed and not to be forgotten:** `Library.pas` calls
+      `Application.ProcessMessages` three times inside handlers. Those run
+      *during* a tick and can still defer keyboard dispatch for the duration
+      of a library command. The acceptance test below exercises PCB reads, so
+      **a pass does not clear the library path.** Separate item.
+    - **Follow-up, deliberately not bundled:** `StatusFormClose` still leaves
+      `tmr_MCP` running for one tick and lets that tick finalise, rather than
+      calling `FinaliseMCPServer` directly. Direct calling would now compile —
+      the scope argument that ruled it out was the false one — but finalise
+      calls `HideStatusForm`, so it would hide the form from inside that
+      form's own `OnClose`. Untested re-entrant path; bundling it would
+      confound the one test this deploy exists to run.
+
   - **BEFORE-baseline recorded on `2026.09.23.1` (operator, 2026-09-23), the
     revision the rework will be compared against.** With the bridge attached:
     **Ctrl+Z does nothing; on detach every buffered press fires at once, and

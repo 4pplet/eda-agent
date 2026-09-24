@@ -680,10 +680,12 @@ Begin
 End;
 
 
-{ NOTE: the MCP dispatch timer is deliberately NOT on this form and not in     }
-{ this file. Two DelphiScript scope rules, both learned the hard way on        }
-{ 2026-09-23/24, make the DFM route impossible for it:                         }
-{   1. A DFM control identifier is only in scope in the .pas paired with the   }
+{ MCP dispatch timer =========================================================}
+{                                                                              }
+{ tmr_MCP is a DFM component like tmr_Spinner and tmr_Probe, and everything    }
+{ that touches it is in this file, because of two DelphiScript scope rules     }
+{ learned the hard way on 2026-09-23/24:                                       }
+{   1. A DFM control identifier is in scope ONLY in the .pas paired with the   }
 {      .dfm - "Undeclared identifier: tmr_MCP" from Dispatcher.pas, while the  }
 {      form itself loaded fine.                                                }
 {   2. A DFM event handler binds only to a procedure in that same paired .pas, }
@@ -691,10 +693,59 @@ End;
 {      published methods. A handler named in the DFM but defined elsewhere     }
 {      binds to NOTHING, SILENTLY: the timer enables, no error is raised, and  }
 {      no tick ever runs.                                                      }
-{ The dispatch handler must call ProcessSingleRequest, which is defined after  }
-{ this file, so it cannot live here - and therefore its timer cannot be a DFM  }
-{ component. Dispatcher.pas owns a TTimer it creates itself. See MCPTimerObj.  }
-{ tmr_Spinner and tmr_Probe stay here because their handlers legitimately do.  }
+{                                                                              }
+{ Both rules stand. What was wrong was the conclusion drawn from them - that   }
+{ because the handler must call ProcessSingleRequest, which is in the          }
+{ later-listed Dispatcher.pas, the handler could not live here and the timer   }
+{ could not be a DFM component at all. THAT INFERENCE WAS FALSE. Calls across  }
+{ documents of the script project resolve regardless of document order; this   }
+{ very file already calls CurrentSelectedProject in SelectedProject.pas, the   }
+{ LAST document in Altium_API.PrjScr, and has done so in production all along. }
+{ The ordering rule that was cited applies to build.py's concatenated          }
+{ Altium_MCP.pas, which is gitignored and is not a document in the PrjScr.     }
+{                                                                              }
+{ So the handler is here, it is three lines, and MCPTimerTick in Dispatcher.pas}
+{ does the work.                                                               }
+
+Procedure tmr_MCPTimer(Sender : TObject);
+Begin
+    MCPTimerTick(0);
+End;
+
+{ Arm, disable and re-pace. These live here rather than in Dispatcher.pas only }
+{ because of rule 1 above: they name tmr_MCP.                                  }
+{                                                                              }
+{ ArmMCPTimer reads Enabled BACK instead of assuming the assignment took, the  }
+{ same trap the P2 probe hit. Without it a form that failed to carry tmr_MCP   }
+{ would leave a session that logged _session_start, set Running := True, and   }
+{ will never serve a request - a bridge that looks up and is dead. StartMCPServer}
+{ turns a False here into an explicit timer-arm-failed finalise.               }
+Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
+Begin
+    Result := False;
+    Try
+        tmr_MCP.Enabled  := False;
+        tmr_MCP.Interval := IntervalMs;
+        tmr_MCP.Enabled  := True;
+        Result := tmr_MCP.Enabled;
+    Except End;
+End;
+
+Procedure DisableMCPTimer(Dummy : Integer);
+Begin
+    Try tmr_MCP.Enabled := False; Except End;
+End;
+
+{ Adaptive pacing: the interval replaces the old Sleep. Written only when it   }
+{ changes, so a steady state is not re-assigning the property every tick.      }
+Procedure SetMCPTimerInterval(IntervalMs : Integer);
+Begin
+    Try
+        If tmr_MCP.Interval <> IntervalMs Then
+            tmr_MCP.Interval := IntervalMs;
+    Except End;
+End;
+
 
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin
@@ -883,16 +934,20 @@ Begin
     { caHide is declared nowhere in this host and an undeclared identifier is a }
     { compile-time fatal, so the VCL default is what we rely on.                }
     {                                                                           }
-    { Disabling it here would be actively WRONG: FinaliseMCPServer lives in     }
-    { Dispatcher.pas and cannot be called from this file, so no tick would ever }
-    { run it - stranding the session with orphan IPC files and no _session_end. }
+    { Disabling it here would strand the session: FinaliseMCPServer is what     }
+    { writes _session_end and clears the IPC files, and only a tick reaches it. }
     { Running := False above makes the very next tick finalise, and finalise    }
     { disables the timer FIRST exactly as section 7 prescribes. Exposure is one }
     { tick, 10-30 ms, against a form that still exists.                         }
     {                                                                           }
-    { The one-way visibility is also why this cannot be solved by calling       }
-    { finalise from here: Dispatcher.pas may call into StatusForm.pas, never    }
-    { the reverse.                                                              }
+    { Calling FinaliseMCPServer straight from here WOULD now compile - the      }
+    { one-way-visibility claim this comment used to make was wrong, see the     }
+    { tmr_MCPTimer block above. It is still not done here, for a reason that    }
+    { has nothing to do with scope: finalise calls HideStatusForm, so it would  }
+    { hide the form from inside that form's own OnClose. That may well be fine, }
+    { and it is a tidier teardown, but it is an untested re-entrant path and    }
+    { bundling it with the Ctrl+Z fix would confound the one test this deploy   }
+    { exists to run. Tracked in TODO as a follow-up.                            }
 End;
 
 

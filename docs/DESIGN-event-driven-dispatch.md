@@ -1,7 +1,10 @@
 # Design: event-driven dispatch (replacing the blocking poll loop)
 
-**Status: design for review. No code written.** The prerequisite in §2 must pass
-before any of §3 onward is built.
+**Status: BUILT and wired, awaiting its first Altium run.** §2's prerequisites
+P1 and P2 both passed (2026-09-23); P3 is still open but is a "no worse than
+today" check, not a gate. §3–§7 are implemented on branch `timer-dispatch-dfm`
+as script `2026.09.24.1`. See the 2026-09-24 correction below for why the
+wiring that was declared impossible turned out not to be.
 
 ## 1. Why this is now the fix rather than one option
 
@@ -50,6 +53,79 @@ the mechanism exists, not that the migration is correct.
 a probe is ticking, and re-run the shutdown probe. Note §8 has already been
 corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
 today", not "clean".
+
+## ✅ 2026-09-24: the wiring blocker was a misread rule, not a host limit
+
+On 2026-09-24 this document carried a block saying §3–§7 were *written and could
+not be wired*, listing four closed routes. Three of those four findings are real
+and stand. **The conclusion drawn from them was wrong**, and it cost about a week.
+
+What is true — the DFM scope rules, each bought with a failed Altium compile:
+
+1. A nested routine cannot read the enclosing routine's params or locals
+   (*"Can't access top level variable"*).
+2. A DFM control identifier is in scope **only** in the `.pas` paired with the
+   `.dfm` (*"Undeclared identifier: tmr_MCP"* from `Dispatcher.pas`).
+3. A DFM event handler binds only to a procedure in that same paired `.pas`, and
+   **fails silently** otherwise — timer enables, session starts, no tick, no error.
+4. Runtime event assignment is unavailable: `X.OnTimer := Proc` gives *"Invalid
+   procedure usage"*, `@Proc` gives *"Expression expected but @ found"*.
+
+What was false — the **fifth** premise, which was never tested:
+
+> *"The dispatch handler must call `ProcessSingleRequest`, which is defined after
+> `StatusForm.pas`, so it cannot live there."*
+> *"`Dispatcher.pas` may call into `StatusForm.pas`, never the reverse."*
+
+Calls across the documents of the script project resolve **regardless of document
+order**. Two live proofs, both in the runtime qualified on 2026-09-23:
+
+| Caller | Callee | Position |
+|---|---|---|
+| `StatusForm.pas:121` `CurrentSelectedProject` | `SelectedProject.pas:42` | callee is the **last** document, under both readings of the PrjScr |
+| `Dispatcher.pas:45` `HandleAuditCommand` | `Audit.pas:4422` | callee is later under both readings; every audit command works |
+
+The second is exercised by every `audit` call; the first runs on every status
+refresh in the read-only profile, and on the **Use this project** click the
+operator makes by hand.
+
+**Where the false rule came from.** "A callee must come earlier than its caller"
+is a real rule — about `build.py`'s concatenated `Altium_MCP.pas`, which is one
+file with no forward declarations. That file is gitignored and is **not** one of
+the documents in `Altium_API.PrjScr`. `lint.py`'s `PAS_FILES` encodes the
+concatenation order (`… Audit, SelectedProject, StatusForm, Dispatcher`), which
+is a *different* order from the PrjScr — which is precisely why neither live
+counter-example ever tripped the linter and the contradiction stayed hidden.
+
+**What it cost.** Route 3 was rejected on the strength of this premise without
+the one experiment that would have settled it: a handler *in* `StatusForm.pas`
+calling *into* `Dispatcher.pas`. That combination was never tried. Instead the
+work went into route 4 (runtime assignment, two compile failures) and then into
+a `Dispatcher`-owned `TTimer` created at runtime.
+
+**The wiring that ships.** Route 3, as the rules actually allow:
+
+- `StatusForm.dfm` declares `tmr_MCP` with `OnTimer = tmr_MCPTimer` — rule 2 and
+  rule 3 satisfied, same as `tmr_Spinner` and `tmr_Probe`.
+- `StatusForm.pas` defines `tmr_MCPTimer`, three lines, calling `MCPTimerTick(0)`;
+  plus `ArmMCPTimer` / `DisableMCPTimer` / `SetMCPTimerInterval`, which have to be
+  there because they name `tmr_MCP` (rule 2).
+- `Dispatcher.pas` keeps `MCPTimerTick` and all dispatch state. Exactly **one**
+  call crosses backwards, and it is the three-line shim.
+- `MCPYield` is **deleted**, not left unused: it wrapped the file's only
+  `Application.ProcessMessages`, and an unused helper for the exact operation
+  that causes the P0 is a landmine. A test now asserts zero occurrences.
+
+**Guards added so this class of failure is cheaper next time.** Rule 3 fails
+*silently*, which is what made it expensive. `tests/test_pas_project_consistency.py`
+now fails if any `StatusForm.dfm` handler names a procedure `StatusForm.pas` does
+not define, and `MCPTimerTick` logs `_tick_first` so "armed but never fired" is
+distinguishable from "fired and something else broke".
+
+**Residual, not fixed here:** `Library.pas` still calls
+`Application.ProcessMessages` three times inside handlers. Those run *during* a
+tick and can still defer keyboard dispatch for the duration of a library
+command. Out of scope for this change; recorded in TODO.
 
 ## 2. Hard prerequisite — do not write §3 until this passes
 

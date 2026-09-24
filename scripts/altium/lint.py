@@ -948,6 +948,30 @@ def lint_file(path: str) -> list[Finding]:
     return findings
 
 
+# Calls that are ILLEGAL in the concatenated monolith and CORRECT in the
+# PrjScr script project, keyed (calling file, called routine). Every entry
+# is a call that has to run backwards in build order for a reason no
+# reordering can fix, and every entry breaks build.py's Altium_MCP.pas.
+#
+# tmr_MCPTimer is the only one. It is the DFM-bound OnTimer handler for
+# tmr_MCP, and two DelphiScript scope rules pin it to StatusForm.pas: a DFM
+# control identifier is in scope only in the .pas paired with the .dfm, and
+# a DFM event handler binds only to a procedure in that same file (failing
+# SILENTLY otherwise). The work it dispatches is MCPTimerTick, which needs
+# every Handle*Command in the project and so cannot move earlier. So the
+# handler must be in StatusForm.pas and the callee must be in Dispatcher.pas,
+# and StatusForm.pas is listed first. There is no arrangement that satisfies
+# both the DFM and the concatenation.
+#
+# The cost is explicit: while this entry exists, build.py's monolith cannot
+# serve requests. Deployment is `eda-agent install-scripts`, which copies the
+# PrjScr documents, so nothing shipping is affected. Do not add to this list
+# to silence an ordinary forward call - move the callee instead.
+CROSS_FILE_ORDER_EXEMPT = {
+    ("StatusForm.pas", "mcptimertick"),
+}
+
+
 def _scan_call_order_across_files(targets: list) -> list:
     """Calls that precede their definition IN THE CONCATENATION.
 
@@ -962,9 +986,29 @@ def _scan_call_order_across_files(targets: list) -> list:
     forward declarations and an unresolved identifier is only discovered
     when the line runs.
 
-    Altium compiles the concatenation, so that is what this checks. Line
-    numbers are reported against the ORIGINAL file, since that is where
-    the fix goes.
+    THIS IS A RULE ABOUT THE MONOLITH, NOT ABOUT WHAT ALTIUM RUNS. The
+    line above used to read "Altium compiles the concatenation, so that
+    is what this checks", and that is false: Altium opens
+    Altium_API.PrjScr and compiles the documents it lists, and
+    Altium_MCP.pas is gitignored and is not one of them. Across PrjScr
+    documents the order does not matter. Two live proofs, both in the
+    runtime qualified on 2026-09-23: StatusForm.pas calls
+    CurrentSelectedProject in SelectedProject.pas, the LAST document; and
+    Dispatcher.pas's ProcessCommand calls HandleAuditCommand in Audit.pas,
+    a later document under either reading of the PrjScr. Neither trips
+    this rule only because PAS_FILES happens to order those pairs the
+    other way round - which is exactly how the contradiction stayed
+    hidden, and it cost the Ctrl+Z fix a week of believing a DFM event
+    handler could not reach the dispatcher.
+
+    The rule is kept, as an error, because the monolith is a supported
+    build target and a violation there is a genuine access violation. But
+    a finding here means "this would break build.py's output", NOT "this
+    cannot work" - see CROSS_FILE_ORDER_EXEMPT for the deliberate
+    exception and what it costs.
+
+    Line numbers are reported against the ORIGINAL file, since that is
+    where the fix goes.
     """
     order = []
     for path in targets:
@@ -997,6 +1041,8 @@ def _scan_call_order_across_files(targets: list) -> list:
         for m in call_re.finditer(line):
             key = m.group(1).lower()
             if key == header_key or key in _DELPHI_BUILTINS:
+                continue
+            if (rel, key) in CROSS_FILE_ORDER_EXEMPT:
                 continue
             if pos < def_at[key]:
                 where = order[def_at[key]][0]

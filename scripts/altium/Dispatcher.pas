@@ -29,18 +29,19 @@ Var
     MCPInTick            : Boolean;   { re-entrancy guard, section 6           }
     MCPFaultStreak       : Integer;   { consecutive tick faults, section 8     }
     MCPTickCount         : Integer;   { ticks since arm; the first one is      }
-                                      { logged, see tmr_MCPTimer              }
-    { The dispatch timer, created HERE rather than placed on StatusForm.       }
-    { A DFM event handler binds only to a procedure in the .pas paired with    }
-    { the .dfm, and it fails SILENTLY when it cannot - the timer enables, no   }
-    { error is raised, and no tick ever runs (observed 2026-09-24: an armed    }
-    { session that logged _session_start and then went quiet). The handler     }
-    { must call ProcessSingleRequest and so cannot live in StatusForm.pas, so  }
-    { the timer cannot be a DFM component. Creating it in the same unit as its }
-    { handler keeps the binding inside one file, where it can be assigned      }
-    { directly. Owning it outside the form is also better for teardown: the    }
-    { timer no longer dies with the window it used to sit on.                  }
-    MCPTimerObj          : TTimer;
+                                      { logged, see MCPTimerTick              }
+    { THE TIMER ITSELF IS NOT HERE. tmr_MCP is a DFM component on StatusForm,  }
+    { and everything that touches it - the OnTimer handler, arm, disable and   }
+    { the interval write - lives in StatusForm.pas, because a DFM control      }
+    { identifier is in scope only in the .pas paired with the .dfm and a DFM   }
+    { event handler binds only to a procedure in that same file.               }
+    {                                                                           }
+    { The state stays here, on purpose: StatusForm.pas holds one three-line     }
+    { shim that calls MCPTimerTick below, and this file keeps the dispatch      }
+    { logic it already owned. That shim is the only call that runs "backwards"  }
+    { from StatusForm.pas into this file, which is a deliberately small bet on  }
+    { cross-unit resolution being order-independent - see the header comment on }
+    { MCPTimerTick for why that is now established rather than assumed.         }
     { ActiveTickCount and I are deliberately GONE: the first only rationed      }
     { ProcessMessages calls and the second drove the Sleep sub-loop. Neither    }
     { call exists any more, and not calling them is the entire fix.             }
@@ -397,21 +398,31 @@ Begin
     Result := True;
 End;
 
-Function MCPYield(StopPath : String) : Boolean;
-Begin
-    Result := False;
-    If Not MCPContinuePolling(StopPath) Then Exit;
-    Application.ProcessMessages;
-    { No Sleep, status access or new request before this post-yield check. }
-    Result := MCPContinuePolling(StopPath);
-End;
+{ MCPYield IS DELETED, NOT MERELY UNUSED. It wrapped the one                  }
+{ Application.ProcessMessages call in this file, and under timer dispatch      }
+{ nothing called it any more - but leaving it sitting there is the landmine    }
+{ version of this bug. Pumping the host's message queue from inside a script   }
+{ that holds the main thread is precisely what deferred keyboard-to-command    }
+{ dispatch and made Ctrl+Z replay in a burst on detach. A future edit that     }
+{ "just needs to let the UI breathe" would reach for the helper that was       }
+{ already here and reinstate the P0 without anyone noticing.                   }
+{                                                                              }
+{ There is nothing to yield to now: each tick returns, and Altium pumps its    }
+{ own loop between ticks. tests/test_dispatcher_shutdown.py asserts this file  }
+{ contains ZERO occurrences of Application.ProcessMessages, so the deletion is }
+{ enforced rather than remembered.                                             }
+{                                                                              }
+{ Library.pas still has three of its own, inside handlers. Those run during a  }
+{ tick and remain a residual source of the same deferral for library commands. }
+{ Out of scope here, recorded in TODO.                                          }
 
 {..............................................................................}
-{ Start MCP server, adaptive polling loop.                                  }
+{ Start MCP server.                                                          }
 {                                                                            }
-{ Uses ADAPTIVE POLLING to avoid blocking Altium:                             }
-{   - Active (just processed a request): polls fast (PollIntervalActiveMs)   }
-{   - Idle: polls slow (PollIntervalIdleMs) with extra ProcessMessages calls }
+{ ARMS tmr_MCP and returns. The adaptive pacing that used to be Sleep is now  }
+{ the timer interval:                                                         }
+{   - Active (just processed a request): PollIntervalActiveMs                 }
+{   - Idle: PollIntervalIdleMs after IdleThreshold empty ticks                }
 {   - Auto-shuts down after AutoShutdownMs of inactivity                      }
 {                                                                            }
 { All tunables come from mcp_config.json via LoadMCPConfig at startup.       }
@@ -485,27 +496,8 @@ Begin
     StartTimerProbe(0);
 End;
 
-{ Dispatch-timer control. Defined before the routines that use them; ArmMCPTimer}
-{ has to wait until after tmr_MCPTimer exists, so it lives further down.        }
-
-Procedure DisableMCPTimer(Dummy : Integer);
-Begin
-    Try
-        If MCPTimerObj <> Nil Then MCPTimerObj.Enabled := False;
-    Except End;
-End;
-
-{ Adaptive pacing: the interval replaces the old Sleep. Written only when it   }
-{ changes, so a steady state is not re-assigning the property every tick.      }
-Procedure SetMCPTimerInterval(IntervalMs : Integer);
-Begin
-    Try
-        If MCPTimerObj <> Nil Then
-            If MCPTimerObj.Interval <> IntervalMs Then
-                MCPTimerObj.Interval := IntervalMs;
-    Except End;
-End;
-
+{ DisableMCPTimer, SetMCPTimerInterval and ArmMCPTimer are in StatusForm.pas,  }
+{ with tmr_MCP itself. They are called freely from here.                       }
 
 {..............................................................................}
 { Teardown, reached from every path that ends a session: the stop file or      }
@@ -550,11 +542,28 @@ End;
 { keyboard-to-command dispatch is never deferred and Ctrl+Z reaches Altium at  }
 { the moment it is pressed. Re-introducing either call would restore both P0s. }
 {                                                                              }
-{ Wired from StatusForm.dfm as tmr_MCP.OnTimer. It lives in Dispatcher.pas     }
-{ rather than StatusForm.pas because it calls ProcessSingleRequest and friends,}
-{ which are only defined by this point in the concatenation.                   }
+{ NOT the OnTimer handler. tmr_MCP.OnTimer is bound in StatusForm.dfm to a     }
+{ three-line tmr_MCPTimer in StatusForm.pas, which calls this and nothing      }
+{ else - the DFM resolves handler names only against its paired .pas, so the   }
+{ handler has to be there and the work has to be reachable from there.         }
+{                                                                              }
+{ THAT CALL RUNS BACKWARDS in document order, and it works. StatusForm.pas is  }
+{ document 11 of Altium_API.PrjScr and this file is document 1 (physically the }
+{ 11th section, with StatusForm the 9th) - either way StatusForm.pas is not    }
+{ "before" this one, and the call still resolves. Two independent live proofs  }
+{ of the same thing, both in the runtime qualified on 2026-09-23:              }
+{   - StatusForm.pas calls CurrentSelectedProject, in SelectedProject.pas,     }
+{     the LAST document under both readings of the PrjScr;                     }
+{   - ProcessCommand above calls HandleAuditCommand, in Audit.pas, which is    }
+{     after this file under both readings, and every audit command works.      }
+{ "A callee must come earlier than its caller" is a real rule, but it is a     }
+{ rule about build.py's concatenated Altium_MCP.pas, which is gitignored and   }
+{ is NOT one of the documents in the active PrjScr. It was misread as a rule   }
+{ about the script project, and that misreading is the only reason this        }
+{ handler was previously believed unable to live on the form. See              }
+{ docs/DESIGN-event-driven-dispatch.md.                                        }
 {..............................................................................}
-Procedure tmr_MCPTimer(Sender : TObject);
+Procedure MCPTimerTick(Dummy : Integer);
 Var
     NowMs      : Cardinal;
     HadRequest : Boolean;
@@ -695,32 +704,6 @@ Begin
 End;
 
 
-{ Create the timer if needed, bind the handler, and start it. Defined here     }
-{ rather than beside the other two because it names tmr_MCPTimer, which must   }
-{ already exist at this point in the file.                                      }
-{                                                                              }
-{ The OnTimer assignment is the whole reason this timer is not a DFM component:}
-{ binding it HERE, in the same unit as the handler, is the one arrangement that}
-{ can work. Result is read back from Enabled rather than assumed, so a failure }
-{ to create or bind surfaces as timer-arm-failed instead of a silently dead    }
-{ bridge - which is exactly how the DFM attempt failed on 2026-09-24.          }
-Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
-Begin
-    Result := False;
-    Try
-        If MCPTimerObj = Nil Then MCPTimerObj := TTimer.Create(Nil);
-        MCPTimerObj.Enabled  := False;
-        MCPTimerObj.Interval := IntervalMs;
-        { @ is required: without it DelphiScript CALLS tmr_MCPTimer instead of }
-        { taking its address, and the call is invalid because the handler needs}
-        { a Sender - reported as "Invalid procedure usage" (2026-09-24).       }
-        MCPTimerObj.OnTimer  := @tmr_MCPTimer;
-        MCPTimerObj.Enabled  := True;
-        Result := MCPTimerObj.Enabled;
-    Except End;
-End;
-
-
 Procedure StartMCPServer;
 Begin
     If Running Then Exit;
@@ -769,7 +752,7 @@ Begin
 
     { ARM AND RETURN. Returning is the fix: Altium's own message loop resumes,  }
     { nothing holds the thread, and the keyboard behaves normally. Everything   }
-    { the loop used to do now happens in tmr_MCPTimer.                          }
+    { the loop used to do now happens in MCPTimerTick, off tmr_MCP.OnTimer.     }
     { ArmMCPTimer returns whether the timer is ACTUALLY enabled afterwards,     }
     { read back rather than assumed - the same trap the P2 probe hit. Without   }
     { that check a missing control leaves a session that logged _session_start, }
