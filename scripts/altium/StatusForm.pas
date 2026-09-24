@@ -680,44 +680,21 @@ Begin
 End;
 
 
-{ MCP timer accessors =======================================================  }
-{                                                                              }
-{ tmr_MCP carries the whole bridge under timer dispatch, but it is armed and    }
-{ paced from Dispatcher.pas - and a DFM control identifier is only in scope in  }
-{ the .pas PAIRED WITH THE .dfm. Touching tmr_MCP from Dispatcher.pas compiles  }
-{ nowhere: "Undeclared identifier: tmr_MCP" (hit live 2026-09-23, and the form  }
-{ itself loaded fine, which is what makes it a scope problem rather than a bad  }
-{ DFM). This is precisely why Dispatcher.pas has always reached the form        }
-{ through UpdateStatsLine / ShowStatusForm / HideStatusForm and never through a }
-{ control. These three keep that rule intact.                                   }
-
-{ Returns whether the timer is ACTUALLY enabled afterwards, read back rather    }
-{ than assumed - a missing control would otherwise leave a session that logged  }
-{ _session_start and will never serve a request.                                }
-Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
-Begin
-    Result := False;
-    Try
-        tmr_MCP.Interval := IntervalMs;
-        tmr_MCP.Enabled  := True;
-        Result := tmr_MCP.Enabled;
-    Except End;
-End;
-
-Procedure DisableMCPTimer(Dummy : Integer);
-Begin
-    Try tmr_MCP.Enabled := False; Except End;
-End;
-
-{ Adaptive pacing: the interval replaces the old Sleep. Only written when it   }
-{ changes, so a steady state is not re-assigning the property every tick.      }
-Procedure SetMCPTimerInterval(IntervalMs : Integer);
-Begin
-    Try
-        If tmr_MCP.Interval <> IntervalMs Then tmr_MCP.Interval := IntervalMs;
-    Except End;
-End;
-
+{ NOTE: the MCP dispatch timer is deliberately NOT on this form and not in     }
+{ this file. Two DelphiScript scope rules, both learned the hard way on        }
+{ 2026-09-23/24, make the DFM route impossible for it:                         }
+{   1. A DFM control identifier is only in scope in the .pas paired with the   }
+{      .dfm - "Undeclared identifier: tmr_MCP" from Dispatcher.pas, while the  }
+{      form itself loaded fine.                                                }
+{   2. A DFM event handler binds only to a procedure in that same paired .pas, }
+{      exactly as a real Delphi DFM resolves against the form class's          }
+{      published methods. A handler named in the DFM but defined elsewhere     }
+{      binds to NOTHING, SILENTLY: the timer enables, no error is raised, and  }
+{      no tick ever runs.                                                      }
+{ The dispatch handler must call ProcessSingleRequest, which is defined after  }
+{ this file, so it cannot live here - and therefore its timer cannot be a DFM  }
+{ component. Dispatcher.pas owns a TTimer it creates itself. See MCPTimerObj.  }
+{ tmr_Spinner and tmr_Probe stay here because their handlers legitimately do.  }
 
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin

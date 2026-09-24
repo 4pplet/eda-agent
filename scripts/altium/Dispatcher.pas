@@ -30,6 +30,17 @@ Var
     MCPFaultStreak       : Integer;   { consecutive tick faults, section 8     }
     MCPTickCount         : Integer;   { ticks since arm; the first one is      }
                                       { logged, see tmr_MCPTimer              }
+    { The dispatch timer, created HERE rather than placed on StatusForm.       }
+    { A DFM event handler binds only to a procedure in the .pas paired with    }
+    { the .dfm, and it fails SILENTLY when it cannot - the timer enables, no   }
+    { error is raised, and no tick ever runs (observed 2026-09-24: an armed    }
+    { session that logged _session_start and then went quiet). The handler     }
+    { must call ProcessSingleRequest and so cannot live in StatusForm.pas, so  }
+    { the timer cannot be a DFM component. Creating it in the same unit as its }
+    { handler keeps the binding inside one file, where it can be assigned      }
+    { directly. Owning it outside the form is also better for teardown: the    }
+    { timer no longer dies with the window it used to sit on.                  }
+    MCPTimerObj          : TTimer;
     { ActiveTickCount and I are deliberately GONE: the first only rationed      }
     { ProcessMessages calls and the second drove the Sleep sub-loop. Neither    }
     { call exists any more, and not calling them is the entire fix.             }
@@ -474,6 +485,28 @@ Begin
     StartTimerProbe(0);
 End;
 
+{ Dispatch-timer control. Defined before the routines that use them; ArmMCPTimer}
+{ has to wait until after tmr_MCPTimer exists, so it lives further down.        }
+
+Procedure DisableMCPTimer(Dummy : Integer);
+Begin
+    Try
+        If MCPTimerObj <> Nil Then MCPTimerObj.Enabled := False;
+    Except End;
+End;
+
+{ Adaptive pacing: the interval replaces the old Sleep. Written only when it   }
+{ changes, so a steady state is not re-assigning the property every tick.      }
+Procedure SetMCPTimerInterval(IntervalMs : Integer);
+Begin
+    Try
+        If MCPTimerObj <> Nil Then
+            If MCPTimerObj.Interval <> IntervalMs Then
+                MCPTimerObj.Interval := IntervalMs;
+    Except End;
+End;
+
+
 {..............................................................................}
 { Teardown, reached from every path that ends a session: the stop file or      }
 { application.stop_server, the Detach button, auto-shutdown, and a tick that   }
@@ -659,6 +692,29 @@ Begin
     Finally
         MCPInTick := False;
     End;
+End;
+
+
+{ Create the timer if needed, bind the handler, and start it. Defined here     }
+{ rather than beside the other two because it names tmr_MCPTimer, which must   }
+{ already exist at this point in the file.                                      }
+{                                                                              }
+{ The OnTimer assignment is the whole reason this timer is not a DFM component:}
+{ binding it HERE, in the same unit as the handler, is the one arrangement that}
+{ can work. Result is read back from Enabled rather than assumed, so a failure }
+{ to create or bind surfaces as timer-arm-failed instead of a silently dead    }
+{ bridge - which is exactly how the DFM attempt failed on 2026-09-24.          }
+Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
+Begin
+    Result := False;
+    Try
+        If MCPTimerObj = Nil Then MCPTimerObj := TTimer.Create(Nil);
+        MCPTimerObj.Enabled  := False;
+        MCPTimerObj.Interval := IntervalMs;
+        MCPTimerObj.OnTimer  := tmr_MCPTimer;
+        MCPTimerObj.Enabled  := True;
+        Result := MCPTimerObj.Enabled;
+    Except End;
 End;
 
 

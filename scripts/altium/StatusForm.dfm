@@ -716,11 +716,4 @@ object StatusForm: TStatusForm
     Left = 308
     Top = 8
   end
-  object tmr_MCP: TTimer
-    Enabled = False
-    Interval = 10
-    OnTimer = tmr_MCPTimer
-    Left = 276
-    Top = 8
-  end
 end
