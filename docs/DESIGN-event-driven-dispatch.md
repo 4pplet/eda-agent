@@ -1,10 +1,13 @@
 # Design: event-driven dispatch (replacing the blocking poll loop)
 
-**Status: BUILT and wired, awaiting its first Altium run.** §2's prerequisites
-P1 and P2 both passed (2026-09-23); P3 is still open but is a "no worse than
-today" check, not a gate. §3–§7 are implemented on branch `timer-dispatch-dfm`
-as script `2026.09.24.2`. See the 2026-09-24 correction below for why the
-wiring that was declared impossible turned out not to be.
+**Status: BUILT, wired as an EXPERIMENT, awaiting its first Altium run.**
+§2's prerequisites P1 and P2 both passed (2026-09-23); P3 is still open but is a
+"no worse than today" check, not a gate. §3–§7 are implemented on branch
+`timer-dispatch-dfm` as script `2026.09.24.2`.
+
+**The wiring is not known to work.** It rests on a forward cross-unit call whose
+legality is unverified, and the 2026-09-24 section below retracts an earlier
+claim that it was proven. Read that retraction before relying on anything here.
 
 ## 1. Why this is now the fix rather than one option
 
@@ -54,11 +57,11 @@ a probe is ticking, and re-run the shutdown probe. Note §8 has already been
 corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
 today", not "clean".
 
-## ✅ 2026-09-24: the wiring blocker was a misread rule, not a host limit
+## ⏳ 2026-09-24: the wiring blocker is UNVERIFIED, and this build tests it
 
-On 2026-09-24 this document carried a block saying §3–§7 were *written and could
-not be wired*, listing four closed routes. Three of those four findings are real
-and stand. **The conclusion drawn from them was wrong**, and it cost about a week.
+**Read the correction at the end of this section before citing anything in it.**
+An earlier version of this section declared the blocker disproved. That was
+published on a mistake and is retracted.
 
 What is true — the DFM scope rules, each bought with a failed Altium compile:
 
@@ -71,39 +74,60 @@ What is true — the DFM scope rules, each bought with a failed Altium compile:
 4. Runtime event assignment is unavailable: `X.OnTimer := Proc` gives *"Invalid
    procedure usage"*, `@Proc` gives *"Expression expected but @ found"*.
 
-What was false — the **fifth** premise, which was never tested:
+What is **unverified** — the fifth premise, which nobody has ever tested:
 
 > *"The dispatch handler must call `ProcessSingleRequest`, which is defined after
 > `StatusForm.pas`, so it cannot live there."*
 > *"`Dispatcher.pas` may call into `StatusForm.pas`, never the reverse."*
 
-Calls across the documents of the script project resolve **regardless of document
-order**. Two live proofs, both in the runtime qualified on 2026-09-23:
+**The retraction.** On 2026-09-24 this section claimed that premise was
+disproved, citing `StatusForm.pas`→`SelectedProject.pas` and
+`Dispatcher.pas`→`Audit.pas` as live forward calls. **Both citations were wrong,
+for two independent reasons:**
 
-| Caller | Callee | Position |
-|---|---|---|
-| `StatusForm.pas:121` `CurrentSelectedProject` | `SelectedProject.pas:42` | callee is the **last** document, under both readings of the PrjScr |
-| `Dispatcher.pas:45` `HandleAuditCommand` | `Audit.pas:4422` | callee is later under both readings; every audit command works |
+1. **Wrong project file.** They were read off this repo's `Altium_API.PrjScr`,
+   which is IDE-only and sets `ReorderDocumentsOnCompile=1`. The shared runtime
+   does not deploy it. PLT-hw's `create_shared_runtime.py:36-41` **generates** a
+   different one with an explicit dependency order and
+   `ReorderDocumentsOnCompile=0`:
+   `… Audit(9), SelectedProject(10), StatusForm.pas(11), StatusForm.dfm(12),
+   SelfTest(13), Dispatcher.pas(14)`. In *that* order both cited calls are
+   ordinary **backward** calls and prove nothing.
+2. **The code path doesn't run.** Both `StatusForm.pas` calls sit behind
+   `If Not SELECTED_PROJECT_READ_ONLY Then Exit;`, so in the checkout profile
+   they never execute regardless of ordering.
 
-The second is exercised by every `audit` call; the first runs on every status
-refresh in the read-only profile, and on the **Use this project** click the
-operator makes by hand.
+There is therefore **no verified counter-example, and none confirming the rule
+either.** `ReorderDocumentsOnCompile=0` beside a hand-pinned dependency order is
+weak evidence the original author believed it.
 
-**Where the false rule came from.** "A callee must come earlier than its caller"
-is a real rule — about `build.py`'s concatenated `Altium_MCP.pas`, which is one
-file with no forward declarations. That file is gitignored and is **not** one of
-the documents in `Altium_API.PrjScr`. `lint.py`'s `PAS_FILES` encodes the
-concatenation order (`… Audit, SelectedProject, StatusForm, Dispatcher`), which
-is a *different* order from the PrjScr — which is precisely why neither live
-counter-example ever tripped the linter and the contradiction stayed hidden.
+**A genuine finding survives the retraction:** there are two `Altium_API.PrjScr`
+files with different document orders, and the one in the repo is not the one
+that compiles. Reasoning about compile order from the checkout is how this went
+wrong. `lint.py`'s `PAS_FILES` matches the **deployed** order, so its
+cross-file rule was validating the right thing all along; a new test in PLT-hw
+(`test_manage_shared_runtime.py::DeployedCompileOrderTests`) now fails if the
+two lists drift apart.
 
-**What it cost.** Route 3 was rejected on the strength of this premise without
-the one experiment that would have settled it: a handler *in* `StatusForm.pas`
-calling *into* `Dispatcher.pas`. That combination was never tried. Instead the
-work went into route 4 (runtime assignment, two compile failures) and then into
-a `Dispatcher`-owned `TTimer` created at runtime.
+**What it cost.** Route 3 was abandoned on an untested premise, then
+re-embraced on a bad proof. The one experiment that settles it — a handler *in*
+`StatusForm.pas` calling *into* `Dispatcher.pas` — still had not been run.
 
-**The wiring that ships.** Route 3, as the rules actually allow:
+**This build runs it.** The wiring below is route 3, deployed as an experiment
+with a named failure mode rather than as a change believed correct:
+
+| Outcome at script start | Means |
+|---|---|
+| `Undeclared identifier: MCPTimerTick` | rule is **real**; the DFM route is closed and the fix needs another mechanism |
+| starts clean, no `_tick_first` | ordering fine; **rule 3** bit again — the DFM did not bind the handler |
+| `_tick_first` present | both fine; the arrangement below is correct |
+
+Note the cycle this sits on: `StatusForm.pas` must hold both the DFM handler
+(needing `Dispatcher`, later) and the UI helpers `Dispatcher` calls (earlier).
+**If the ordering rule is real, that cycle is unsatisfiable and no arrangement
+of these files works** — the fix would have to stop being a DFM timer.
+
+**The wiring under test:**
 
 - `StatusForm.dfm` declares `tmr_MCP` with `OnTimer = tmr_MCPTimer` — rule 2 and
   rule 3 satisfied, same as `tmr_Spinner` and `tmr_Probe`.
@@ -111,7 +135,7 @@ a `Dispatcher`-owned `TTimer` created at runtime.
   plus `ArmMCPTimer` / `DisableMCPTimer` / `SetMCPTimerInterval`, which have to be
   there because they name `tmr_MCP` (rule 2).
 - `Dispatcher.pas` keeps `MCPTimerTick` and all dispatch state. Exactly **one**
-  call crosses backwards, and it is the three-line shim.
+  call crosses forwards, and it is the three-line shim. That is the bet.
 - `MCPYield` is **deleted**, not left unused: it wrapped the file's only
   `Application.ProcessMessages`, and an unused helper for the exact operation
   that causes the P0 is a landmine. A test now asserts zero occurrences.

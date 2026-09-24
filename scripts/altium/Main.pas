@@ -161,17 +161,20 @@ End;
 {                                                                               }
 { Defined in Main.pas so Library.pas and Generic.pas can both use them.       }
 {                                                                              }
-{ This used to claim the Altium project compiles in DesignN order and that a   }
-{ callee must therefore come earlier than its caller. THAT IS A RULE ABOUT A   }
-{ DIFFERENT ARTIFACT. It holds for build.py's concatenated Altium_MCP.pas,     }
-{ which is one file with no forward declarations - and which is gitignored and }
-{ is NOT a document in Altium_API.PrjScr. Across the PrjScr's own documents    }
-{ the order does not matter: StatusForm.pas calls CurrentSelectedProject in    }
-{ SelectedProject.pas (the last document), and ProcessCommand in Dispatcher.pas}
-{ calls HandleAuditCommand in Audit.pas (a later document under either reading }
-{ of the file), both in production. Keeping shared helpers early is still good }
-{ practice and keeps the monolith build honest; it is not a constraint the     }
-{ script project imposes. Mistaking it for one cost the Ctrl+Z fix a week.     }
+{ Keeping shared helpers early is load-bearing for build.py's concatenated     }
+{ Altium_MCP.pas, which is one file with no forward declarations.              }
+{                                                                              }
+{ WHETHER IT ALSO BINDS ACROSS DOCUMENTS OF THE SCRIPT PROJECT IS UNVERIFIED.  }
+{ Do not settle that question from this repo's Altium_API.PrjScr: that file is }
+{ IDE-only and sets ReorderDocumentsOnCompile=1. What deploys is a DIFFERENT,  }
+{ GENERATED project file (create_shared_runtime.py) with an explicit           }
+{ dependency order and ReorderDocumentsOnCompile=0, ending Audit,              }
+{ SelectedProject, StatusForm.pas, StatusForm.dfm, SelfTest, Dispatcher.pas.   }
+{                                                                              }
+{ On 2026-09-24 this comment briefly asserted the rule was false across        }
+{ documents, citing two calls that turned out to be backward calls in the      }
+{ deployed order. Reasoning about compile order from the wrong project file    }
+{ has now cost time twice. Read the runtime's own scripts\Altium_API.PrjScr.   }
 {..............................................................................}
 
 Function NextBatchOp(Var Remaining : String) : String;

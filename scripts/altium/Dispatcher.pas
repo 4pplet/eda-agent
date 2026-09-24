@@ -547,21 +547,29 @@ End;
 { else - the DFM resolves handler names only against its paired .pas, so the   }
 { handler has to be there and the work has to be reachable from there.         }
 {                                                                              }
-{ THAT CALL RUNS BACKWARDS in document order, and it works. StatusForm.pas is  }
-{ document 11 of Altium_API.PrjScr and this file is document 1 (physically the }
-{ 11th section, with StatusForm the 9th) - either way StatusForm.pas is not    }
-{ "before" this one, and the call still resolves. Two independent live proofs  }
-{ of the same thing, both in the runtime qualified on 2026-09-23:              }
-{   - StatusForm.pas calls CurrentSelectedProject, in SelectedProject.pas,     }
-{     the LAST document under both readings of the PrjScr;                     }
-{   - ProcessCommand above calls HandleAuditCommand, in Audit.pas, which is    }
-{     after this file under both readings, and every audit command works.      }
-{ "A callee must come earlier than its caller" is a real rule, but it is a     }
-{ rule about build.py's concatenated Altium_MCP.pas, which is gitignored and   }
-{ is NOT one of the documents in the active PrjScr. It was misread as a rule   }
-{ about the script project, and that misreading is the only reason this        }
-{ handler was previously believed unable to live on the form. See              }
-{ docs/DESIGN-event-driven-dispatch.md.                                        }
+{ THAT CALL RUNS FORWARDS in the DEPLOYED document order, and whether it        }
+{ resolves is AN OPEN QUESTION being settled by this build. Do not read the     }
+{ arrangement below as proven.                                                  }
+{                                                                               }
+{ The deployed order is NOT this repo's Altium_API.PrjScr. create_shared_runtime}
+{ .py generates its own with an explicit dependency order and                   }
+{ ReorderDocumentsOnCompile=0: ... Audit(9), SelectedProject(10),               }
+{ StatusForm.pas(11), StatusForm.dfm(12), SelfTest(13), Dispatcher.pas(14).     }
+{ So StatusForm.pas calling into this file is a FORWARD cross-unit call.        }
+{                                                                               }
+{ An earlier version of this comment claimed two production calls already did   }
+{ exactly that. They do not: both were read off the checkout's PrjScr, which is }
+{ IDE-only, and in the deployed order both are ordinary backward calls. There   }
+{ is no verified counter-example to "a callee must come earlier than its        }
+{ caller" - and none confirming it either.                                      }
+{                                                                               }
+{ If the rule holds, this build fails at script start with                      }
+{ "Undeclared identifier: MCPTimerTick", which is a clean, named answer and     }
+{ closes the DFM route for good. If it starts and _tick_first appears, the rule }
+{ does not apply across documents and this arrangement is correct. Either way   }
+{ the question stops being folklore. See                                        }
+{ docs/DESIGN-event-driven-dispatch.md and                                      }
+{ PLT-hw tools/eda-agent/DEPLOY-2026-09-24-timer-dispatch.md gate 1.            }
 {..............................................................................}
 Procedure MCPTimerTick(Dummy : Integer);
 Var

@@ -948,25 +948,31 @@ def lint_file(path: str) -> list[Finding]:
     return findings
 
 
-# Calls that are ILLEGAL in the concatenated monolith and CORRECT in the
-# PrjScr script project, keyed (calling file, called routine). Every entry
-# is a call that has to run backwards in build order for a reason no
-# reordering can fix, and every entry breaks build.py's Altium_MCP.pas.
+# ONE deliberate forward call, suppressed here because it is an OPEN
+# EXPERIMENT rather than a mistake. Keyed (calling file, called routine).
 #
-# tmr_MCPTimer is the only one. It is the DFM-bound OnTimer handler for
-# tmr_MCP, and two DelphiScript scope rules pin it to StatusForm.pas: a DFM
-# control identifier is in scope only in the .pas paired with the .dfm, and
-# a DFM event handler binds only to a procedure in that same file (failing
-# SILENTLY otherwise). The work it dispatches is MCPTimerTick, which needs
-# every Handle*Command in the project and so cannot move earlier. So the
-# handler must be in StatusForm.pas and the callee must be in Dispatcher.pas,
-# and StatusForm.pas is listed first. There is no arrangement that satisfies
-# both the DFM and the concatenation.
+# tmr_MCPTimer is the DFM-bound OnTimer handler for tmr_MCP, and two
+# DelphiScript scope rules pin it to StatusForm.pas: a DFM control
+# identifier is in scope only in the .pas paired with the .dfm, and a DFM
+# event handler binds only to a procedure in that same file (failing
+# SILENTLY otherwise). The work it dispatches, MCPTimerTick, needs every
+# Handle*Command and so cannot move earlier. Handler must be in
+# StatusForm.pas, callee must be in Dispatcher.pas, StatusForm.pas comes
+# first. That is a genuine cycle: no ordering satisfies both.
 #
-# The cost is explicit: while this entry exists, build.py's monolith cannot
-# serve requests. Deployment is `eda-agent install-scripts`, which copies the
-# PrjScr documents, so nothing shipping is affected. Do not add to this list
-# to silence an ordinary forward call - move the callee instead.
+# So the arrangement is only viable if forward cross-unit calls resolve in
+# the script project - which is UNVERIFIED. It is being settled by running
+# it: if the rule holds, the script fails at start with "Undeclared
+# identifier: MCPTimerTick" and the DFM route is closed for good.
+#
+# READ THIS BEFORE TREATING THE ENTRY AS SETTLED. While it exists, lint is
+# silent about a call that breaks build.py's monolith for certain and may
+# break the deployed runtime too. Remove it the moment the experiment
+# returns: on a pass, replace it with a comment recording the result; on a
+# failure, the code it exempts has to go anyway.
+#
+# Do NOT add to this list to silence an ordinary forward call. Move the
+# callee instead - every other case in this codebase can be.
 CROSS_FILE_ORDER_EXEMPT = {
     ("StatusForm.pas", "mcptimertick"),
 }
@@ -986,26 +992,23 @@ def _scan_call_order_across_files(targets: list) -> list:
     forward declarations and an unresolved identifier is only discovered
     when the line runs.
 
-    THIS IS A RULE ABOUT THE MONOLITH, NOT ABOUT WHAT ALTIUM RUNS. The
-    line above used to read "Altium compiles the concatenation, so that
-    is what this checks", and that is false: Altium opens
-    Altium_API.PrjScr and compiles the documents it lists, and
-    Altium_MCP.pas is gitignored and is not one of them. Across PrjScr
-    documents the order does not matter. Two live proofs, both in the
-    runtime qualified on 2026-09-23: StatusForm.pas calls
-    CurrentSelectedProject in SelectedProject.pas, the LAST document; and
-    Dispatcher.pas's ProcessCommand calls HandleAuditCommand in Audit.pas,
-    a later document under either reading of the PrjScr. Neither trips
-    this rule only because PAS_FILES happens to order those pairs the
-    other way round - which is exactly how the contradiction stayed
-    hidden, and it cost the Ctrl+Z fix a week of believing a DFM event
-    handler could not reach the dispatcher.
+    PAS_FILES IS ALSO THE DEPLOYED ORDER, which makes this rule matter
+    more than its wording suggests. The shared runtime does not ship this
+    repo's Altium_API.PrjScr; PLT-hw's create_shared_runtime.py GENERATES
+    one with an explicit dependency order and ReorderDocumentsOnCompile=0,
+    and that order is PAS_FILES with StatusForm.dfm and SelfTest.pas
+    slotted in. So a finding here flags a forward call in the concatenated
+    monolith AND in the project Altium actually compiles.
 
-    The rule is kept, as an error, because the monolith is a supported
-    build target and a violation there is a genuine access violation. But
-    a finding here means "this would break build.py's output", NOT "this
-    cannot work" - see CROSS_FILE_ORDER_EXEMPT for the deliberate
-    exception and what it costs.
+    Keep the two lists in step. If create_shared_runtime.py's `order` is
+    ever changed, change PAS_FILES to match, or this rule silently starts
+    validating an arrangement nobody runs. On 2026-09-24 a wrong
+    conclusion was published from exactly that confusion - the checkout's
+    PrjScr was read as authoritative when it is IDE-only.
+
+    Whether a forward cross-unit call actually fails in the script project
+    is not itself established; it is established for the monolith, which
+    has no forward declarations. See CROSS_FILE_ORDER_EXEMPT.
 
     Line numbers are reported against the ORIGINAL file, since that is
     where the fix goes.

@@ -185,33 +185,42 @@ either way: stop the bridge before quitting Altium.
 
     **P3 is the only prerequisite left.**
 
-  - **✅ 2026-09-24: THE REWORK IS WIRED. The blocker was a rule we had
-    misread, not a limit of the host.** Branch `timer-dispatch-dfm`, script
-    `2026.09.24.2`, lint clean, 64 source-level tests green. Awaiting its
-    first Altium run.
-    - **What was wrong.** The parked `timer-dispatch` branch concluded that a
-      DFM event handler "cannot exist" because it would have to call
-      `ProcessSingleRequest`, defined in a later-listed document, and that
-      *"Dispatcher.pas may call into StatusForm.pas, never the reverse."*
-      **Calls across PrjScr documents resolve regardless of order.** Two live
-      proofs in the runtime qualified 2026-09-23: `StatusForm.pas` calls
-      `CurrentSelectedProject` in `SelectedProject.pas`, the **last**
-      document; and `ProcessCommand` in `Dispatcher.pas` calls
-      `HandleAuditCommand` in `Audit.pas`, a later one. Both under either
-      reading of the PrjScr.
-    - **Where the false rule came from.** "A callee must come earlier than its
-      caller" is real — for `build.py`'s concatenated `Altium_MCP.pas`, which
-      is gitignored and is **not** a document in `Altium_API.PrjScr`.
-      `lint.py`'s `PAS_FILES` encodes that concatenation order, which differs
-      from the PrjScr's, which is exactly why neither counter-example ever
-      tripped the linter.
-    - **The avoidable part, plainly.** After the silent-binding failure the
-      next experiment should have been a handler *in* `StatusForm.pas` calling
-      *into* `Dispatcher.pas` — the one combination never tried. Instead two
-      more compile cycles went into runtime event assignment and then into a
-      runtime-created timer. The premise was inherited from a source comment
-      and never checked against the code sitting in front of it, which is the
-      actual lesson: an ordering claim is cheap to verify by grep.
+  - **⏳ 2026-09-24: THE REWORK IS WIRED AS AN EXPERIMENT. Whether it can work
+    is still unverified — see the retraction below.** Branch
+    `timer-dispatch-dfm`, script `2026.09.24.2`, lint clean, 66 source-level
+    tests green. Awaiting its first Altium run.
+    - **RETRACTION, same day.** This entry first said the ordering blocker was
+      disproved, citing `StatusForm.pas`→`SelectedProject.pas` and
+      `Dispatcher.pas`→`Audit.pas` as live forward calls. **Both citations were
+      wrong.** They were read off the eda-agent checkout's `Altium_API.PrjScr`,
+      which is IDE-only and sets `ReorderDocumentsOnCompile=1`. The shared
+      runtime **generates** a different one (`create_shared_runtime.py:36-41`)
+      with an explicit dependency order ending `... Audit(9),
+      SelectedProject(10), StatusForm.pas(11), StatusForm.dfm(12),
+      SelfTest(13), Dispatcher.pas(14)`. In that order both cited calls are
+      ordinary **backward** calls. The two `StatusForm` ones also sit behind
+      `If Not SELECTED_PROJECT_READ_ONLY Then Exit`, so they never execute in
+      that profile either. Two independent reasons they prove nothing.
+    - **So the premise is UNVERIFIED, not false.** No counter-example, and
+      nothing confirming it. `ReorderDocumentsOnCompile=0` beside a hand-pinned
+      dependency order is weak evidence the original author believed it. This
+      build is the experiment: `Undeclared identifier: MCPTimerTick` at script
+      start means the rule is real and the DFM route is closed **for good** —
+      the cycle is unsatisfiable under a strict order, because `StatusForm.pas`
+      must hold both the handler (needing `Dispatcher`, later) and the UI
+      helpers `Dispatcher` calls (earlier).
+    - **The genuine finding that survives.** There are TWO `Altium_API.PrjScr`
+      files with different document orders, and the repo's is not the one that
+      compiles. `lint.py`'s `PAS_FILES` matches the DEPLOYED order, so its
+      cross-file rule was validating the right thing all along. New test
+      `test_manage_shared_runtime.py::DeployedCompileOrderTests` pins the
+      deployed sequence and fails if the two lists drift apart.
+    - **The lesson, plainly.** A claim was checked against the wrong artifact
+      and reported as verified, compounding an error that began as folklore in
+      a source comment. Before citing a counter-example: confirm it lives in
+      the artifact that actually runs, and that the code path actually
+      executes. A call guarded by a constant that is False in that profile
+      proves nothing at all.
     - **Guards added, because rule 3 fails SILENTLY.**
       `test_pas_project_consistency.py` now fails if any `StatusForm.dfm`
       handler names a procedure `StatusForm.pas` does not define — verified to

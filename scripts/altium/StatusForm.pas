@@ -694,18 +694,27 @@ End;
 {      binds to NOTHING, SILENTLY: the timer enables, no error is raised, and  }
 {      no tick ever runs.                                                      }
 {                                                                              }
-{ Both rules stand. What was wrong was the conclusion drawn from them - that   }
-{ because the handler must call ProcessSingleRequest, which is in the          }
-{ later-listed Dispatcher.pas, the handler could not live here and the timer   }
-{ could not be a DFM component at all. THAT INFERENCE WAS FALSE. Calls across  }
-{ documents of the script project resolve regardless of document order; this   }
-{ very file already calls CurrentSelectedProject in SelectedProject.pas, the   }
-{ LAST document in Altium_API.PrjScr, and has done so in production all along. }
-{ The ordering rule that was cited applies to build.py's concatenated          }
-{ Altium_MCP.pas, which is gitignored and is not a document in the PrjScr.     }
+{ Both rules stand. What is UNSETTLED is whether this handler may call FORWARD  }
+{ into Dispatcher.pas, which in the DEPLOYED document order comes after this    }
+{ file - Dispatcher is last, see create_shared_runtime.py. The parked branch    }
+{ assumed it may not and abandoned the DFM route on that basis. Nobody tested   }
+{ it. This build tests it: the handler is here, three lines, and MCPTimerTick   }
+{ in Dispatcher.pas does the work.                                              }
 {                                                                              }
-{ So the handler is here, it is three lines, and MCPTimerTick in Dispatcher.pas}
-{ does the work.                                                               }
+{ An earlier version of this comment claimed the call was already proven, by    }
+{ this file's own calls to CurrentSelectedProject in SelectedProject.pas. IT IS }
+{ NOT. SelectedProject.pas is document 10 and this is 11, so that is a BACKWARD }
+{ call; and it sits behind "If Not SELECTED_PROJECT_READ_ONLY Then Exit", so it }
+{ does not run at all outside the shared profile. Two separate reasons it       }
+{ proves nothing. The claim was read off the checkout's PrjScr, which is not    }
+{ the file that gets deployed.                                                  }
+{                                                                              }
+{ Outcomes, written down so the result is unambiguous when it arrives:          }
+{   - "Undeclared identifier: MCPTimerTick" at script start -> forward calls do }
+{     not resolve; the DFM route is closed and the fix needs another mechanism. }
+{   - Starts clean but no _tick_first in activity.log -> forward calls are fine }
+{     and rule 3 bit again: the DFM did not bind this handler.                  }
+{   - _tick_first present -> both fine.                                         }
 
 Procedure tmr_MCPTimer(Sender : TObject);
 Begin
