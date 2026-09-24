@@ -274,6 +274,7 @@ Begin
         Or (Command = 'pcb.get_net_classes')
         Or (Command = 'pcb.get_object_classes')
         Or (Command = 'pcb.get_room_rules')
+        Or (Command = 'pcb.get_clearance_violations')
         Or (Command = 'pcb.get_design_rules')
         Or (Command = 'pcb.get_trace_lengths')
         Or (Command = 'pcb.get_selected_objects')
@@ -425,6 +426,13 @@ Begin
                 Reply := PCB_GetObjectClassesForBoard(Board, RequestId)
             Else If Command = 'pcb.get_room_rules' Then
                 Reply := PCB_GetRoomRulesForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_clearance_violations' Then
+                { Rebuild the params object rather than forwarding the caller's,
+                  same as trace-lengths below: only the whitelisted net filter
+                  crosses into the handler. }
+                Reply := PCB_GetClearanceViolationsForBoard(Board,
+                    '{"net":"' + EscapeJsonString(ExtractJsonValue(Params, 'net')) + '"}',
+                    RequestId)
             Else If Command = 'pcb.get_design_rules' Then
                 Reply := PCB_GetDesignRulesForBoard(Board, RequestId)
             Else If Command = 'pcb.get_board_statistics' Then

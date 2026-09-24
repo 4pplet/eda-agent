@@ -14,6 +14,44 @@ Var
     MCPHostClosing      : Boolean;
     MCPStopReason       : String;
 
+    { Event-driven dispatch state - DESIGN-event-driven-dispatch.md section 4.  }
+    { Every one of these was a LOCAL of the old blocking StartMCPServer loop.   }
+    { Each tick is now a separate call, so anything the loop carried between    }
+    { iterations has to live here instead. A variable missed in that migration  }
+    { does not fail loudly, it quietly changes behaviour, which is why the      }
+    { design lists them explicitly and why this block mirrors that table.       }
+    MCPStopPath          : String;    { was StopPath, set once at arm          }
+    MCPIdleCount         : Integer;   { was IdleCount, drives stats cadence    }
+    MCPCurrentInterval   : Integer;   { was CurrentSleep; now written to       }
+                                      { Timer.Interval instead of Sleep()      }
+    MCPLastActivityMs    : Cardinal;  { was LastActivityMs, auto-shutdown      }
+    MCPLoopFailed        : Boolean;   { was LoopFailed, read by finalise       }
+    MCPInTick            : Boolean;   { re-entrancy guard, section 6           }
+    MCPFaultStreak       : Integer;   { consecutive tick faults, section 8     }
+    MCPTickCount         : Integer;   { ticks since arm; the first one is      }
+                                      { logged, see MCPTimerTick              }
+    { THE TIMER ITSELF IS NOT HERE. tmr_MCP is a DFM component on StatusForm,  }
+    { and everything that touches it - the OnTimer handler, arm, disable and   }
+    { the interval write - lives in StatusForm.pas, because a DFM control      }
+    { identifier is in scope only in the .pas paired with the .dfm and a DFM   }
+    { event handler binds only to a procedure in that same file.               }
+    {                                                                           }
+    { The state stays here, on purpose: StatusForm.pas holds one three-line     }
+    { shim that calls MCPTimerTick below, and this file keeps the dispatch      }
+    { logic it already owned. That shim is the only call that runs "backwards"  }
+    { from StatusForm.pas into this file, which is a deliberately small bet on  }
+    { cross-unit resolution being order-independent - see the header comment on }
+    { MCPTimerTick for why that is now established rather than assumed.         }
+    { ActiveTickCount and I are deliberately GONE: the first only rationed      }
+    { ProcessMessages calls and the second drove the Sleep sub-loop. Neither    }
+    { call exists any more, and not calling them is the entire fix.             }
+
+Const
+    { Stop after this many consecutive failing ticks. The old design wrapped    }
+    { the whole loop in one Try/Except, so a fault ended the session outright;  }
+    { per-tick handling would otherwise let a repeating fault log forever.      }
+    MCP_MAX_FAULT_STREAK = 5;
+
 Function ProcessCommand(Command : String; Params : String; RequestId : String) : String;
 Var
     Category, Action : String;
@@ -360,21 +398,31 @@ Begin
     Result := True;
 End;
 
-Function MCPYield(StopPath : String) : Boolean;
-Begin
-    Result := False;
-    If Not MCPContinuePolling(StopPath) Then Exit;
-    Application.ProcessMessages;
-    { No Sleep, status access or new request before this post-yield check. }
-    Result := MCPContinuePolling(StopPath);
-End;
+{ MCPYield IS DELETED, NOT MERELY UNUSED. It wrapped the one                  }
+{ Application.ProcessMessages call in this file, and under timer dispatch      }
+{ nothing called it any more - but leaving it sitting there is the landmine    }
+{ version of this bug. Pumping the host's message queue from inside a script   }
+{ that holds the main thread is precisely what deferred keyboard-to-command    }
+{ dispatch and made Ctrl+Z replay in a burst on detach. A future edit that     }
+{ "just needs to let the UI breathe" would reach for the helper that was       }
+{ already here and reinstate the P0 without anyone noticing.                   }
+{                                                                              }
+{ There is nothing to yield to now: each tick returns, and Altium pumps its    }
+{ own loop between ticks. tests/test_dispatcher_shutdown.py asserts this file  }
+{ contains ZERO occurrences of Application.ProcessMessages, so the deletion is }
+{ enforced rather than remembered.                                             }
+{                                                                              }
+{ Library.pas still has three of its own, inside handlers. Those run during a  }
+{ tick and remain a residual source of the same deferral for library commands. }
+{ Out of scope here, recorded in TODO.                                          }
 
 {..............................................................................}
-{ Start MCP server, adaptive polling loop.                                  }
+{ Start MCP server.                                                          }
 {                                                                            }
-{ Uses ADAPTIVE POLLING to avoid blocking Altium:                             }
-{   - Active (just processed a request): polls fast (PollIntervalActiveMs)   }
-{   - Idle: polls slow (PollIntervalIdleMs) with extra ProcessMessages calls }
+{ ARMS tmr_MCP and returns. The adaptive pacing that used to be Sleep is now  }
+{ the timer interval:                                                         }
+{   - Active (just processed a request): PollIntervalActiveMs                 }
+{   - Idle: PollIntervalIdleMs after IdleThreshold empty ticks                }
 {   - Auto-shuts down after AutoShutdownMs of inactivity                      }
 {                                                                            }
 { All tunables come from mcp_config.json via LoadMCPConfig at startup.       }
@@ -448,22 +496,231 @@ Begin
     StartTimerProbe(0);
 End;
 
-Procedure StartMCPServer;
+{ DisableMCPTimer, SetMCPTimerInterval and ArmMCPTimer are in StatusForm.pas,  }
+{ with tmr_MCP itself. They are called freely from here.                       }
+
+{..............................................................................}
+{ Teardown, reached from every path that ends a session: the stop file or      }
+{ application.stop_server, the Detach button, auto-shutdown, and a tick that   }
+{ has failed too many times in a row.                                          }
+{                                                                              }
+{ The ORDER is prescribed by DESIGN section 7 and is not cosmetic: disable the }
+{ timer FIRST, before anything else, so no tick can re-enter cleanup or fire   }
+{ against controls HideStatusForm is about to take away. A live timer on a     }
+{ closed form is the single most likely crash in this whole redesign.          }
+{..............................................................................}
+Procedure FinaliseMCPServer(Dummy : Integer);
+Begin
+    DisableMCPTimer(0);
+    Running := False;
+
+    If Not MCPLoopFailed Then
+    Begin
+        If MCPHostAvailable(0) Then HideStatusForm(0);
+    End;
+    Try
+        CleanupMCPServer(0);
+    Except
+        MCPLoopFailed := True;
+        MCPStopReason := 'cleanup-exception';
+    End;
+    Try
+        If MCPLoopFailed Then
+            AppendLog(FormatLogStamp(0) + ',0,_session_aborted,reason=' + MCPStopReason)
+        Else
+            AppendLog(FormatLogStamp(0) + ',0,_session_end,requests='
+                + IntToStr(StatusRequestCount) + ',reason=' + MCPStopReason);
+    Except End;
+End;
+
+
+{..............................................................................}
+{ One poll's worth of work, on a timer instead of inside a blocking loop.      }
+{                                                                              }
+{ NOTHING HERE SLEEPS AND NOTHING CALLS Application.ProcessMessages. That is   }
+{ the whole point: the host is pumping its own message loop normally now, so   }
+{ keyboard-to-command dispatch is never deferred and Ctrl+Z reaches Altium at  }
+{ the moment it is pressed. Re-introducing either call would restore both P0s. }
+{                                                                              }
+{ NOT the OnTimer handler. tmr_MCP.OnTimer is bound in StatusForm.dfm to a     }
+{ three-line tmr_MCPTimer in StatusForm.pas, which calls this and nothing      }
+{ else - the DFM resolves handler names only against its paired .pas, so the   }
+{ handler has to be there and the work has to be reachable from there.         }
+{                                                                              }
+{ THAT CALL RUNS FORWARDS in the DEPLOYED document order, and whether it        }
+{ resolves is AN OPEN QUESTION being settled by this build. Do not read the     }
+{ arrangement below as proven.                                                  }
+{                                                                               }
+{ The deployed order is NOT this repo's Altium_API.PrjScr. create_shared_runtime}
+{ .py generates its own with an explicit dependency order and                   }
+{ ReorderDocumentsOnCompile=0: ... Audit(9), SelectedProject(10),               }
+{ StatusForm.pas(11), StatusForm.dfm(12), SelfTest(13), Dispatcher.pas(14).     }
+{ So StatusForm.pas calling into this file is a FORWARD cross-unit call.        }
+{                                                                               }
+{ An earlier version of this comment claimed two production calls already did   }
+{ exactly that. They do not: both were read off the checkout's PrjScr, which is }
+{ IDE-only, and in the deployed order both are ordinary backward calls. There   }
+{ is no verified counter-example to "a callee must come earlier than its        }
+{ caller" - and none confirming it either.                                      }
+{                                                                               }
+{ If the rule holds, this build fails at script start with                      }
+{ "Undeclared identifier: MCPTimerTick", which is a clean, named answer and     }
+{ closes the DFM route for good. If it starts and _tick_first appears, the rule }
+{ does not apply across documents and this arrangement is correct. Either way   }
+{ the question stops being folklore. See                                        }
+{ docs/DESIGN-event-driven-dispatch.md and                                      }
+{ PLT-hw tools/eda-agent/DEPLOY-2026-09-24-timer-dispatch.md gate 1.            }
+{..............................................................................}
+Procedure MCPTimerTick(Dummy : Integer);
 Var
-    StopPath       : String;
-    IdleCount      : Integer;
-    CurrentSleep   : Integer;
-    LastActivityMs : Cardinal;
-    NowMs          : Cardinal;
-    HadRequest     : Boolean;
-    I              : Integer;
-    ActiveTickCount : Integer;
-    LoopFailed     : Boolean;
+    NowMs      : Cardinal;
+    HadRequest : Boolean;
+Begin
+    { Re-entrancy (section 6). A handler that outruns its interval, or a        }
+    { request that pumps messages internally inside Altium, can re-enter here.  }
+    { DROP the coincident tick rather than queueing it: the next one is 10-30   }
+    { ms away and the work is idempotent polling, whereas queueing would let a  }
+    { slow request build a backlog that then stampedes - the very shape of the  }
+    { bug being fixed.                                                          }
+    If MCPInTick Then Exit;
+    MCPInTick := True;
+    Try
+        Try
+            { Log the FIRST tick and nothing after. Under timer dispatch a      }
+            { handler that never binds produces a form that is up, a session    }
+            { that logged _session_start, and total silence - indistinguishable }
+            { by eye from a dozen other failures. This one line separates       }
+            { "armed but never fired" from "firing and something else is        }
+            { wrong", which is the first question to ask of any tick problem.   }
+            Inc(MCPTickCount);
+            If MCPTickCount = 1 Then
+                Try
+                    AppendLog(FormatLogStamp(0) + ',0,_tick_first,interval='
+                        + IntToStr(MCPCurrentInterval));
+                Except End;
+
+            If Not Running Then
+            Begin
+                FinaliseMCPServer(0);
+                Exit;
+            End;
+            If Not MCPContinuePolling(MCPStopPath) Then
+            Begin
+                FinaliseMCPServer(0);
+                Exit;
+            End;
+
+            { Renew button: reset the real idle deadline once per click. }
+            If RenewRequested Then
+            Begin
+                MCPLastActivityMs := GetTickCount;
+                RenewRequested := False;
+                UpdateStatsLine(
+                    (GetTickCount - StatusStartTick) Div 1000,
+                    StatusRequestCount,
+                    StatusTotalAltiumMs,
+                    AutoShutdownMs Div 1000);
+            End;
+
+            { Paused sessions never auto-shut-down, so the user can step away. }
+            If PausedFlag Then
+                MCPLastActivityMs := GetTickCount;
+            If AutoShutdownMs > 0 Then
+            Begin
+                NowMs := GetTickCount;
+                If NowMs >= MCPLastActivityMs Then
+                Begin
+                    If (NowMs - MCPLastActivityMs) > AutoShutdownMs Then
+                    Begin
+                        MCPStopReason := 'idle-timeout';
+                        Running := False;
+                        FinaliseMCPServer(0);
+                        Exit;
+                    End;
+                End;
+            End;
+
+            If PausedFlag Then
+            Begin
+                { Skip dispatch entirely, but keep the countdown alive. No      }
+                { yield call is needed now - the host never stopped pumping.    }
+                UpdateStatsLine(
+                    (GetTickCount - StatusStartTick) Div 1000,
+                    StatusRequestCount,
+                    StatusTotalAltiumMs,
+                    AutoShutdownMs Div 1000);
+                MCPCurrentInterval := PollIntervalIdleMs;
+            End
+            Else
+            Begin
+                HadRequest := ProcessSingleRequest(0);
+                If Not MCPContinuePolling(MCPStopPath) Then
+                Begin
+                    FinaliseMCPServer(0);
+                    Exit;
+                End;
+
+                If HadRequest Then
+                Begin
+                    MCPIdleCount := 0;
+                    MCPCurrentInterval := PollIntervalActiveMs;
+                    MCPLastActivityMs := GetTickCount;
+                    UpdateStatusHeader('MCP: idle');
+                    UpdateStatsLine(
+                        (GetTickCount - StatusStartTick) Div 1000,
+                        StatusRequestCount,
+                        StatusTotalAltiumMs,
+                        (AutoShutdownMs - (GetTickCount - MCPLastActivityMs)) Div 1000);
+                End
+                Else
+                Begin
+                    Inc(MCPIdleCount);
+                    If MCPIdleCount > IdleThreshold Then
+                        MCPCurrentInterval := PollIntervalIdleMs;
+                    If (MCPIdleCount Mod 10) = 0 Then
+                        UpdateStatsLine(
+                            (GetTickCount - StatusStartTick) Div 1000,
+                            StatusRequestCount,
+                            StatusTotalAltiumMs,
+                            (AutoShutdownMs - (GetTickCount - MCPLastActivityMs)) Div 1000);
+                End;
+            End;
+
+            { Adaptive pacing survives as an INTERVAL change, which is strictly }
+            { better than sleeping: the thread is genuinely free between ticks. }
+            SetMCPTimerInterval(MCPCurrentInterval);
+
+            { A clean tick clears the streak, so only CONSECUTIVE faults count. }
+            MCPFaultStreak := 0;
+        Except
+            Inc(MCPFaultStreak);
+            Try
+                AppendLog(FormatLogStamp(0) + ',0,_tick_exception,streak='
+                    + IntToStr(MCPFaultStreak));
+            Except End;
+            If MCPFaultStreak >= MCP_MAX_FAULT_STREAK Then
+            Begin
+                MCPLoopFailed := True;
+                MCPStopReason := 'loop-exception';
+                Running := False;
+                FinaliseMCPServer(0);
+            End;
+        End;
+    Finally
+        MCPInTick := False;
+    End;
+End;
+
+
+Procedure StartMCPServer;
 Begin
     If Running Then Exit;
     MCPHostClosing := False;
     MCPStopReason := 'stop-requested';
-    LoopFailed := False;
+    MCPLoopFailed := False;
+    MCPInTick := False;
+    MCPFaultStreak := 0;
+    MCPTickCount := 0;
     If Not MCPHostAvailable(0) Then Exit;
 
     InitDefaultConfig(0);
@@ -476,13 +733,12 @@ Begin
     CleanupOrphanResponses(0);
     CleanupOrphanProgress(0);
     Running := True;
-    StopPath := WorkspaceDir + 'stop';
-    If FileExists(StopPath) Then DeleteFile(StopPath);
+    MCPStopPath := WorkspaceDir + 'stop';
+    If FileExists(MCPStopPath) Then DeleteFile(MCPStopPath);
 
-    IdleCount := 0;
-    CurrentSleep := PollIntervalActiveMs;
-    LastActivityMs := GetTickCount;
-    ActiveTickCount := 0;
+    MCPIdleCount := 0;
+    MCPCurrentInterval := PollIntervalActiveMs;
+    MCPLastActivityMs := GetTickCount;
 
     StatusStartTick := GetTickCount;
     StatusRequestCount := 0;
@@ -493,135 +749,32 @@ Begin
     UpdateStatusHeader('MCP: idle');
     UpdateStatsLine(0, 0, 0, AutoShutdownMs Div 1000);
     AppendLog(FormatLogStamp(0) + ',0,_session_start,version=' + SCRIPT_VERSION
-              + ',protocol=' + IntToStr(PROTOCOL_VERSION));
+              + ',protocol=' + IntToStr(PROTOCOL_VERSION) + ',dispatch=timer');
+    { YieldIterations and YieldEveryNActive are DEAD CONFIG under timer         }
+    { dispatch - they only ever rationed Sleep and ProcessMessages calls, and   }
+    { neither exists now. Still parsed so an existing mcp_config.json keeps     }
+    { loading; say so once rather than letting a tuned value look effective.    }
+    If (YieldIterations <> 0) Or (YieldEveryNActive <> 0) Then
+        AppendLog(FormatLogStamp(0) + ',0,_config_ignored,'
+            + 'yield_iterations_and_yield_every_n_active_are_unused_under_timer_dispatch');
 
-    Try
-        While Running Do
-        Begin
-            If Not MCPContinuePolling(StopPath) Then Break;
-
-            // Renew button: reset the real idle deadline once per click.
-            If RenewRequested Then
-            Begin
-                LastActivityMs := GetTickCount;
-                RenewRequested := False;
-                UpdateStatsLine(
-                    (GetTickCount - StatusStartTick) Div 1000,
-                    StatusRequestCount,
-                    StatusTotalAltiumMs,
-                    AutoShutdownMs Div 1000);
-            End;
-
-            // Auto-shutdown after prolonged inactivity. Paused sessions
-            // never auto-shutdown so the user can step away indefinitely.
-            If PausedFlag Then
-                LastActivityMs := GetTickCount;
-            If AutoShutdownMs > 0 Then
-            Begin
-                NowMs := GetTickCount;
-                If NowMs >= LastActivityMs Then
-                Begin
-                    If (NowMs - LastActivityMs) > AutoShutdownMs Then
-                    Begin
-                        MCPStopReason := 'idle-timeout';
-                        Running := False;
-                        Break;
-                    End;
-                End;
-            End;
-
-            If PausedFlag Then
-            Begin
-                { Skip dispatch entirely while paused, but still yield and    }
-                { refresh stats so the dashboard countdown stays alive.       }
-                UpdateStatsLine(
-                    (GetTickCount - StatusStartTick) Div 1000,
-                    StatusRequestCount,
-                    StatusTotalAltiumMs,
-                    AutoShutdownMs Div 1000);
-                If Not MCPYield(StopPath) Then Break;
-                Sleep(PollIntervalIdleMs);
-                Continue;
-            End;
-
-            HadRequest := ProcessSingleRequest(0);
-            If Not MCPContinuePolling(StopPath) Then Break;
-
-            If HadRequest Then
-            Begin
-                IdleCount := 0;
-                CurrentSleep := PollIntervalActiveMs;
-                LastActivityMs := GetTickCount;
-                UpdateStatusHeader('MCP: idle');
-                UpdateStatsLine(
-                    (GetTickCount - StatusStartTick) Div 1000,
-                    StatusRequestCount,
-                    StatusTotalAltiumMs,
-                    (AutoShutdownMs - (GetTickCount - LastActivityMs)) Div 1000);
-                { Perf row already updated in-place by TrackPerf (called }
-                { from AppendLogLine inside ProcessSingleRequest). Skip  }
-                { the full RefreshPerfPanel rebuild that used to flash  }
-                { the visible memo on every command.                     }
-            End
-            Else
-            Begin
-                Inc(IdleCount);
-                If IdleCount > IdleThreshold Then
-                    CurrentSleep := PollIntervalIdleMs;
-                If (IdleCount Mod 10) = 0 Then
-                    UpdateStatsLine(
-                        (GetTickCount - StatusStartTick) Div 1000,
-                        StatusRequestCount,
-                        StatusTotalAltiumMs,
-                        (AutoShutdownMs - (GetTickCount - LastActivityMs)) Div 1000);
-            End;
-
-            If CurrentSleep >= PollIntervalIdleMs Then
-            Begin
-                For I := 1 To YieldIterations Do
-                Begin
-                    If Not MCPYield(StopPath) Then Break;
-                    Sleep(CurrentSleep Div YieldIterations);
-                End;
-                ActiveTickCount := 0;
-            End
-            Else
-            Begin
-                Inc(ActiveTickCount);
-                If ActiveTickCount >= YieldEveryNActive Then
-                Begin
-                    If Not MCPYield(StopPath) Then Break;
-                    ActiveTickCount := 0;
-                End;
-                Sleep(CurrentSleep);
-            End;
-        End;
-    Except
-        { Do not turn an exception into a claimed clean shutdown, or touch
-          possibly destroyed status controls on this path. }
-        LoopFailed := True;
-        MCPStopReason := 'loop-exception';
-    End;
-
-    Running := False;
-    If Not LoopFailed Then
+    { ARM AND RETURN. Returning is the fix: Altium's own message loop resumes,  }
+    { nothing holds the thread, and the keyboard behaves normally. Everything   }
+    { the loop used to do now happens in MCPTimerTick, off tmr_MCP.OnTimer.     }
+    { ArmMCPTimer returns whether the timer is ACTUALLY enabled afterwards,     }
+    { read back rather than assumed - the same trap the P2 probe hit. Without   }
+    { that check a missing control leaves a session that logged _session_start, }
+    { set Running := True, and will never serve a request: a bridge that looks  }
+    { up and is dead. Fail loudly instead.                                      }
+    If Not ArmMCPTimer(MCPCurrentInterval) Then
     Begin
-        If MCPHostAvailable(0) Then HideStatusForm(0);
+        MCPLoopFailed := True;
+        MCPStopReason := 'timer-arm-failed';
+        Running := False;
+        FinaliseMCPServer(0);
     End;
-    Try
-        CleanupMCPServer(0);
-    Except
-        LoopFailed := True;
-        MCPStopReason := 'cleanup-exception';
-    End;
-    Try
-        If LoopFailed Then
-            AppendLog(FormatLogStamp(0) + ',0,_session_aborted,reason=' + MCPStopReason)
-        Else
-            AppendLog(FormatLogStamp(0) + ',0,_session_end,requests='
-                + IntToStr(StatusRequestCount) + ',reason=' + MCPStopReason);
-    Except End;
 End;
+
 
 {..............................................................................}
 { Write the 'stop' file so a running StartMCPServer exits on its next poll.   }

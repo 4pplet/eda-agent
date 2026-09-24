@@ -100,17 +100,24 @@ Const
     PROBE_MAX_TICKS     = 120;
 
 
-{ Ctrl+Z is deferred while the bridge holds the main thread, and the presses   }
-{ REPLAY as an undo burst when it detaches (TODO P0, cause class established    }
-{ 2026-09-23: idle and minimized both still fail, menu undo works, presses are  }
-{ buffered not swallowed). Until the event-driven redesign lands, the only      }
-{ thing standing between that and a silently reverted board is the operator     }
-{ remembering. This goes in the CAPTION on purpose: the title bar is readable   }
-{ in the taskbar while the form is MINIMIZED, which is exactly when the         }
-{ constraint is easiest to forget. A label inside the form is not.              }
+{ THE Ctrl+Z WARNING IS GONE BECAUSE THE BUG IS FIXED, not because it was      }
+{ tidied away. Verified live on 2026-09-24 against 2026.09.24.2: with the      }
+{ bridge attached a press undoes AT THAT MOMENT, and detaching produces no     }
+{ burst at all - both halves of the acceptance criterion recorded on           }
+{ 2026-09-23 before any code was written. Timer dispatch no longer holds the   }
+{ main thread, so keyboard-to-command dispatch is never deferred.              }
+{                                                                              }
+{ Leaving the warning up would have been worse than useless: an operator who   }
+{ learns the caption lies about one thing stops trusting it about the others.  }
+{                                                                              }
+{ IF THE BLOCKING LOOP IS EVER RESTORED, PUT THIS BACK. The caption is where   }
+{ it belongs - readable in the taskbar while the form is MINIMIZED, which is   }
+{ exactly when the constraint is easiest to forget, and a label inside the     }
+{ form is not. Kept as a function rather than deleted so restoring it is one   }
+{ line, and so every call site stays wired.                                    }
 Function KeyboardWarningSuffix(Dummy : Integer) : String;
 Begin
-    Result := '  ***  NO Ctrl+Z - use Edit menu  ***';
+    Result := '';
 End;
 
 Procedure RefreshSelectedLabel(Dummy : Integer);
@@ -680,6 +687,82 @@ Begin
 End;
 
 
+{ MCP dispatch timer =========================================================}
+{                                                                              }
+{ tmr_MCP is a DFM component like tmr_Spinner and tmr_Probe, and everything    }
+{ that touches it is in this file, because of two DelphiScript scope rules     }
+{ learned the hard way on 2026-09-23/24:                                       }
+{   1. A DFM control identifier is in scope ONLY in the .pas paired with the   }
+{      .dfm - "Undeclared identifier: tmr_MCP" from Dispatcher.pas, while the  }
+{      form itself loaded fine.                                                }
+{   2. A DFM event handler binds only to a procedure in that same paired .pas, }
+{      exactly as a real Delphi DFM resolves against the form class's          }
+{      published methods. A handler named in the DFM but defined elsewhere     }
+{      binds to NOTHING, SILENTLY: the timer enables, no error is raised, and  }
+{      no tick ever runs.                                                      }
+{                                                                              }
+{ Both rules stand. What is UNSETTLED is whether this handler may call FORWARD  }
+{ into Dispatcher.pas, which in the DEPLOYED document order comes after this    }
+{ file - Dispatcher is last, see create_shared_runtime.py. The parked branch    }
+{ assumed it may not and abandoned the DFM route on that basis. Nobody tested   }
+{ it. This build tests it: the handler is here, three lines, and MCPTimerTick   }
+{ in Dispatcher.pas does the work.                                              }
+{                                                                              }
+{ An earlier version of this comment claimed the call was already proven, by    }
+{ this file's own calls to CurrentSelectedProject in SelectedProject.pas. IT IS }
+{ NOT. SelectedProject.pas is document 10 and this is 11, so that is a BACKWARD }
+{ call; and it sits behind "If Not SELECTED_PROJECT_READ_ONLY Then Exit", so it }
+{ does not run at all outside the shared profile. Two separate reasons it       }
+{ proves nothing. The claim was read off the checkout's PrjScr, which is not    }
+{ the file that gets deployed.                                                  }
+{                                                                              }
+{ Outcomes, written down so the result is unambiguous when it arrives:          }
+{   - "Undeclared identifier: MCPTimerTick" at script start -> forward calls do }
+{     not resolve; the DFM route is closed and the fix needs another mechanism. }
+{   - Starts clean but no _tick_first in activity.log -> forward calls are fine }
+{     and rule 3 bit again: the DFM did not bind this handler.                  }
+{   - _tick_first present -> both fine.                                         }
+
+Procedure tmr_MCPTimer(Sender : TObject);
+Begin
+    MCPTimerTick(0);
+End;
+
+{ Arm, disable and re-pace. These live here rather than in Dispatcher.pas only }
+{ because of rule 1 above: they name tmr_MCP.                                  }
+{                                                                              }
+{ ArmMCPTimer reads Enabled BACK instead of assuming the assignment took, the  }
+{ same trap the P2 probe hit. Without it a form that failed to carry tmr_MCP   }
+{ would leave a session that logged _session_start, set Running := True, and   }
+{ will never serve a request - a bridge that looks up and is dead. StartMCPServer}
+{ turns a False here into an explicit timer-arm-failed finalise.               }
+Function ArmMCPTimer(IntervalMs : Integer) : Boolean;
+Begin
+    Result := False;
+    Try
+        tmr_MCP.Enabled  := False;
+        tmr_MCP.Interval := IntervalMs;
+        tmr_MCP.Enabled  := True;
+        Result := tmr_MCP.Enabled;
+    Except End;
+End;
+
+Procedure DisableMCPTimer(Dummy : Integer);
+Begin
+    Try tmr_MCP.Enabled := False; Except End;
+End;
+
+{ Adaptive pacing: the interval replaces the old Sleep. Written only when it   }
+{ changes, so a steady state is not re-assigning the property every tick.      }
+Procedure SetMCPTimerInterval(IntervalMs : Integer);
+Begin
+    Try
+        If tmr_MCP.Interval <> IntervalMs Then
+            tmr_MCP.Interval := IntervalMs;
+    Except End;
+End;
+
+
 Procedure ApplyAlwaysOnTop(Dummy : Integer);
 Begin
     Try
@@ -766,10 +849,9 @@ Begin
             { invisible warning is worse than none. Hints expand freely.        }
             lbl_Permissions.Hint := 'Requires an explicitly selected project. '
                 + 'Compile may create cache/report files. Editing permissions are not implemented.'
-                + #13#10 + 'KEYBOARD UNDO IS DEFERRED while this bridge is attached: '
-                + 'Ctrl+Z does nothing now and the presses REPLAY as an undo burst on detach. '
-                + 'Use the Edit menu, which works normally. If you pressed it anyway, '
-                + 'check the board after detaching and Ctrl+Y back any unwanted reverts.';
+                + #13#10 + 'Keyboard undo works normally while this bridge is attached '
+                + '(fixed 2026-09-24 by timer dispatch; it was deferred on every '
+                + 'earlier runtime, and the presses replayed as a burst on detach).';
             { Children have already been DPI-scaled by the native form loader.
               Use their bounds and the scaled button/label gap, not raw pixels. }
             pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height
@@ -857,6 +939,30 @@ Begin
     { left it enabled.                                                          }
     Try tmr_Probe.Enabled := False; Except End;
     Try tmr_Spinner.Enabled := False; Except End;
+
+    { tmr_MCP is deliberately LEFT RUNNING for one more tick, which contradicts }
+    { DESIGN section 7's "StatusFormClose must also disable the timer". That    }
+    { note assumed closing FREES the form. It does not here: the pre-redesign   }
+    { teardown called HideStatusForm(0) AFTER this handler had run, in          }
+    { production, without crashing - so the close hides and the controls        }
+    { survive. Setting Action := caHide explicitly would be better still, but   }
+    { caHide is declared nowhere in this host and an undeclared identifier is a }
+    { compile-time fatal, so the VCL default is what we rely on.                }
+    {                                                                           }
+    { Disabling it here would strand the session: FinaliseMCPServer is what     }
+    { writes _session_end and clears the IPC files, and only a tick reaches it. }
+    { Running := False above makes the very next tick finalise, and finalise    }
+    { disables the timer FIRST exactly as section 7 prescribes. Exposure is one }
+    { tick, 10-30 ms, against a form that still exists.                         }
+    {                                                                           }
+    { Calling FinaliseMCPServer straight from here WOULD now compile - the      }
+    { one-way-visibility claim this comment used to make was wrong, see the     }
+    { tmr_MCPTimer block above. It is still not done here, for a reason that    }
+    { has nothing to do with scope: finalise calls HideStatusForm, so it would  }
+    { hide the form from inside that form's own OnClose. That may well be fine, }
+    { and it is a tidier teardown, but it is an untested re-entrant path and    }
+    { bundling it with the Ctrl+Z fix would confound the one test this deploy   }
+    { exists to run. Tracked in TODO as a follow-up.                            }
 End;
 
 

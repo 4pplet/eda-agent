@@ -1,7 +1,15 @@
 # Design: event-driven dispatch (replacing the blocking poll loop)
 
-**Status: design for review. No code written.** The prerequisite in §2 must pass
-before any of §3 onward is built.
+**Status: FIXED AND VERIFIED LIVE 2026-09-24.** The Ctrl+Z P0 is closed.
+Script `2026.09.24.2` ran in Altium against the 22p: with the bridge attached a
+press undid at that moment, and detaching produced **no burst at all** - both
+halves of the acceptance criterion, neither softened. P1, P2 and the ordering
+question all answered; P3 and gate 4's remaining reads are still open, so the
+runtime is **not yet activated**.
+
+The 2026-09-24 section below records the ordering answer: forward cross-unit
+calls **do** resolve across PrjScr documents, so "a callee must come earlier
+than its caller" binds only `build.py`'s concatenated monolith.
 
 ## 1. Why this is now the fix rather than one option
 
@@ -51,48 +59,104 @@ a probe is ticking, and re-run the shutdown probe. Note §8 has already been
 corrected — quit-while-attached crashes *today*, so P3's bar is "no worse than
 today", not "clean".
 
-## ⛔ 2026-09-24: §3–§7 ARE WRITTEN AND CANNOT BE WIRED. Parked on branch `timer-dispatch`
+## ✅ 2026-09-24: the wiring blocker was never real - measured, not argued
 
-The code exists and is lint-clean. **The timer cannot be connected to its
-handler in this file layout**, and four compile attempts closed every route.
-This is not a coding problem; it is a structural one, and §9's sequencing was
-wrong to treat wiring as trivial.
+**Result first: the forward call works.** `StatusForm.pas` is document 11 of
+the deployed runtime and `Dispatcher.pas` is 14. The script compiled, started,
+and logged `_tick_first` 67 ms after `_session_start`. So a DFM event handler
+*can* reach the dispatcher, and route 3 was viable the whole time.
 
-| Route | Result |
+The history below is kept because the way this was got wrong twice is worth
+more than the answer. One reading declared the blocker real without testing it;
+a second declared it disproved on counter-examples read from the wrong file.
+
+What is true — the DFM scope rules, each bought with a failed Altium compile:
+
+1. A nested routine cannot read the enclosing routine's params or locals
+   (*"Can't access top level variable"*).
+2. A DFM control identifier is in scope **only** in the `.pas` paired with the
+   `.dfm` (*"Undeclared identifier: tmr_MCP"* from `Dispatcher.pas`).
+3. A DFM event handler binds only to a procedure in that same paired `.pas`, and
+   **fails silently** otherwise — timer enables, session starts, no tick, no error.
+4. Runtime event assignment is unavailable: `X.OnTimer := Proc` gives *"Invalid
+   procedure usage"*, `@Proc` gives *"Expression expected but @ found"*.
+
+What is **unverified** — the fifth premise, which nobody has ever tested:
+
+> *"The dispatch handler must call `ProcessSingleRequest`, which is defined after
+> `StatusForm.pas`, so it cannot live there."*
+> *"`Dispatcher.pas` may call into `StatusForm.pas`, never the reverse."*
+
+**The retraction.** On 2026-09-24 this section claimed that premise was
+disproved, citing `StatusForm.pas`→`SelectedProject.pas` and
+`Dispatcher.pas`→`Audit.pas` as live forward calls. **Both citations were wrong,
+for two independent reasons:**
+
+1. **Wrong project file.** They were read off this repo's `Altium_API.PrjScr`,
+   which is IDE-only and sets `ReorderDocumentsOnCompile=1`. The shared runtime
+   does not deploy it. PLT-hw's `create_shared_runtime.py:36-41` **generates** a
+   different one with an explicit dependency order and
+   `ReorderDocumentsOnCompile=0`:
+   `… Audit(9), SelectedProject(10), StatusForm.pas(11), StatusForm.dfm(12),
+   SelfTest(13), Dispatcher.pas(14)`. In *that* order both cited calls are
+   ordinary **backward** calls and prove nothing.
+2. **The code path doesn't run.** Both `StatusForm.pas` calls sit behind
+   `If Not SELECTED_PROJECT_READ_ONLY Then Exit;`, so in the checkout profile
+   they never execute regardless of ordering.
+
+There is therefore **no verified counter-example, and none confirming the rule
+either.** `ReorderDocumentsOnCompile=0` beside a hand-pinned dependency order is
+weak evidence the original author believed it.
+
+**A genuine finding survives the retraction:** there are two `Altium_API.PrjScr`
+files with different document orders, and the one in the repo is not the one
+that compiles. Reasoning about compile order from the checkout is how this went
+wrong. `lint.py`'s `PAS_FILES` matches the **deployed** order, so its
+cross-file rule was validating the right thing all along; a new test in PLT-hw
+(`test_manage_shared_runtime.py::DeployedCompileOrderTests`) now fails if the
+two lists drift apart.
+
+**What it cost.** Route 3 was abandoned on an untested premise, then
+re-embraced on a bad proof. The one experiment that settles it — a handler *in*
+`StatusForm.pas` calling *into* `Dispatcher.pas` — still had not been run.
+
+**This build runs it.** The wiring below is route 3, deployed as an experiment
+with a named failure mode rather than as a change believed correct:
+
+| Outcome at script start | Means |
 |---|---|
-| Handler in `Dispatcher.pas`, timer as a **DFM component** | `Undeclared identifier: tmr_MCP` — a DFM control is in scope only in the `.pas` paired with the `.dfm` |
-| Handler in `Dispatcher.pas`, **DFM names the handler** | Binds to **nothing, silently**. Timer enables, `_session_start` logs, no tick ever runs. A DFM event resolves against the paired unit's procedures, like a real Delphi DFM against published methods |
-| Timer created in code, `OnTimer := tmr_MCPTimer` | `Invalid procedure usage` — DelphiScript **calls** the identifier instead of referencing it |
-| Same, `OnTimer := @tmr_MCPTimer` | `Expression expected but @ found` — **`@` is not a supported operator** |
+| `Undeclared identifier: MCPTimerTick` | rule is **real**; the DFM route is closed and the fix needs another mechanism |
+| starts clean, no `_tick_first` | ordering fine; **rule 3** bit again — the DFM did not bind the handler |
+| `_tick_first` present | both fine; the arrangement below is correct |
 
-**Runtime event assignment is unavailable, and the DFM route requires the
-handler to live in `StatusForm.pas`.** It cannot: it calls
-`ProcessSingleRequest`, and `Main.pas` states the rule outright — *"the Altium
-project compiles files in DesignN order and a callee must come earlier than its
-caller."*
+Note the cycle this sits on: `StatusForm.pas` must hold both the DFM handler
+(needing `Dispatcher`, later) and the UI helpers `Dispatcher` calls (earlier).
+**If the ordering rule is real, that cycle is unsatisfiable and no arrangement
+of these files works** — the fix would have to stop being a DFM timer.
 
-### The only remaining path: restructure the file order
+**The wiring under test:**
 
-The handler must live in `StatusForm.pas`, so everything it calls must be
-defined **before** `StatusForm.pas`. Today the dependency is circular:
-`ProcessSingleRequest` calls `SetInFlight`, `AppendLogLine` and
-`ResetInFlight`, which touch form controls and must stay in `StatusForm.pas`.
+- `StatusForm.dfm` declares `tmr_MCP` with `OnTimer = tmr_MCPTimer` — rule 2 and
+  rule 3 satisfied, same as `tmr_Spinner` and `tmr_Probe`.
+- `StatusForm.pas` defines `tmr_MCPTimer`, three lines, calling `MCPTimerTick(0)`;
+  plus `ArmMCPTimer` / `DisableMCPTimer` / `SetMCPTimerInterval`, which have to be
+  there because they name `tmr_MCP` (rule 2).
+- `Dispatcher.pas` keeps `MCPTimerTick` and all dispatch state. Exactly **one**
+  call crosses forwards, and it is the three-line shim. That is the bet.
+- `MCPYield` is **deleted**, not left unused: it wrapped the file's only
+  `Application.ProcessMessages`, and an unused helper for the exact operation
+  that causes the P0 is a landmine. A test now asserts zero occurrences.
 
-**Break the cycle by hoisting the UI calls out of `ProcessSingleRequest`** so
-it returns what happened instead of reporting it, letting the caller — the tick
-handler, in `StatusForm.pas` — do the UI updates. Then the dispatch core moves
-ahead of `StatusForm.pas` and the DFM timer binds normally.
+**Guards added so this class of failure is cheaper next time.** Rule 3 fails
+*silently*, which is what made it expensive. `tests/test_pas_project_consistency.py`
+now fails if any `StatusForm.dfm` handler names a procedure `StatusForm.pas` does
+not define, and `MCPTimerTick` logs `_tick_first` so "armed but never fired" is
+distinguishable from "fired and something else broke".
 
-That is surgery on the hot request path and needs its own session, its own
-review, and the full acceptance pass §8 already demands. **Do not attempt it as
-a follow-on to a debugging session.**
-
-### What still stands
-
-P1 and P2 both passed and are not invalidated: a `TTimer` on that form **does**
-fire after the script returns, at 1.00 ticks/s, minimized. The mechanism works;
-only the wiring is blocked. The blocking loop remains in production on `main`,
-and `selected-readonly-classes-20260923` is the qualified runtime.
+**Residual, not fixed here:** `Library.pas` still calls
+`Application.ProcessMessages` three times inside handlers. Those run *during* a
+tick and can still defer keyboard dispatch for the duration of a library
+command. Out of scope for this change; recorded in TODO.
 
 ## 2. Hard prerequisite — do not write §3 until this passes
 

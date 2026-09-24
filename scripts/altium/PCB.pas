@@ -1392,7 +1392,8 @@ Var
     Iterator : IPCB_BoardIterator;
     Violation : IPCB_Violation;
     JsonItems, ReportPath, AllowStr : String;
-    First, ReportPresent, AllowModal : Boolean;
+    First, ReportPresent, AllowModal, ReportFresh : Boolean;
+    ReportBefore, ReportAfter : Integer;
 Begin
     Board := GetPCBBoardAnywhere(0);
     If Board = Nil Then
@@ -1423,8 +1424,36 @@ Begin
         Exit;
     End;
 
+    { TIMESTAMP THE REPORT BEFORE THE RUN. This is what separates a board    }
+    { that passed from a dialog that was cancelled, and those used to be     }
+    { byte-identical: both produced violation_count 0 with an empty list.    }
+    { Merely checking the report EXISTS does not do it - a stale .DRC from   }
+    { any earlier run satisfies that, so a cancelled check on a              }
+    { previously-checked board still reported good news.                     }
+    {                                                                         }
+    { FileAge returns a DOS date-time stamp, or -1 when the file is absent.  }
+    { Those stamps are chronologically ordered, so a plain > comparison      }
+    { answers "did Altium rewrite this report just now". Absent-then-present }
+    { counts as fresh because -1 is below every real stamp.                  }
+    {                                                                         }
+    { LIMIT, stated rather than papered over: DOS stamps have TWO-SECOND     }
+    { granularity. A run finishing inside the same two-second tick as the    }
+    { previous report would read as unchanged and be reported UNCONFIRMED -  }
+    { the safe direction, since it understates confidence rather than        }
+    { overstating it. It cannot produce a false "confirmed".                  }
+    ReportPath := '';
+    Try ReportPath := ChangeFileExt(Board.FileName, '.DRC'); Except End;
+    ReportBefore := -1;
+    If ReportPath <> '' Then
+        Try ReportBefore := FileAge(ReportPath); Except ReportBefore := -1; End;
+
     ResetParameters;
     RunProcess('PCB:DesignRuleCheck');
+
+    ReportAfter := -1;
+    If ReportPath <> '' Then
+        Try ReportAfter := FileAge(ReportPath); Except ReportAfter := -1; End;
+    ReportFresh := (ReportAfter >= 0) And (ReportAfter > ReportBefore);
 
     // Count violations by iterating
     ViolationCount := 0;
@@ -1456,36 +1485,48 @@ Begin
     { list, byte-identical to a board that genuinely passes. A caller was    }
     { told the good news either way, which is the worst shape this bug takes.}
     {                                                                         }
-    { There is no verified silent form of the process. The only corroboration }
-    { available in-process is the .DRC report Altium writes beside the board  }
-    { when the check actually runs, so its presence is reported and a zero is }
-    { explicitly qualified rather than left to speak for itself. Nothing is   }
-    { deleted to force the issue: that would mean removing a file from the    }
-    { user's project folder to answer a question.                             }
-    ReportPath := '';
+    { There is no verified silent form of the process, so the run cannot be  }
+    { made non-blocking. What CAN be fixed is the honesty of the answer, and }
+    { that is done above by timestamping the .DRC report across the call.    }
+    {                                                                         }
+    { This used to check only that the report EXISTED, which is not the same }
+    { question: a stale .DRC from any earlier run satisfies it, so cancelling }
+    { the dialog on a previously-checked board still reported drc_confirmed. }
+    { Freshness is the real signal and existence is kept only as context.    }
+    {                                                                         }
+    { Nothing is deleted to force the issue: that would mean removing a file }
+    { from the user's project folder to answer a question.                    }
     ReportPresent := False;
-    Try ReportPath := ChangeFileExt(Board.FileName, '.DRC'); Except End;
     If ReportPath <> '' Then
         Try ReportPresent := FileExists(ReportPath); Except End;
 
-    If (ViolationCount = 0) And (Not ReportPresent) Then
+    { drc_confirmed is now FRESHNESS, not existence. Only a report Altium     }
+    { rewrote during this call proves the check ran, so a zero is trustworthy }
+    { exactly when ReportFresh is true and never otherwise.                   }
+    If Not ReportFresh Then
         Result := BuildSuccessResponse(RequestId,
-            '{"violation_count":0,"violations":[],"drc_confirmed":false'
-            + ',"drc_triggered":true'
-            + ',"report_present":false'
-            + ',"report_path":"' + EscapeJsonString(ReportPath) + '"'
-            + ',"reason":"no violations were found AND no .DRC report exists, '
-            + 'so this zero does NOT mean the board is clean. The Design Rule '
-            + 'Checker is a dialog on this build: if it was cancelled the '
-            + 'check never ran. Confirm the dialog was answered, or drive it '
-            + 'with app_run_ui_command."}')
+            '{"violation_count":' + IntToStr(ViolationCount) + ','
+            + '"violations":[' + JsonItems + '],'
+            + '"drc_triggered":true,'
+            + '"drc_confirmed":false,'
+            + '"report_present":' + BoolToJsonStr(ReportPresent) + ','
+            + '"report_path":"' + EscapeJsonString(ReportPath) + '",'
+            + '"reason":"THE CHECK IS NOT CONFIRMED TO HAVE RUN. The .DRC '
+            + 'report was not rewritten during this call, which is what a '
+            + 'CANCELLED Design Rule Checker dialog looks like. Any count '
+            + 'here - including 0 - describes violations left on the board by '
+            + 'some EARLIER run, so a 0 does NOT mean the board is clean. '
+            + 'Re-run and answer the dialog. (A run finishing within the same '
+            + 'two-second file-stamp tick as the previous report also lands '
+            + 'here; re-running settles it.)"}')
     Else
         Result := BuildSuccessResponse(RequestId,
             '{"violation_count":' + IntToStr(ViolationCount) + ','
+            + '"violations":[' + JsonItems + '],'
             + '"drc_triggered":true,'
-            + '"drc_confirmed":' + BoolToJsonStr(ReportPresent) + ','
+            + '"drc_confirmed":true,'
             + '"report_present":' + BoolToJsonStr(ReportPresent) + ','
-            + '"violations":[' + JsonItems + ']}');
+            + '"report_path":"' + EscapeJsonString(ReportPath) + '"}');
 End;
 
 {..............................................................................}
@@ -6202,9 +6243,13 @@ End;
 { response says so via drc_triggered / note.                                 }
 {..............................................................................}
 
-Function PCB_GetClearanceViolations(Params : String; RequestId : String) : String;
+{ Split ForBoard/wrapper so the shared selected-project dispatcher can call    }
+{ this against the board it has already resolved and revalidated, rather than  }
+{ letting GetPCBBoardAnywhere wander. Same shape as the trace-lengths and      }
+{ room-rules reads.                                                            }
+Function PCB_GetClearanceViolationsForBoard(Board : IPCB_Board; Params : String;
+                                            RequestId : String) : String;
 Var
-    Board : IPCB_Board;
     Iterator : IPCB_BoardIterator;
     Violation : IPCB_Violation;
     FilterNet, ViolDesc, ViolName : String;
@@ -6212,7 +6257,6 @@ Var
     First : Boolean;
     Count : Integer;
 Begin
-    Board := GetPCBBoardAnywhere(0);
     If Board = Nil Then
     Begin
         Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
@@ -6259,6 +6303,19 @@ Begin
         + '"note":"Existing violations only -- no DRC was run. 0 does not mean '
         + 'the board passes if DRC has never been run on it.",'
         + '"violations":[' + JsonItems + ']}');
+End;
+
+Function PCB_GetClearanceViolations(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetClearanceViolationsForBoard(Board, Params, RequestId);
 End;
 
 {..............................................................................}

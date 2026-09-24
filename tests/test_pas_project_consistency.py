@@ -5,7 +5,11 @@
 Three parallel surfaces reference the .pas files in scripts/altium/:
 
   - scripts/altium/build.py FILES list: defines what gets concatenated
-    into Altium_MCP.pas, the deployed bundle.
+    into Altium_MCP.pas. NOT the deployed artifact -- this docstring
+    used to say "the deployed bundle" and that is wrong. Deployment is
+    `eda-agent install-scripts`, which copies the .pas/.dfm/.PrjScr set,
+    and Altium compiles the documents Altium_API.PrjScr lists.
+    Altium_MCP.pas is gitignored and is not one of them.
 
   - scripts/altium/Altium_API.PrjScr [DocumentN] sections: defines
     which files are openable in Altium's scripting IDE for debugging.
@@ -310,4 +314,50 @@ def test_disk_pas_files_are_in_build_or_excluded():
         f"the known exception sets: {sorted(unexpected)}. Either add to "
         f"build.py (deploys to the bundle), PRJSCR_ONLY (IDE-debug only), "
         f"or EXCLUDED (build output / legacy)."
+    )
+
+
+def test_every_dfm_event_handler_is_defined_in_statusform_pas():
+    """A DFM event handler bound to nothing is the silent failure.
+
+    MEASURED 2026-09-24. StatusForm.dfm named ``tmr_MCPTimer`` on
+    tmr_MCP.OnTimer while the procedure lived in Dispatcher.pas. The
+    form loaded, the timer enabled, the session logged _session_start,
+    and no tick ever ran. No error, no exception, no log line. A DFM
+    resolves handler names against the published methods of the class
+    its paired unit defines, exactly as real Delphi does, so a handler
+    in another unit binds to NOTHING.
+
+    That is the worst failure shape in this codebase: the bridge comes
+    up looking healthy and serves nothing. It costs one cycle of an
+    Altium restart to find by hand and is free to find here.
+
+    Note this rule is about the PAIRED FILE, not about order. Calls
+    across PrjScr documents resolve in any direction -- see
+    CROSS_FILE_ORDER_EXEMPT in lint.py -- which is why the handler can
+    sit here and hand straight off to Dispatcher.pas.
+    """
+    dfm = (SCRIPTS_DIR / "StatusForm.dfm").read_text(encoding="utf-8",
+                                                     errors="replace")
+    handlers = set(re.findall(r"^\s*On\w+\s*=\s*(\w+)\s*$", dfm,
+                              flags=re.MULTILINE))
+    assert len(handlers) > 10, (
+        f"only {len(handlers)} event handlers parsed from the .dfm; the "
+        f"parse broke and this check has gone blind")
+
+    source = (SCRIPTS_DIR / "StatusForm.pas").read_text(encoding="utf-8",
+                                                        errors="replace")
+    defined = {
+        m.group(1).lower()
+        for m in re.finditer(r"^\s*(?:Function|Procedure)\s+(\w+)",
+                             source, flags=re.MULTILINE | re.IGNORECASE)
+    }
+
+    unbound = sorted(h for h in handlers if h.lower() not in defined)
+    assert not unbound, (
+        f"StatusForm.dfm binds these event handlers to procedures that "
+        f"StatusForm.pas does not define: {unbound}. They will bind to "
+        f"nothing and fail SILENTLY -- no error, no tick, no click. "
+        f"Define them in StatusForm.pas (they may call out to any other "
+        f"document), or remove the binding from the .dfm."
     )

@@ -185,6 +185,116 @@ either way: stop the bridge before quitting Altium.
 
     **P3 is the only prerequisite left.**
 
+  - **✅✅ 2026-09-24: THE Ctrl+Z P0 IS FIXED. Operator-verified live on script
+    `2026.09.24.2`.** Both halves of the acceptance criterion recorded on
+    2026-09-23 before any code was written:
+    - **"a press must undo at that moment"** — operator: *"ctrlz works!"*
+    - **"detaching must produce no burst at all"** — operator: *"nothing moved
+      when detatching, no queded undos since they happen"*
+
+    Nothing was softened. The second half is the one that killed every earlier
+    candidate fix, and it passed clean.
+    - **The ordering question is SETTLED, and the rule does not apply.**
+      `StatusForm.pas` is document 11 of the deployed runtime and
+      `Dispatcher.pas` is 14; the forward call compiled and ran, logging
+      `_tick_first` 67 ms after `_session_start`. So "a callee must come
+      earlier than its caller" is real **only** for `build.py`'s concatenated
+      `Altium_MCP.pas`, never across PrjScr documents. Two earlier answers to
+      this were wrong in opposite directions; the live test cost 30 seconds
+      and should have been run on 2026-09-23.
+    - **Pacing is not a regression.** `pcb.get_object_classes` took 4281 ms
+      under timer dispatch against 3985/3922/3922/4125 ms on the blocking
+      loop — one sample against four, with a dirty board. The runbook's
+      "well under a second" expectation was simply wrong; this read is ~4 s on
+      both runtimes.
+    - **The caption warning is REMOVED** (`KeyboardWarningSuffix` now returns
+      empty, kept as a function so restoring it is one line). An operator who
+      learns the caption lies about one thing stops trusting it about the
+      others. Script bumped to `2026.09.24.3` for that change.
+    - **Guards that earned their place.** `_tick_first` is what turned "is it
+      running?" into a one-line answer, and the DFM-binding test would have
+      caught the silent failure that cost a cycle. Keep both.
+    - **NOT closed by this:** the shutdown crash (quit-while-attached still
+      AVs), and `Library.pas`'s three `Application.ProcessMessages` calls
+      inside handlers, which this test did not exercise.
+    - **Gate 4 read re-qualification: PASSED 2026-09-24** on script
+      `2026.09.24.2`, board saved (`dirty_doc_count: 0`). Every stable metric
+      matches its baseline exactly: `erc` **187**, `bom` **172**, `rooms`
+      **0**, `rules --expect` **1 matched / 3 mismatched / 8 missing**,
+      `objectclasses` **18 classes, 11 counts_unreliable**,
+      `nets --designator R404` PA0/LNSW[0]. All six `audit` checks ran in
+      78-1437 ms - that is the one exercising `Library.pas`, the path this fix
+      does NOT touch, so it was the one that mattered.
+      - Three audit numbers moved against the **2026-09-14** checkpoint, all
+        downward: via_antennas 16 -> 12, signal_vias_without_return 72 -> 53,
+        pads_near_edge 2 -> 0. That baseline is ten days and a lot of layout
+        old, so these are near-certainly real board changes, not read
+        differences. **A strict A/B - the same board read through the old
+        runtime - was NOT done**; it costs a full script swap. The case rests
+        on every stable metric matching.
+    - **Shutdown, 2026-09-24: the AV did not reproduce, and that is one
+      observation, not a fix.** Operator quit Altium with the bridge attached
+      (*"closing altium with mcp running now also seem to work"*), and
+      confirmed on follow-up that there was **no error dialog at all**
+      (*"no error when closing altium"*). That distinction was asked for
+      deliberately: "no dialog" and "a dialog I dismissed" are different
+      results. **0 orphan IPC files** left behind.
+      - **But `FinaliseMCPServer` never ran.** Session 2 opened 12:10:24, last
+        entry 12:12:09, then the log simply stops - no `_session_end` and no
+        `_session_aborted`. Altium exited and took the script with it before a
+        tick could finalise. So the state moved from "AV + no end log" to "no
+        AV + no end log": the crash symptom is gone, graceful teardown is not
+        achieved.
+      - **QUIT #2, 2026-09-24, script `2026.09.24.3`: same result.** Operator
+        confirmed the bridge was active at exit and there was no error dialog
+        (*"no error and MCP was active when exiting"*). The session log again
+        stops mid-stream - last entry a `pcb.get_clearance_violations` at
+        13:13:06 - with no `_session_end` and no `_session_aborted`. So the
+        signature is stable across two runtimes and two quits: **no AV, no
+        graceful finalise.**
+      - **Do not close this P0 on one quit.** The AV is a race against
+        Altium's teardown ordering and a 10 ms tick can miss the window on any
+        given run. Repeat the quit 2-3 times before claiming anything.
+      - If it does hold, the likely reason is simply that the script no longer
+        holds the main thread through teardown - the same root cause as the
+        Ctrl+Z P0, fixed by the same change, which is what
+        DESIGN-event-driven-dispatch.md section 1 predicted when it said "two
+        P0s, one piece of work".
+    - **P3 is still NOT done** - closing the *form* with its X while ticks run
+      is a narrower case than quitting Altium and has not been exercised.
+    - **Qualification is INCOMPLETE.** Gate 4's compiled reads (`nets`,
+      Gate 4 has now passed (above), but P3 has not run and the shutdown
+      result needs repeating. `ACTIVE-RUNTIME.txt` therefore still points at
+      `selected-readonly-classes-20260923`.
+    - **The genuine finding from the earlier wrong turn.** There are TWO
+      `Altium_API.PrjScr` files with different orders and the repo's is not
+      the one that compiles. `lint.py`'s `PAS_FILES` matches the DEPLOYED
+      order, so its cross-file rule was validating the right thing all along.
+      `test_manage_shared_runtime.py::DeployedCompileOrderTests` pins the
+      deployed sequence and fails if the two lists drift apart.
+    - **Guards added, because rule 3 fails SILENTLY.**
+      `test_pas_project_consistency.py` now fails if any `StatusForm.dfm`
+      handler names a procedure `StatusForm.pas` does not define — verified to
+      fail when deliberately broken. `MCPTimerTick` logs `_tick_first`, so
+      "armed but never fired" is distinguishable from "fired and something
+      else broke". `test_dispatcher_shutdown.py` asserts `Dispatcher.pas`
+      contains **zero** `Application.ProcessMessages`.
+    - **`MCPYield` deleted.** Nothing called it under timer dispatch, and it
+      wrapped the file's only message-pump call — an unused helper for the
+      exact operation that causes this P0 is a landmine, not dead weight.
+    - **Residual, NOT fixed and not to be forgotten:** `Library.pas` calls
+      `Application.ProcessMessages` three times inside handlers. Those run
+      *during* a tick and can still defer keyboard dispatch for the duration
+      of a library command. The acceptance test below exercises PCB reads, so
+      **a pass does not clear the library path.** Separate item.
+    - **Follow-up, deliberately not bundled:** `StatusFormClose` still leaves
+      `tmr_MCP` running for one tick and lets that tick finalise, rather than
+      calling `FinaliseMCPServer` directly. Direct calling would now compile —
+      the scope argument that ruled it out was the false one — but finalise
+      calls `HideStatusForm`, so it would hide the form from inside that
+      form's own `OnClose`. Untested re-entrant path; bundling it would
+      confound the one test this deploy exists to run.
+
   - **BEFORE-baseline recorded on `2026.09.23.1` (operator, 2026-09-23), the
     revision the rework will be compared against.** With the bridge attached:
     **Ctrl+Z does nothing; on detach every buffered press fires at once, and
@@ -712,8 +822,61 @@ either way: stop the bridge before quitting Altium.
      zone-fit checks (e.g. cap-vs-connector-body during compaction).
   4. Client-side `placements --diff` shipped in companion PLT-hw
      2026-09-14 (338393c), no Pascal change needed.
-- [ ] **Native DRC violation read (`pcb.get_drc_violations`) — the gap that bites
-  next.** `erc` covers compiled ERC and `audit` covers our six surfacing checks,
+- [ ] **Expose the DRC RUNNER, and report which rules a run actually checked.**
+  Two halves, and the second is the one that matters.
+  - **The runner.** `PCB_RunDRCForBoard` was split on 2026-09-24 and then
+    REVERTED unbuilt, deliberately: the split alone does nothing, and
+    committing it would have made source `2026.09.24.4` differ from the
+    deployed `2026.09.24.4`, which is precisely the stale-compile hazard the
+    version pin exists to catch. Redo it as one complete change - split, both
+    `SelectedProject.pas` gates, `PCB_READ_COMMANDS` (cap is **100** here, not
+    the reader's 200), the tool and a `rundrc` subcommand - when it is
+    actually going to be deployed. Honesty is already fixed: `drc_confirmed`
+    is report FRESHNESS as of `2026.09.24.4`.
+  - **Policy note to settle first:** a DRC run writes a `.DRC` report into the
+    project folder and **marks the PcbDoc modified** (measured 2026-09-24:
+    `pcb_modified` went true after the operator's native run). That is the
+    same class as `erc`, which compiles and is already permitted, but it does
+    stretch what "selected-project-read-only" covers. Operator call.
+  - **THE RULE-COVERAGE GAP, and it is the more valuable half.** MEASURED
+    2026-09-24: a fresh native DRC returned 220 violations and **`RoutingVias`
+    appeared ZERO times in the report** - it was not enabled in the run. So an
+    absent violation means "not checked", not "compliant", and the violation
+    objects alone cannot tell the two apart. This is the same shape as the
+    `zero_is_not_a_pass` trap one level up: a clean-looking result that is
+    actually silence.
+    - **Baseline from that run, 220 total, for comparison after stage 6:**
+      95 Minimum Solder Mask Sliver, 89 Silk To Solder Mask Clearance, 15 Net
+      Antennae, 12 Un-Routed Net (GND, expected - pours not started), 7 Hole
+      Size, 1 Silk To Silk, 1 Board Outline Clearance. Clearance, Width,
+      Short-Circuit, Hole-To-Hole, Power Plane, Modified Polygon and Height
+      all returned 0.
+      - **The 7 Hole Size violations (3.5mm > 2.54mm) are the PCB MOUNTING
+        HOLES** (operator, 2026-09-24). Expected, not a defect; the stock
+        2.54 mm max is what is wrong, not the holes. Either scope a rule
+        exception or accept them as known - do not chase them.
+      - **1 Board Outline Clearance collision is NOT explained** and is worth
+        a look before the order.
+    - The `.DRC` report DOES list every rule processed with its count
+      (`Processing Rule : Clearance Constraint (Gap=0.15mm) (All),(All)` then
+      `Rule Violations :0`), so the fix is to parse it alongside the violation
+      objects and return `rules_checked`. Until that exists, **never read a
+      zero from `violations` as a pass without checking the report by hand.**
+
+- [x] **Native DRC violation read — BUILT 2026-09-24, awaiting its deploy
+  window.** Shipped as `pcb.get_clearance_violations` / `bridge_read violations`
+  in script `2026.09.24.3`. It turned out to be **wiring, not new code**:
+  `PCB_GetClearanceViolations` had been in `PCB.pas` all along with no
+  `...ForBoard` split and no dispatcher entry — exactly the rooms-read pattern,
+  and exactly what the memory note warns to check before writing anything.
+  **The reader is exposed and the runner is NOT**: `PCB_RunDRC` calls
+  `RunProcess('PCB:DesignRuleCheck')`, which raises the Design Rule Checker
+  modal and once wedged the bridge for 30+ minutes; a modal is unrecoverable
+  from the Python side. The operator runs DRC natively, the bridge reads what
+  it left behind. Three tests hold that line, one of them reading `PCB.pas`
+  itself so the reader stays a read. Original entry follows.
+- [x] ~~**Native DRC violation read (`pcb.get_drc_violations`) — the gap that bites
+  next.**~~ `erc` covers compiled ERC and `audit` covers our six surfacing checks,
   but **nothing reads native DRC**, and the 22p is about to enter the phase where
   DRC is the check that matters: the rules ritual is 1/12 entered, room
   `MIPI_CROSS` is new, and the (b1) lane crossing is routed against clearance,
