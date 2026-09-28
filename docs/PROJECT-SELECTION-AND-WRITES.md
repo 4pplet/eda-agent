@@ -240,6 +240,10 @@ ordinary projects yet.
 
 ### Gate 3: First qualified writes: component metadata
 
+> **2026-09-28:** a concrete first increment of this gate, with an audit of
+> the `set_sch_components_parameters` handler (do not expose it as-is: F1-F7),
+> is proposed in [PROPOSAL-2026-09-28-metadata-write-increment](PROPOSAL-2026-09-28-metadata-write-increment.md).
+
 Start narrowly: update existing, placed schematic string parameters for
 manufacturer, already-approved MPN and datasheet on explicit components. No
 parameter creation/deletion, inherited/managed overrides, value changes,
