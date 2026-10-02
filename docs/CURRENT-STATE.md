@@ -15,8 +15,15 @@ baselines; no installed package/runtime redeployment accompanied publication.
 - Fork: `4pplet/eda-agent`, based on `1b60105cbe0c4bd557007b87bc04dda2fd4ef9a1`.
   This publication checkpoint contains the local integration changes; use its
   actual Git revision, not the old base alone, to reproduce them.
-- Altium 23.3.1; shared scripts `2026.09.24.4`; 34 bounded read tools.
-  Runtime: `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-readonly-drc2-20260924`.
+- Altium 23.3.1; shared scripts `2026.10.02.1`; 35 bounded read tools (since 2026-10-02:
+  `pcb_get_tracks`, copper tracks and arcs in exact coordinates, paged; the violations read
+  paged). Natively qualified on the PLT HS and 22p boards.
+  Runtime: `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-readonly-tracks-20261002`
+  (previous, kept for rollback: `selected-readonly-drc2-20260924`, scripts `2026.09.24.4`).
+  For using the bridge, the one page to read first is PLT-hw
+  `tools/eda-agent/BRIDGE.md` (commands, rules, blind spots; test-enforced against the
+  runtime pointer). Upstream review of 2026-10-02: PLT-hw
+  `tools/eda-agent/UPSTREAM-REVIEW-2026-10-02.md`.
   **Runtime paths are written with the environment variable on purpose.** An
   absolute path here names one machine's private storage, which
   `test_no_client_design_data.py` refuses. Use the variable in committed docs;
