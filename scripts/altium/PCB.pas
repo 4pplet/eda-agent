@@ -6255,7 +6255,7 @@ Var
     FilterNet, ViolDesc, ViolName : String;
     JsonItems : String;
     First : Boolean;
-    Count : Integer;
+    Count, Offset, Limit, Emitted : Integer;
 Begin
     If Board = Nil Then
     Begin
@@ -6264,6 +6264,16 @@ Begin
     End;
 
     FilterNet := ExtractJsonValue(Params, 'net');
+    { Paging added 2026-10-02 (PLT): the list used to stop at 200 rows with no
+      way to read the rest. offset / limit select a page; the defaults (0, 200)
+      give exactly the old response, so existing callers see no change.
+      violation_count stays the TOTAL number of matching violations. }
+    Offset := StrToIntDef(ExtractJsonValue(Params, 'offset'), 0);
+    If Offset < 0 Then Offset := 0;
+    Limit := StrToIntDef(ExtractJsonValue(Params, 'limit'), 200);
+    If Limit < 1 Then Limit := 1;
+    If Limit > 1000 Then Limit := 1000;
+    Emitted := 0;
 
     { No DRC trigger here -- see the header. Iterating eViolationObject is   }
     { a pure board read: it opens no dialog and cannot block the loop.       }
@@ -6285,11 +6295,12 @@ Begin
         // Filter by net if specified (check if net name appears in description)
         If (FilterNet = '') Or (Pos(FilterNet, ViolDesc) > 0) Or (Pos(FilterNet, ViolName) > 0) Then
         Begin
-            If Count < 200 Then
+            If (Count >= Offset) And (Emitted < Limit) Then
             Begin
                 If Not First Then JsonItems := JsonItems + ',';
                 First := False;
                 JsonItems := JsonItems + BuildViolationJson(Violation);
+                Inc(Emitted);
             End;
             Inc(Count);
         End;
@@ -6299,6 +6310,8 @@ Begin
 
     Result := BuildSuccessResponse(RequestId,
         '{"violation_count":' + IntToStr(Count) + ','
+        + '"offset":' + IntToStr(Offset) + ','
+        + '"limit":' + IntToStr(Limit) + ','
         + '"drc_triggered":false,'
         + '"note":"Existing violations only -- no DRC was run. 0 does not mean '
         + 'the board passes if DRC has never been run on it.",'
@@ -6507,6 +6520,154 @@ Begin
         Exit;
     End;
     Result := PCB_GetViasForBoard(Board, RequestId);
+End;
+
+{..............................................................................}
+{ PCB_GetTracksForBoard - routed copper geometry: tracks and arcs, read-only  }
+{                                                                            }
+{ Added 2026-10-02 (PLT) for layout checks the rule engine does not summarise }
+{ (neck-down lengths, coupled gap, per-leg layer sequence). One row per       }
+{ primitive: kind, net, layer, geometry and width.                           }
+{                                                                            }
+{ UNITS: raw TCoord integers (1/10000 mil), NOT CoordToMils, which rounds to }
+{ whole mils (0.025 mm) and would make a 0.15 mm pair gap unverifiable. The  }
+{ response says so ("units":"coord", "coord_per_mil":10000).                 }
+{                                                                            }
+{ Copper only (TopLayer, MidLayerN, BottomLayer). Primitives that belong to   }
+{ a component, a polygon (hatched pours are made of tracks) or a dimension   }
+{ are skipped: they are not routing.                                         }
+{                                                                            }
+{ Tracks AND arcs: corners routed with arcs are part of the path, and a read }
+{ without them shows every rounded bend as a gap (the HS board's CH5 / CH6    }
+{ bends are arcs in the ordered gerbers). Teardrops flagged per row.         }
+{ Params: net (exact, empty = all), layer (GetLayerString name, empty = all  }
+{ copper), offset (default 0), limit (default 500, clamped 1..2000).         }
+{ Paged because every read builds its JSON by concatenation and returns it   }
+{ through a response file inside the client's 60 s timeout; "total" is the   }
+{ number of matching primitives, "count" the rows in this page.              }
+{..............................................................................}
+Function PCB_IsCopperLayerName(LayerStr : String) : Boolean;
+Begin
+    Result := (LayerStr = 'TopLayer') Or (LayerStr = 'BottomLayer')
+        Or (Copy(LayerStr, 1, 8) = 'MidLayer');
+End;
+
+Function PCB_GetTracksForBoard(Board : IPCB_Board; Params : String; RequestId : String) : String;
+Var
+    Iterator : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Track : IPCB_Track;
+    Arc : IPCB_Arc;
+    FilterNet, FilterLayer, NetName, LayerStr, Row, JsonItems, TearStr : String;
+    Offset, Limit, Total, Emitted : Integer;
+    First : Boolean;
+Begin
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+
+    FilterNet := ExtractJsonValue(Params, 'net');
+    FilterLayer := ExtractJsonValue(Params, 'layer');
+    Offset := StrToIntDef(ExtractJsonValue(Params, 'offset'), 0);
+    If Offset < 0 Then Offset := 0;
+    Limit := StrToIntDef(ExtractJsonValue(Params, 'limit'), 500);
+    If Limit < 1 Then Limit := 1;
+    If Limit > 2000 Then Limit := 2000;
+
+    JsonItems := '';
+    First := True;
+    Total := 0;
+    Emitted := 0;
+
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
+    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_Method(eProcessAll);
+
+    Prim := Iterator.FirstPCBObject;
+    While Prim <> Nil Do
+    Begin
+        LayerStr := GetLayerString(Prim.Layer);
+        If PCB_IsCopperLayerName(LayerStr)
+            And (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension)
+            And ((FilterLayer = '') Or (LayerStr = FilterLayer)) Then
+        Begin
+            NetName := '';
+            Try If Prim.Net <> Nil Then NetName := Prim.Net.Name; Except NetName := ''; End;
+            If (FilterNet = '') Or (NetName = FilterNet) Then
+            Begin
+                If (Total >= Offset) And (Emitted < Limit) Then
+                Begin
+                    Row := '';
+                    { Teardrops are copper made of tracks / arcs; flagged, not
+                      dropped, so the read stays complete and width checks can
+                      ignore them (the audits skip them the same way). }
+                    TearStr := 'false';
+                    Try If Prim.TearDrop Then TearStr := 'true'; Except TearStr := 'false'; End;
+                    If Prim.ObjectId = eTrackObject Then
+                    Begin
+                        Track := Prim;
+                        Row := '{"kind":"track",'
+                            + '"net":"' + EscapeJsonString(NetName) + '",'
+                            + '"layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"x1":' + IntToStr(Track.X1) + ','
+                            + '"y1":' + IntToStr(Track.Y1) + ','
+                            + '"x2":' + IntToStr(Track.X2) + ','
+                            + '"y2":' + IntToStr(Track.Y2) + ','
+                            + '"width":' + IntToStr(Track.Width) + ','
+                            + '"teardrop":' + TearStr + '}';
+                    End
+                    Else If Prim.ObjectId = eArcObject Then
+                    Begin
+                        Arc := Prim;
+                        Row := '{"kind":"arc",'
+                            + '"net":"' + EscapeJsonString(NetName) + '",'
+                            + '"layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"xc":' + IntToStr(Arc.XCenter) + ','
+                            + '"yc":' + IntToStr(Arc.YCenter) + ','
+                            + '"radius":' + IntToStr(Arc.Radius) + ','
+                            + '"start_angle":' + FloatToJsonStr(Arc.StartAngle) + ','
+                            + '"end_angle":' + FloatToJsonStr(Arc.EndAngle) + ','
+                            + '"width":' + IntToStr(Arc.Width) + ','
+                            + '"teardrop":' + TearStr + '}';
+                    End;
+                    If Row <> '' Then
+                    Begin
+                        If Not First Then JsonItems := JsonItems + ',';
+                        First := False;
+                        JsonItems := JsonItems + Row;
+                        Inc(Emitted);
+                    End;
+                End;
+                Inc(Total);
+            End;
+        End;
+        Prim := Iterator.NextPCBObject;
+    End;
+    Board.BoardIterator_Destroy(Iterator);
+
+    Result := BuildSuccessResponse(RequestId,
+        '{"units":"coord","coord_per_mil":10000,'
+        + '"total":' + IntToStr(Total) + ','
+        + '"offset":' + IntToStr(Offset) + ','
+        + '"limit":' + IntToStr(Limit) + ','
+        + '"count":' + IntToStr(Emitted) + ','
+        + '"tracks":[' + JsonItems + ']}');
+End;
+
+Function PCB_GetTracks(Params : String; RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+Begin
+    Board := GetPCBBoardAnywhere(0);
+    If Board = Nil Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
+        Exit;
+    End;
+    Result := PCB_GetTracksForBoard(Board, Params, RequestId);
 End;
 
 { Layer occupancy report for copper-policy checks (e.g. internal GND planes  }
@@ -13317,6 +13478,7 @@ Begin
         'snap_to_grid':            Result := PCB_SnapToGrid(Params, RequestId);
         'get_diff_pair_rules':     Result := PCB_GetDiffPairRules(Params, RequestId);
         'get_vias':                Result := PCB_GetVias(Params, RequestId);
+        'get_tracks':              Result := PCB_GetTracks(Params, RequestId);
         'delete_object':           Result := PCB_DeleteObject(Params, RequestId);
         'get_pad_properties':      Result := PCB_GetPadProperties(Params, RequestId);
         'set_track_width':         Result := PCB_SetTrackWidth(Params, RequestId);

@@ -268,6 +268,7 @@ Begin
         Or (Command = 'pcb.get_differential_pairs')
         Or (Command = 'pcb.get_diff_pair_rules')
         Or (Command = 'pcb.get_vias')
+        Or (Command = 'pcb.get_tracks')
         Or (Command = 'pcb.get_polygons')
         Or (Command = 'pcb.get_unrouted_nets')
         Or (Command = 'pcb.get_layer_primitive_counts')
@@ -414,6 +415,15 @@ Begin
                 Reply := PCB_GetDifferentialPairsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_vias' Then
                 Reply := PCB_GetViasForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_tracks' Then
+                { Rebuilt params: only the whitelisted filter and page fields
+                  cross into the handler, never the caller's object. }
+                Reply := PCB_GetTracksForBoard(Board,
+                    '{"net":"' + EscapeJsonString(ExtractJsonValue(Params, 'net'))
+                    + '","layer":"' + EscapeJsonString(ExtractJsonValue(Params, 'layer'))
+                    + '","offset":"' + EscapeJsonString(ExtractJsonValue(Params, 'offset'))
+                    + '","limit":"' + EscapeJsonString(ExtractJsonValue(Params, 'limit')) + '"}',
+                    RequestId)
             Else If Command = 'pcb.get_polygons' Then
                 Reply := PCB_GetPolygonsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_unrouted_nets' Then
@@ -431,7 +441,9 @@ Begin
                   same as trace-lengths below: only the whitelisted net filter
                   crosses into the handler. }
                 Reply := PCB_GetClearanceViolationsForBoard(Board,
-                    '{"net":"' + EscapeJsonString(ExtractJsonValue(Params, 'net')) + '"}',
+                    '{"net":"' + EscapeJsonString(ExtractJsonValue(Params, 'net'))
+                    + '","offset":"' + EscapeJsonString(ExtractJsonValue(Params, 'offset'))
+                    + '","limit":"' + EscapeJsonString(ExtractJsonValue(Params, 'limit')) + '"}',
                     RequestId)
             Else If Command = 'pcb.get_design_rules' Then
                 Reply := PCB_GetDesignRulesForBoard(Board, RequestId)
