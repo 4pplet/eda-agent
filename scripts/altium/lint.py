@@ -267,6 +267,20 @@ RULE_PCB_SUBTYPE_ON_BASE = LineRule(
     description="Subtype-only PCB property on a base IPCB_Primitive var; narrow to a typed local (Track/Arc/Pad/...) via ObjectId.",
 )
 
+# IPCB_Arc has no Width member: its stroke width is LineWidth. Reading Arc.Width
+# raises a MODAL "Undeclared identifier: Width" before any Try/Except runs, which
+# stops the polling loop until a human dismisses it (upstream 2d1630b, found on a
+# live board 2026-09-14; caught again in PLT's new track read 2026-10-02 before
+# deployment). Width is deliberately absent from the subtype rule above because
+# schematic objects have it, so this needs its own rule, keyed on the Arc local.
+RULE_ARC_WIDTH = LineRule(
+    name="pcb-arc-width",
+    pattern=re.compile(r"\bArc\.Width\b"),
+    severity="error",
+    memory="delphiscript_interface_narrowing.md",
+    description="IPCB_Arc has no Width; use Arc.LineWidth (Arc.Width raises a modal that stops the loop).",
+)
+
 # IPCB_Rule.Priority is a read-only function, not a property.
 RULE_RULE_PRIORITY_WRITE = LineRule(
     name="rule-priority-readonly-write",
@@ -461,6 +475,7 @@ LINE_RULES = [
     RULE_PCB_SUBTYPE_ON_BASE,
     RULE_FOOTPRINT_NAME_WRITE,
     RULE_RULE_PRIORITY_WRITE,
+    RULE_ARC_WIDTH,
     RULE_PROBE_TEXT_WRITE,
     RULE_KNOWN_WRONG_E_IDENT,
     RULE_KNOWN_WRONG_METHOD,

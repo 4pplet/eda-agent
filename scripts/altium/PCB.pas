@@ -6630,7 +6630,7 @@ Begin
                             + '"radius":' + IntToStr(Arc.Radius) + ','
                             + '"start_angle":' + FloatToJsonStr(Arc.StartAngle) + ','
                             + '"end_angle":' + FloatToJsonStr(Arc.EndAngle) + ','
-                            + '"width":' + IntToStr(Arc.Width) + ','
+                            + '"width":' + IntToStr(Arc.LineWidth) + ','
                             + '"teardrop":' + TearStr + '}';
                     End;
                     If Row <> '' Then
