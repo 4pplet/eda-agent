@@ -3,8 +3,11 @@
 For the latest scoped test results and remaining work, read the
 [current-state handoff](CURRENT-STATE.md) first.
 
-Current local source/shared candidate: **`2026.09.24.4`**, deployed as
-`selected-readonly-drc2-20260924` with a 34-tool read-only surface. Use the
+Current local source: **`2026.10.03.1`**, the version app_ping reports once this
+source is deployed. It adds the gated parameter-edit command
+([PROPOSAL-2026-09-28](PROPOSAL-2026-09-28-metadata-write-increment.md) section 7) and is not
+provisioned yet; the deployed runtime and its rollback are named in
+[CURRENT-STATE](CURRENT-STATE.md). Use the
 companion
 [shared acceptance checklist](../../PLT-hw/tools/eda-agent/SHARED-PROJECTS.md).
 The `.1` named-profile observations remain in [the shutdown log](SHUTDOWN.md).
@@ -167,7 +170,7 @@ objects you can delete afterwards.
 app_ping
 ```
 
-Expect `altium_script_version` = `2026.09.24.4`, `version_match` =
+Expect `altium_script_version` = `2026.10.03.1`, `version_match` =
 `true`, and `mcp_server_version` = `0.5.0`.
 
 Those are two different versions and they fail differently.

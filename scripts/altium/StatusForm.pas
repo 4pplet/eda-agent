@@ -23,6 +23,9 @@
 
 Var
     HidePingsFlag    : Boolean;
+    { What the grant checkbox last showed, so an end of grant the operator   }
+    { did not click (a batch applied, a project switch) is logged once.      }
+    ParamGrantShown  : Boolean;
     OnlySlowFlag     : Boolean;
     AlwaysOnTopFlag  : Boolean;
 
@@ -594,6 +597,47 @@ Begin
 End;
 
 
+{ The operator's parameter-edit grant, shown where it is given. Amber and   }
+{ filled while granted, and the window title says so, so a granted session  }
+{ is never mistaken for a read-only one. A selection change clears the      }
+{ grant natively; this repaints it on the next stats tick.                  }
+Procedure RefreshParamGrantCheck(Dummy : Integer);
+Var
+    Granted : Boolean;
+Begin
+    If Not (SELECTED_PROJECT_READ_ONLY And SELECTED_PARAM_EDITS) Then Exit;
+    Granted := ParamEditGrantActive(0);
+    Try
+        If ParamGrantShown And (Not Granted) Then
+            mmo_Log.Lines.Insert(0, 'Parameter edit grant ended (a batch was applied, '
+                + 'or the selection changed). Tick again for the next batch.');
+        ParamGrantShown := Granted;
+        If Granted Then
+        Begin
+            chk_AllowParams.Caption := '  ' + FilledDot(0)
+                + '  Parameter edits GRANTED for ONE batch - click to revoke';
+            chk_AllowParams.Color := $00303848;
+            If SelectedPath <> '' Then
+            Begin
+                StatusForm.Caption := ExtractFileName(SelectedPath)
+                    + ' - EDA (PARAMETER EDITS GRANTED)' + KeyboardWarningSuffix(0);
+                lbl_SelectedProject.Caption := 'Selected: ' + ExtractFileName(SelectedPath)
+                    + #13#10 + 'PARAMETER EDITS GRANTED for one batch (never saves)';
+            End;
+        End
+        Else
+        Begin
+            chk_AllowParams.Caption := '  ' + HollowDot(0)
+                + '  Allow parameter edits (LCSC Part #, Instruction)';
+            chk_AllowParams.Color := $00202126;
+        End;
+        chk_AllowParams.Hint := 'Grant for ONE proj_set_component_params_checked batch: one sheet, '
+            + 'existing LCSC Part # / Instruction parameters only, compare-and-set, never saves. '
+            + 'Ends after a batch is applied, and on a project switch, Detach or session end. '
+            + 'You review the sheet and save it.';
+    Except End;
+End;
+
 Procedure UpdateStatsLine(UptimeSec, Requests : Integer; AltiumMs : Cardinal;
                           IdleSecToShutdown : Integer);
 Var
@@ -621,6 +665,7 @@ Begin
 
     Try lbl_ValUp.Caption  := UpStr; Except End;
     If SELECTED_PROJECT_READ_ONLY Then RefreshSelectedLabel(0);
+    RefreshParamGrantCheck(0);
     Try lbl_ValReq.Caption := IntToStr(Requests); Except End;
     Try lbl_ValMs.Caption  := MsStr; Except End;
     ColorCountdown(IdleSecToShutdown);
@@ -794,6 +839,7 @@ Begin
     Try
         EnsureStatusBuffers(0);
         HidePingsFlag   := True;
+        ParamGrantShown := False;
         OnlySlowFlag    := False;
         AlwaysOnTopFlag := True;
         PausedFlag      := False;
@@ -840,10 +886,15 @@ Begin
         btn_UseProject.Visible := SELECTED_PROJECT_READ_ONLY;
         lbl_SelectedProject.Visible := SELECTED_PROJECT_READ_ONLY;
         lbl_Permissions.Visible := SELECTED_PROJECT_READ_ONLY;
+        chk_AllowParams.Visible := SELECTED_PROJECT_READ_ONLY And SELECTED_PARAM_EDITS;
         If SELECTED_PROJECT_READ_ONLY Then
         Begin
-            lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
-                + #13#10 + 'Unavailable: edits, saves, output jobs';
+            If SELECTED_PARAM_EDITS Then
+                lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
+                    + #13#10 + 'Parameter edits only while ticked below; never saves'
+            Else
+                lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
+                    + #13#10 + 'Unavailable: edits, saves, output jobs';
             { Hint only, not Caption: the label is a fixed two-line control     }
             { from the form resource, so a third caption line would clip and an }
             { invisible warning is worse than none. Hints expand freely.        }
@@ -854,11 +905,16 @@ Begin
                 + 'earlier runtime, and the presses replayed as a burst on detach).';
             { Children have already been DPI-scaled by the native form loader.
               Use their bounds and the scaled button/label gap, not raw pixels. }
-            pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height
-                + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height);
+            If SELECTED_PARAM_EDITS Then
+                pnl_Header.Height := chk_AllowParams.Top + chk_AllowParams.Height
+                    + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height)
+            Else
+                pnl_Header.Height := lbl_Permissions.Top + lbl_Permissions.Height
+                    + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height);
             StatusForm.Caption := 'EDA Agent - selected project (READ ONLY)'
                 + KeyboardWarningSuffix(0);
             RefreshProjectChoices(Nil);
+            RefreshParamGrantCheck(0);
         End;
         { Non-shared mode retains the DFM's naturally scaled header height. }
         { Button is always enabled: dashboard can run standalone. }
@@ -967,6 +1023,31 @@ End;
 
 
 { Action buttons ============================================================ }
+
+{ The only way the parameter-edit grant is given or taken: an operator click. }
+{ Refused while a request is in flight, so it never changes under a write.    }
+Procedure chk_AllowParamsClick(Sender : TObject);
+Begin
+    If Not (SELECTED_PROJECT_READ_ONLY And SELECTED_PARAM_EDITS) Then Exit;
+    If SelectedBusy Or InFlightActive Then Exit;
+    If Not ToggleParamEditGrant(0) Then
+    Begin
+        Try lbl_LastErr.Caption := 'Select a project first (Use this project).'; Except End;
+        RefreshParamGrantCheck(0);
+        Exit;
+    End;
+    Try
+        If ParamEditGrantActive(0) Then
+            mmo_Log.Lines.Insert(0, 'Parameter edits GRANTED by the operator, generation '
+                + IntToStr(SelectedGeneration))
+        Else
+            mmo_Log.Lines.Insert(0, 'Parameter edits revoked by the operator, generation '
+                + IntToStr(SelectedGeneration));
+        ParamGrantShown := ParamEditGrantActive(0);
+    Except End;
+    RefreshSelectedLabel(0);
+    RefreshParamGrantCheck(0);
+End;
 
 Procedure btn_DetachClick(Sender : TObject);
 Begin

@@ -904,7 +904,13 @@ either way: stop the bridge before quitting Altium.
   already-logged **rooms read**, which the same work needs — rule 10 scopes to two
   rooms now and no tool can confirm either exists.
 
-- [ ] **Parameter WRITES: the right first write capability, but gated on P0**
+- [ ] **Parameter WRITES: BUILT in source 2026-10-03, operator-approved; native
+  qualification open, not deployed.** The Ctrl+Z P0 below was closed 2026-09-24 (timer
+  dispatch). Scope and implementation: [PROPOSAL-2026-09-28](docs/PROPOSAL-2026-09-28-metadata-write-increment.md)
+  section 7 (`LCSC Part #` and `Instruction` only; the wider field list below stays
+  for Gate 4). Next: provision `--param-edits` on a non-CAD day and run T1-T17 on a
+  disposable copy. History of the item follows.
+- [x] **Parameter WRITES: the right first write capability, but gated on P0**
   (operator asked 2026-09-23 whether the bridge should write parameters).
   **Why this class specifically is defensible**, where geometry writes are not:
   parameters are **non-topological** — they cannot change a net, a footprint, a

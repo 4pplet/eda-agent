@@ -6,11 +6,16 @@ Var
     SelectedGeneration : Integer;
     SelectedReference : IProject;
     SelectedBusy : Boolean;
+    { Checked parameter edits: set only by the operator's status-form tick, }
+    { valid only for the selection generation it was ticked in. }
+    ParamEditGrant : Boolean;
+    ParamEditGrantGeneration : Integer;
 
 Procedure ClearSelectedProject(Dummy : Integer);
 Begin
     SelectedPath := '';
     SelectedReference := Nil;
+    ParamEditGrant := False;
     Inc(SelectedGeneration);
     SelectedCompileReady := False;
     SelectedCompileProject := Nil;
@@ -21,6 +26,7 @@ Procedure InitSelectedProject(Dummy : Integer);
 Begin
     SelectedGeneration := 0;
     SelectedBusy := False;
+    ParamEditGrantGeneration := -1;
     SelectedSession := FormatDateTime('yyyymmddhhnnsszzz', Now)
         + '-' + IntToStr(GetTickCount);
     ClearSelectedProject(0);
@@ -55,6 +61,31 @@ Begin
     Result := Candidate;
 End;
 
+Function ParamEditGrantActive(Dummy : Integer) : Boolean;
+Begin
+    Result := SELECTED_PARAM_EDITS And ParamEditGrant
+        And (ParamEditGrantGeneration = SelectedGeneration)
+        And (SelectedPath <> '');
+End;
+
+{ Operator UI only (status form). Every change of the grant bumps the        }
+{ selection generation, so a token or preview taken before it is refused.    }
+Function ToggleParamEditGrant(Dummy : Integer) : Boolean;
+Begin
+    Result := False;
+    If Not SELECTED_PARAM_EDITS Then Exit;
+    If SelectedBusy Then Exit;
+    If CurrentSelectedProject(0) = Nil Then
+    Begin
+        ParamEditGrant := False;
+        Exit;
+    End;
+    ParamEditGrant := Not ParamEditGrant;
+    Inc(SelectedGeneration);
+    ParamEditGrantGeneration := SelectedGeneration;
+    Result := True;
+End;
+
 Function UseSelectedProject(Path : String) : Boolean;
 Var
     Candidate : IProject;
@@ -77,7 +108,17 @@ Begin
     Result := '{"project_path":"' + EscapeJsonString(SelectedPath)
         + '","session":"' + EscapeJsonString(SelectedSession)
         + '","generation":' + IntToStr(SelectedGeneration)
-        + ',"access":"read-only","selected":' + BoolToJsonStr(P <> Nil) + '}';
+        + ',"access":"read-only","selected":' + BoolToJsonStr(P <> Nil);
+    { Only a param-edit runtime reports the grant, so the read-only runtime's }
+    { selection identity stays byte-identical to before. }
+    If SELECTED_PARAM_EDITS Then
+    Begin
+        If ParamEditGrantActive(0) Then
+            Result := Result + ',"param_edits":"granted"'
+        Else
+            Result := Result + ',"param_edits":"off"';
+    End;
+    Result := Result + '}';
 End;
 
 Function SelectedProjectsJSON(Dummy : Integer) : String;
@@ -289,6 +330,557 @@ Begin
         Or (Command = 'pcb.audit_mirrored_text');
 End;
 
+{ ---- Checked parameter edits ----------------------------------------------- }
+{ PROPOSAL-2026-09-28-metadata-write-increment: Gate 3's first slice. The code }
+{ is in every runtime, but the command is reachable only when the runtime was  }
+{ generated with SELECTED_PARAM_EDITS = True, and apply additionally needs the }
+{ operator's session grant (status form checkbox). No command sets the grant,  }
+{ so an agent cannot approve its own writes.                                   }
+{                                                                              }
+{ Fixes the audited upstream handler's F1-F7: exact sheet only, never the      }
+{ focused one (F1); LCSC Part # and Instruction only, so Value can never reach }
+{ Comment (F2); blank is an ordinary value (F3); every value percent-encoded   }
+{ (F4); per-field status with the text read back from the object (F5, F7);     }
+{ existing parameters only, nothing created (F6). Never saves (F9).            }
+
+Function ParamEditSafeChar(Ch : String) : Boolean;
+Begin
+    Result := (Length(Ch) = 1) And (Pos(Ch,
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ._-') > 0);
+End;
+
+{ Values cross as printable ASCII with every byte outside [A-Za-z0-9 ._-]      }
+{ written %XX. A raw separator, a bad escape, a control or non-ASCII byte      }
+{ fails the batch: nothing is guessed at, and micro / Ohm signs are refused    }
+{ until a Unicode round trip is qualified.                                     }
+Function ParamEditDecode(S : String; Var Ok : Boolean) : String;
+Var
+    I, Hi, Lo, Code : Integer;
+    Ch : String;
+Begin
+    Result := '';
+    Ok := True;
+    I := 1;
+    While I <= Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        If Ch = '%' Then
+        Begin
+            If I + 2 > Length(S) Then
+            Begin
+                Ok := False;
+                Exit;
+            End;
+            Hi := HexDigitValue(Copy(S, I + 1, 1));
+            Lo := HexDigitValue(Copy(S, I + 2, 1));
+            If (Hi < 0) Or (Lo < 0) Then
+            Begin
+                Ok := False;
+                Exit;
+            End;
+            Code := Hi * 16 + Lo;
+            If (Code < 32) Or (Code > 126) Then
+            Begin
+                Ok := False;
+                Exit;
+            End;
+            Result := Result + Chr(Code);
+            I := I + 3;
+        End
+        Else If ParamEditSafeChar(Ch) Then
+        Begin
+            Result := Result + Ch;
+            Inc(I);
+        End
+        Else
+        Begin
+            Ok := False;
+            Exit;
+        End;
+    End;
+End;
+
+{ Returns Rest up to the first Sep and leaves the remainder in Rest. }
+Function ParamEditTake(Var Rest : String; Sep : String) : String;
+Var
+    P : Integer;
+Begin
+    P := Pos(Sep, Rest);
+    If P = 0 Then
+    Begin
+        Result := Rest;
+        Rest := '';
+    End
+    Else
+    Begin
+        Result := Copy(Rest, 1, P - 1);
+        Rest := Copy(Rest, P + Length(Sep), Length(Rest));
+    End;
+End;
+
+Function ParamEditCountChar(S, Ch : String) : Integer;
+Var
+    I : Integer;
+Begin
+    Result := 0;
+    For I := 1 To Length(S) Do
+        If Copy(S, I, 1) = Ch Then Inc(Result);
+End;
+
+Function ParamEditFieldAllowed(Field : String) : Boolean;
+Begin
+    Result := (Field = 'LCSC Part #') Or (Field = 'Instruction');
+End;
+
+Function ParamEditHashValid(H : String) : Boolean;
+Var
+    I : Integer;
+Begin
+    Result := Length(H) = 64;
+    If Not Result Then Exit;
+    For I := 1 To 64 Do
+        If HexDigitValue(Copy(H, I, 1)) < 0 Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+End;
+
+{ The single schematic component with this designator on Doc, and its one     }
+{ parameter named Field (case-insensitive). Hits counts the matching           }
+{ parameters; UniqueId is the component's. Nil unless exactly one parameter    }
+{ matched. Iterators are destroyed before the caller touches the parameter,    }
+{ as SetCompParamText does: find first, then modify.                           }
+Function ParamEditFind(Doc : ISch_Document; Designator, Field : String;
+    Var UniqueId : String; Var Hits : Integer) : ISch_Parameter;
+Var
+    Iter, PIter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    Param, Found : ISch_Parameter;
+Begin
+    Result := Nil;
+    Found := Nil;
+    UniqueId := '';
+    Hits := 0;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Comp := Obj;
+            If Comp.Designator.Text = Designator Then
+            Begin
+                Try UniqueId := Comp.UniqueId; Except UniqueId := ''; End;
+                PIter := Comp.SchIterator_Create;
+                Try
+                    PIter.AddFilter_ObjectSet(MkSet(eParameter));
+                    Param := PIter.FirstSchObject;
+                    While Param <> Nil Do
+                    Begin
+                        If UpperCase(Param.Name) = UpperCase(Field) Then
+                        Begin
+                            Inc(Hits);
+                            Found := Param;
+                        End;
+                        Param := PIter.NextSchObject;
+                    End;
+                Finally
+                    Comp.SchIterator_Destroy(PIter);
+                End;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+    If Hits = 1 Then Result := Found;
+End;
+
+{ Params: mode (preview | apply), sheet_path (exact member SchDoc), batch_hash  }
+{ (64 hex, echoed), edits: 'designator|field|old|new|unique_id;...', all five  }
+{ parts percent-encoded. Preview ignores old and unique_id and reports what     }
+{ each edit would do. Apply refuses the whole batch unless every old value and  }
+{ every component UniqueId still match the preview (compare-and-set on value    }
+{ AND identity, so a re-annotation between preview and apply cannot retarget   }
+{ an edit). An apply that touched anything clears the grant: one tick, one      }
+{ batch. Error codes returned before PreProcess are the pre-write set the       }
+{ client treats as "nothing written"; CHANGED_DURING_WRITE is not one of them.  }
+Function SelectedSetParamsChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, SheetPath, EditsStr, BatchHash, Rest, OpStr, Part, Key : String;
+    D, F, O, N, U, Problems, EditsJson, Back, Status, Path, TargetPath, Binding, Blank, Uid : String;
+    OpDes, OpField, OpOld, OpNew, OpUidReq, OpUid, OpCur, OpStatus, OpBack, OpTotal, OpTarget, OpHits, Keys : TStringList;
+    I, J, Count, Hits, WouldWrite, Unchanged, Refused, Written, NotWritten : Integer;
+    Ok, Apply, IsTarget, FoundSheet, TargetModified, Partial, Touched : Boolean;
+    Doc : IDocument;
+    S : IServerDocument;
+    SchDoc, TargetDoc : ISch_Document;
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    Param : ISch_Parameter;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    SheetPath := ExtractJsonValue(Params, 'sheet_path');
+    EditsStr := ExtractJsonValue(Params, 'edits');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not ParamEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Parameter edits are not granted: the operator ticks "Allow parameter edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    If (Not LooksAbsolutePath(SheetPath)) Or (LowerCase(ExtractFileExt(SheetPath)) <> '.schdoc') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_SHEET', 'sheet_path must be an absolute .SchDoc path');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    { DelphiScript trips on a literal '' as a call argument. }
+    Blank := '';
+    Touched := False;
+    OpDes := TStringList.Create;
+    OpField := TStringList.Create;
+    OpOld := TStringList.Create;
+    OpNew := TStringList.Create;
+    OpUidReq := TStringList.Create;
+    OpUid := TStringList.Create;
+    OpCur := TStringList.Create;
+    OpStatus := TStringList.Create;
+    OpBack := TStringList.Create;
+    OpTotal := TStringList.Create;
+    OpTarget := TStringList.Create;
+    OpHits := TStringList.Create;
+    Keys := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        If SelectedFreshnessJSON(P) = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P) + '); save or discard the named document');
+            Exit;
+        End;
+
+        { Parse. A malformed batch is a client defect: refused in both modes. }
+        Rest := EditsStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 200) Or (ParamEditCountChar(OpStr, '|') <> 4) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Edit ' + IntToStr(Count) + ': expected designator|field|old|new|unique_id, at most 200 edits');
+                Exit;
+            End;
+            Part := ParamEditTake(OpStr, '|');
+            D := ParamEditDecode(Part, Ok);
+            If Ok Then
+            Begin
+                Part := ParamEditTake(OpStr, '|');
+                F := ParamEditDecode(Part, Ok);
+            End;
+            If Ok Then
+            Begin
+                Part := ParamEditTake(OpStr, '|');
+                O := ParamEditDecode(Part, Ok);
+            End;
+            If Ok Then
+            Begin
+                Part := ParamEditTake(OpStr, '|');
+                N := ParamEditDecode(Part, Ok);
+            End;
+            If Ok Then
+                U := ParamEditDecode(OpStr, Ok);
+            If (Not Ok) Or (D = '') Or (Length(D) > 40) Or (Apply And (U = '')) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Edit ' + IntToStr(Count) + ': bad encoding, designator or unique_id');
+                Exit;
+            End;
+            If Not ParamEditFieldAllowed(F) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'FIELD_NOT_ALLOWED',
+                    'Edit ' + IntToStr(Count) + ' (' + D + '): only LCSC Part # and Instruction may be written, not "' + F + '"');
+                Exit;
+            End;
+            Key := D + '|' + F;
+            If Keys.IndexOf(Key) >= 0 Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Duplicate edit: ' + D + ' ' + F);
+                Exit;
+            End;
+            Keys.Add(Key);
+            OpDes.Add(D);
+            OpField.Add(F);
+            OpOld.Add(O);
+            OpNew.Add(N);
+            OpUidReq.Add(U);
+            OpUid.Add(Blank);
+            OpCur.Add(Blank);
+            OpStatus.Add(Blank);
+            OpBack.Add(Blank);
+            OpTotal.Add('0');
+            OpTarget.Add('0');
+            OpHits.Add('0');
+        End;
+        If OpDes.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No edits');
+            Exit;
+        End;
+
+        { Every schematic of the project must be open: a designator is counted }
+        { across all of them, so a multi-part component split over sheets or a }
+        { duplicate cannot pass as the single target. Nothing is opened here.  }
+        FoundSheet := False;
+        TargetDoc := Nil;
+        TargetPath := '';
+        TargetModified := True;
+        For I := 0 To P.DM_LogicalDocumentCount - 1 Do
+        Begin
+            Doc := P.DM_LogicalDocuments(I);
+            If Doc = Nil Then Continue;
+            If UpperCase(Doc.DM_DocumentKind) <> 'SCH' Then Continue;
+            Path := Doc.DM_FullPath;
+            S := Client.GetDocumentByPath(Path);
+            If S = Nil Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'SHEET_NOT_OPEN',
+                    'Open every schematic of the selected project first (not open: ' + Path + ')');
+                Exit;
+            End;
+            SchDoc := Nil;
+            Try SchDoc := SchServer.GetSchDocumentByPath(Path); Except SchDoc := Nil; End;
+            If SchDoc = Nil Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'SHEET_NOT_AVAILABLE',
+                    'Schematic editor did not resolve: ' + Path);
+                Exit;
+            End;
+            IsTarget := (UpperCase(Path) = UpperCase(SheetPath));
+            If IsTarget Then
+            Begin
+                FoundSheet := True;
+                TargetDoc := SchDoc;
+                TargetPath := Path;
+                Try TargetModified := S.Modified; Except TargetModified := True; End;
+            End;
+            Iter := SchDoc.SchIterator_Create;
+            Try
+                Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+                Obj := Iter.FirstSchObject;
+                While Obj <> Nil Do
+                Begin
+                    Comp := Obj;
+                    For J := 0 To OpDes.Count - 1 Do
+                        If Comp.Designator.Text = OpDes[J] Then
+                        Begin
+                            OpTotal[J] := IntToStr(StrToIntDef(OpTotal[J], 0) + 1);
+                            If IsTarget Then
+                                OpTarget[J] := IntToStr(StrToIntDef(OpTarget[J], 0) + 1);
+                        End;
+                    Obj := Iter.NextSchObject;
+                End;
+            Finally
+                SchDoc.SchIterator_Destroy(Iter);
+            End;
+        End;
+        If Not FoundSheet Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'SHEET_NOT_IN_PROJECT',
+                'sheet_path is not a schematic of the selected project: ' + SheetPath);
+            Exit;
+        End;
+        If Apply And TargetModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'SHEET_DIRTY',
+                'The target sheet has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+
+        { Read each targeted parameter from the objects an apply would write. }
+        For J := 0 To OpDes.Count - 1 Do
+            If OpTotal[J] = '1' Then
+            Begin
+                Param := ParamEditFind(TargetDoc, OpDes[J], OpField[J], Uid, Hits);
+                OpHits[J] := IntToStr(Hits);
+                OpUid[J] := Uid;
+                If Param <> Nil Then OpCur[J] := Param.Text;
+            End;
+
+        { Classify. }
+        Problems := '';
+        Refused := 0;
+        WouldWrite := 0;
+        Unchanged := 0;
+        For J := 0 To OpDes.Count - 1 Do
+        Begin
+            Status := '';
+            If OpTotal[J] = '0' Then Status := 'refused: designator not found in the project'
+            Else If OpTarget[J] = '0' Then Status := 'refused: designator is on another sheet'
+            Else If OpTotal[J] <> '1' Then Status := 'refused: multi-part or duplicate designator (' + OpTotal[J] + ' symbols)'
+            Else If OpHits[J] = '0' Then Status := 'refused: component has no ' + OpField[J] + ' parameter (none is created)'
+            Else If OpHits[J] <> '1' Then Status := 'refused: ' + OpField[J] + ' appears ' + OpHits[J] + ' times'
+            Else If Apply And (OpUid[J] <> OpUidReq[J]) Then Status := 'refused: component identity changed since preview'
+            Else If Apply And (OpCur[J] <> OpOld[J]) Then Status := 'refused: changed since preview'
+            Else If OpCur[J] = OpNew[J] Then Status := 'unchanged'
+            Else Status := 'would_write';
+            OpStatus[J] := Status;
+            If Copy(Status, 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 600 Then
+                    Problems := Problems + OpDes[J] + ' ' + OpField[J] + ': ' + Copy(Status, 10, 200) + '; ';
+            End
+            Else If Status = 'unchanged' Then Inc(Unchanged)
+            Else Inc(WouldWrite);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED',
+                'Nothing written. ' + Problems);
+            Exit;
+        End;
+
+        { Apply: one PreProcess / PostProcess pair. Per edit: find, compare     }
+        { identity and value again, then write and read back. Stops at the     }
+        { first surprise; what was written is reported, never rolled back.     }
+        Written := 0;
+        NotWritten := 0;
+        Partial := False;
+        If Apply And (WouldWrite > 0) Then
+        Begin
+            SchServer.ProcessControl.PreProcess(TargetDoc, '');
+            Try
+                For J := 0 To OpDes.Count - 1 Do
+                Begin
+                    If Partial Or (OpStatus[J] <> 'would_write') Then Continue;
+                    Param := ParamEditFind(TargetDoc, OpDes[J], OpField[J], Uid, Hits);
+                    If (Param = Nil) Or (Uid <> OpUidReq[J]) Then
+                    Begin
+                        OpStatus[J] := 'not_written: changed during apply';
+                        Partial := True;
+                        Continue;
+                    End;
+                    If Param.Text <> OpOld[J] Then
+                    Begin
+                        OpStatus[J] := 'not_written: changed during apply';
+                        Partial := True;
+                        Continue;
+                    End;
+                    { From here on the object may differ from the file: the sheet }
+                    { is marked dirty whatever the read-back says.               }
+                    Touched := True;
+                    SchBeginModify(Param);
+                    Param.Text := OpNew[J];
+                    SchEndModify(Param);
+                    Back := Param.Text;
+                    OpBack[J] := Back;
+                    If Back = OpNew[J] Then
+                    Begin
+                        OpStatus[J] := 'written';
+                        Inc(Written);
+                    End
+                    Else
+                    Begin
+                        OpStatus[J] := 'written_readback_differs';
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                Try SchServer.ProcessControl.PostProcess(TargetDoc, 'Edit'); Except End;
+                Try TargetDoc.GraphicallyInvalidate; Except End;
+                { A write that leaves the document clean did not happen as far   }
+                { as Save and compile are concerned (upstream 69374c2).          }
+                If Touched Then MarkDocDirtyByPath(TargetPath);
+            End;
+            For J := 0 To OpDes.Count - 1 Do
+                If OpStatus[J] = 'would_write' Then
+                Begin
+                    OpStatus[J] := 'not_written';
+                    Inc(NotWritten);
+                End;
+        End;
+
+        EditsJson := '';
+        For J := 0 To OpDes.Count - 1 Do
+        Begin
+            If J > 0 Then EditsJson := EditsJson + ',';
+            EditsJson := EditsJson + '{"designator":"' + EscapeJsonString(OpDes[J])
+                + '","field":"' + EscapeJsonString(OpField[J])
+                + '","unique_id":"' + EscapeJsonString(OpUid[J])
+                + '","current":"' + EscapeJsonString(OpCur[J])
+                + '","new":"' + EscapeJsonString(OpNew[J])
+                + '","status":"' + EscapeJsonString(OpStatus[J]) + '"';
+            If Apply Then
+                EditsJson := EditsJson + ',"old":"' + EscapeJsonString(OpOld[J])
+                    + '","readback":"' + EscapeJsonString(OpBack[J]) + '"';
+            EditsJson := EditsJson + '}';
+        End;
+        S := Client.GetDocumentByPath(TargetPath);
+        If S <> Nil Then
+            Try TargetModified := S.Modified; Except TargetModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again before trusting the sheet'
+                + ' (written: ' + IntToStr(Written) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode
+                + '","sheet_path":"' + EscapeJsonString(TargetPath)
+                + '","batch_hash":"' + LowerCase(BatchHash)
+                + '","edit_count":' + IntToStr(OpDes.Count)
+                + ',"would_write":' + IntToStr(WouldWrite)
+                + ',"unchanged":' + IntToStr(Unchanged)
+                + ',"refused":' + IntToStr(Refused)
+                + ',"written":' + IntToStr(Written)
+                + ',"not_written":' + IntToStr(NotWritten)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"sheet_modified":' + BoolToJsonStr(TargetModified)
+                + ',"saved":false,"edits":[' + EditsJson + ']}}');
+    Finally
+        { One tick, one batch: an apply that touched the sheet ends the grant. }
+        { The generation moves with it, so the token used here is spent.       }
+        If Touched Then
+        Begin
+            ParamEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        OpDes.Free;
+        OpField.Free;
+        OpOld.Free;
+        OpNew.Free;
+        OpUidReq.Free;
+        OpUid.Free;
+        OpCur.Free;
+        OpStatus.Free;
+        OpBack.Free;
+        OpTotal.Free;
+        OpTarget.Free;
+        OpHits.Free;
+        Keys.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -303,9 +895,16 @@ Begin
     { This is the complete native allowlist in shared mode, not just MCP filtering. }
     If Command = 'application.ping' Then
     Begin
-        Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
-            + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
-            + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}');
+        { A param-edit runtime names itself differently, so neither client can  }
+        { be pointed at the other kind of runtime by mistake. }
+        If SELECTED_PARAM_EDITS Then
+            Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
+                + SCRIPT_VERSION + '","plt_profile":"eda-selected-paramedit-v1"'
+                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
+                + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
+                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}');
         Exit;
     End;
     If Command = 'selection.get_projects' Then
@@ -324,7 +923,8 @@ Begin
        (Command <> 'project.get_component_info') And
        (Command <> 'project.get_component_info_batch') And
        (Command <> 'project.get_messages') And
-       (Not IsSelectedPcbReadCommand(Command)) Then
+       (Not IsSelectedPcbReadCommand(Command)) And
+       (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -338,6 +938,11 @@ Begin
        (UpperCase(ExpectedPath) <> UpperCase(SelectedPath)) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Select a project in Altium; stale requests are not redirected');
+        Exit;
+    End;
+    If Command = 'project.set_component_params_checked' Then
+    Begin
+        Result := SelectedSetParamsChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);

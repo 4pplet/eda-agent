@@ -1,6 +1,8 @@
 # Proposal: a first metadata-write increment
 
-**Status: proposal, 2026-09-28. Nothing here is implemented or enabled.**
+**Status: approved by the operator 2026-10-03 and implemented in source (scripts
+`2026.10.03.1`); NOT deployed. Native qualification (section 5, plus T14-T17 in
+section 7) is open.** Section 7 records how the build differs from this proposal.
 Qualify on a day without CAD work, on a disposable copy, per the operator's
 standing decision in [CURRENT-STATE](CURRENT-STATE.md).
 
@@ -129,3 +131,81 @@ runtime, still restricted to `LCSC Part #` and `Instruction`.
 `Value`, `Comment`, footprints, parameter creation or deletion, variants,
 annotation, any PCB-side write, saving, and the full Gate 2 permissions panel
 (this uses one session checkbox, not per-capability grants).
+
+## 7. Implementation, 2026-10-03
+
+Approved by the operator 2026-10-03. Source only; no runtime provisioned, nothing deployed.
+
+**Where it is**
+
+| Part | Location |
+|---|---|
+| Native gate | `Main.pas` `SELECTED_PARAM_EDITS = False` (source default) |
+| Native command | `SelectedProject.pas` `SelectedSetParamsChecked`, reached from `ProcessSelectedCommand` only when the gate is True |
+| Grant | `SelectedProject.pas` `ParamEditGrant` / `ToggleParamEditGrant`; `StatusForm` `chk_AllowParams` (hidden unless the gate is True) |
+| Runtime | PLT-hw `create_shared_runtime.py --param-edits`: mode `selected-project-param-edits`, ping profile `eda-selected-paramedit-v1` |
+| MCP tool | PLT-hw `shared_server.py` `proj_set_component_params_checked`, registered only in that mode |
+| Client | PLT-hw `bridge_write.py` (`preview`, `apply --hash`) |
+| Batches | PLT-hw `sheet_spec.py batch` |
+| Offline tests | PLT-hw `test_param_edits.py`, `test_bridge_write.py`, `test_shared_runtime.py`, `test_sheet_spec.py` |
+
+**Differences from sections 4-5**
+
+- **Preview is native.** `mode: preview` reads the targeted parameters from the same schematic
+  objects an apply writes and returns `would_write` / `unchanged` / `refused: reason` per edit; it
+  needs no grant and writes nothing. The client's approval hash covers project, sheet and, per
+  edit, the previewed value and the new value; the selection token is left out so the grant tick
+  (which bumps the generation) does not void a preview. Compare-and-set at apply is the guarantee.
+- **One tick, one batch.** An apply that touches the sheet clears the grant natively, so the
+  operator approves each batch, not a session (review finding C4). Grant changes bump the
+  selection generation, so a token taken before a tick or untick is refused afterwards. A project
+  switch, Detach and session end clear the grant; the tick is refused while a request is in
+  flight; the status form logs a grant that ended without a click.
+- **Identity is bound, not only values.** Preview returns each component's `UniqueId`; the
+  approval hash covers it and apply refuses (`refused: component identity changed since
+  preview`) if a re-annotation moved the designator to another part (review finding C3).
+- **Separate runtime identity.** The param-edit runtime's ping names `eda-selected-paramedit-v1`
+  and its selection carries `param_edits: off | granted`; the read-only client refuses such a
+  bridge and the write client refuses the read-only one. With the gate False, ping and selection
+  JSON are unchanged from `2026.10.02.1`.
+- **Review.** An adversarial review of the build on 2026-10-03 found C1-C6 and P1-P3; all are
+  addressed as listed above and in the tests.
+- **Encoding is ASCII-only.** Values are percent-encoded printable ASCII; micro and Ohm signs are
+  refused on both sides until a Unicode round trip is qualified. T3 is narrowed accordingly.
+- **Multi-part and duplicate designators are refused.** The designator is counted across every
+  schematic of the selected project, so every schematic must be open (`SHEET_NOT_OPEN`
+  otherwise). A multi-part device split over sheets (the HDMI board's U501) is set by hand.
+- **Apply marks the sheet dirty after a write** (`MarkDocDirtyByPath`): upstream 69374c2 measured
+  that an API parameter write leaves the document clean, so Save has nothing to flush.
+- **Outcome classes, decided by code.** Native refusals all return before `PreProcess`. PLT-hw
+  `shared_server._param_edit` prefixes every failure with `NO_WRITE:` (client validation, the
+  selection or grant check before sending, a native pre-write error code, any preview failure) or
+  `OUTCOME_UNKNOWN:` (a timeout, disconnect, `CHANGED_DURING_WRITE`, any other native code, a
+  result that fails validation, a selection that moved before delivery), and the client reads
+  only that leading prefix. Free-text matching was rejected after review finding C1: a triage
+  annotation can quote an old refusal from the log. Never re-run apply on OUTCOME_UNKNOWN.
+- **Dirty mark on touch.** The sheet is marked dirty as soon as a value is assigned, whatever
+  the read-back says, and `PostProcess` / `GraphicallyInvalidate` are each guarded (C2). The
+  parameter is found first and written after its iterators are destroyed, as `SetCompParamText`
+  does (P1).
+- **Values that cannot round-trip block at preview** (C5): apply sends the previewed value back
+  as `old`, so a current value outside printable ASCII is reported for a hand edit.
+
+**Added native tests**
+
+| Test | Pass means |
+|---|---|
+| T14 multi-part | a designator with two symbols (same or different sheets): refused in preview and apply, nothing written |
+| T15 read-only unchanged | a read-only runtime built from `2026.10.03.1`: ping and selection JSON have the `2026.10.02.1` shape (no `param_edits`), the command returns `READ_ONLY`, no checkbox shows, the read surface passes its usual smoke test |
+| T16 grant lifecycle | tick, untick, project switch and Detach each change or clear the grant as the window shows; a token from before a tick is refused; the tick does nothing while a request is in flight; after an apply that wrote, the grant is off, the log says so and a second apply is refused until the next tick |
+| T17 identity | preview, then swap two designators by hand and save, then apply with the old hash: refused, nothing written |
+
+**Qualification procedure (non-CAD day)**
+
+1. Stop the bridge, close Altium. Make a disposable copy of a project (the 22p is the reference).
+2. `python create_shared_runtime.py --root %LOCALAPPDATA%\PLT\eda-agent\shared\selected-paramedit-<date> --tool-source <eda-agent checkout> --param-edits`
+3. Start Altium, open the copy and the new runtime's `scripts\Altium_API.PrjScr`, run
+   `Dispatcher.pas > StartMCPServer`, select the copy, open all its schematics.
+4. Run T1-T17 with `bridge_write.py --shared-root <that runtime>` and record each result, the
+   Altium version and the runtime hashes in a dated note.
+5. Only then decide whether the runtime may point at a working project.

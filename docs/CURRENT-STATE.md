@@ -24,6 +24,12 @@ baselines; no installed package/runtime redeployment accompanied publication.
   `tools/eda-agent/BRIDGE.md` (commands, rules, blind spots; test-enforced against the
   runtime pointer). Upstream review of 2026-10-02: PLT-hw
   `tools/eda-agent/UPSTREAM-REVIEW-2026-10-02.md`.
+- **Source is ahead of the deployed runtime (2026-10-03):** scripts `2026.10.03.1` add the
+  first write, checked `LCSC Part #` / `Instruction` edits, approved by the operator and
+  gated off by default (`SELECTED_PARAM_EDITS = False`). Not provisioned, not deployed;
+  native qualification T1-T17 is open:
+  [PROPOSAL-2026-09-28](PROPOSAL-2026-09-28-metadata-write-increment.md) section 7. The
+  running runtime above is unaffected.
   **Runtime paths are written with the environment variable on purpose.** An
   absolute path here names one machine's private storage, which
   `test_no_client_design_data.py` refuses. Use the variable in committed docs;

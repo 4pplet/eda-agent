@@ -93,6 +93,28 @@ object StatusForm: TStatusForm
       Caption = 'Read-only permissions'
       Visible = False
     end
+    object chk_AllowParams: TPanel
+      Left = 14
+      Top = 206
+      Width = 352
+      Height = 20
+      Anchors = [akLeft, akTop, akRight]
+      BevelOuter = bvNone
+      Alignment = taLeftJustify
+      Caption = '  o  Allow parameter edits'
+      Color = $00202126
+      Cursor = crHandPoint
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = $00589EE0
+      Font.Height = -11
+      Font.Name = 'Segoe UI'
+      Font.Style = [fsBold]
+      ParentFont = False
+      ShowHint = True
+      TabOrder = 2
+      Visible = False
+      OnClick = chk_AllowParamsClick
+    end
     object pnl_StatusDot: TPanel
       Left = 14
       Top = 19
