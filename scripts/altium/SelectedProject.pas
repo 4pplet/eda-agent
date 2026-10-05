@@ -338,8 +338,10 @@ End;
 { so an agent cannot approve its own writes.                                   }
 {                                                                              }
 { Fixes the audited upstream handler's F1-F7: exact sheet only, never the      }
-{ focused one (F1); LCSC Part # and Instruction only, so Value can never reach }
-{ Comment (F2); blank is an ordinary value (F3); every value percent-encoded   }
+{ focused one (F1); one named, EXISTING parameter per edit, matched by exact  }
+{ name, never Designator, Footprint or a component property (F2; widened from }
+{ LCSC Part # / Instruction on 2026-10-05, Stefan); blank is an ordinary value }
+{ (F3); every value percent-encoded                                            }
 { (F4); per-field status with the text read back from the object (F5, F7);     }
 { existing parameters only, nothing created (F6). Never saves (F9).            }
 
@@ -427,9 +429,30 @@ Begin
         If Copy(S, I, 1) = Ch Then Inc(Result);
 End;
 
+{ Any existing parameter by exact name, printable ASCII, 1-64 characters, except }
+{ the names that are not parameters (Designator, Footprint, component          }
+{ properties shown in the parameter table). Widened 2026-10-05 (Stefan) from    }
+{ LCSC Part # / Instruction; the finder still never creates a parameter.        }
 Function ParamEditFieldAllowed(Field : String) : Boolean;
+Var
+    I, C : Integer;
+    Ch, U : String;
 Begin
-    Result := (Field = 'LCSC Part #') Or (Field = 'Instruction');
+    Result := (Length(Field) >= 1) And (Length(Field) <= 64);
+    If Not Result Then Exit;
+    For I := 1 To Length(Field) Do
+    Begin
+        Ch := Copy(Field, I, 1);
+        C := Ord(Ch[1]);
+        If (C < 32) Or (C > 126) Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+    U := '|' + UpperCase(Field) + '|';
+    Result := Pos(U, '|DESIGNATOR|FOOTPRINT|COMPONENT KIND|LIBRARY REFERENCE|LIBRARY NAME|'
+        + 'PIN INFO|SIGNAL INTEGRITY|SIMULATION|IBIS MODEL|PCB3D|') = 0;
 End;
 
 Function ParamEditHashValid(H : String) : Boolean;
@@ -447,7 +470,7 @@ Begin
 End;
 
 { The single schematic component with this designator on Doc, and its one     }
-{ parameter named Field (case-insensitive). Hits counts the matching           }
+{ parameter named exactly Field. Hits counts the matching                      }
 { parameters; UniqueId is the component's. Nil unless exactly one parameter    }
 { matched. Iterators are destroyed before the caller touches the parameter,    }
 { as SetCompParamText does: find first, then modify.                           }
@@ -479,7 +502,7 @@ Begin
                     Param := PIter.FirstSchObject;
                     While Param <> Nil Do
                     Begin
-                        If UpperCase(Param.Name) = UpperCase(Field) Then
+                        If Param.Name = Field Then
                         Begin
                             Inc(Hits);
                             Found := Param;
@@ -616,7 +639,7 @@ Begin
             If Not ParamEditFieldAllowed(F) Then
             Begin
                 Result := BuildErrorResponse(RequestId, 'FIELD_NOT_ALLOWED',
-                    'Edit ' + IntToStr(Count) + ' (' + D + '): only LCSC Part # and Instruction may be written, not "' + F + '"');
+                    'Edit ' + IntToStr(Count) + ' (' + D + '): "' + F + '" may not be written (Designator, Footprint and component properties are not parameters)');
                 Exit;
             End;
             Key := D + '|' + F;

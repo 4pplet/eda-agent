@@ -209,3 +209,32 @@ Approved by the operator 2026-10-03. Source only; no runtime provisioned, nothin
 4. Run T1-T17 with `bridge_write.py --shared-root <that runtime>` and record each result, the
    Altium version and the runtime hashes in a dated note.
 5. Only then decide whether the runtime may point at a working project.
+
+## 8. First live use and widening, 2026-10-05
+
+**Stefan's decisions, 2026-10-05:** qualify on the live HDMI project instead of a disposable copy,
+with every design file committed and pushed first as the rollback point (PLT-hw e1a9041); and,
+once that worked, widen the write from `LCSC Part #` / `Instruction` to any existing parameter.
+
+**Live results on scripts `2026.10.03.1` (runtime `selected-paramedit-20261005`):**
+- Refused in preview, nothing written, the sheet stayed clean: `Value` and `Instuction` (client
+  allowlist), an unknown designator, a designator on another sheet, the two-part CON401 (T14).
+- Apply without the tick: refused, nothing written (client side; the native bypass half of T11
+  was not exercised).
+- Four batches applied, one tick each: sheet 4 (15 written), sheet 2 (19), sheet 5 (21),
+  sheet 1 (1). Each read back exact, the grant ended with each batch, only the target sheet was
+  dirty, and after Stefan saved, the netlist was identical to the pre-write baseline and exactly
+  the batch's fields had changed (PLT-hw `hdmi-adapter` commits 48285f0, 842daab, 7e30c29, cff020f).
+- Not exercised live: T3 round-trip of special characters, T5 stale hand edit, T8 undo (Stefan
+  saved without the Ctrl+Z step), T9 close without saving, T12 pre-dirtied sheet, T13
+  disconnect, T16 tick lifecycle detail, T17 identity swap. They remain open.
+
+**Widening, scripts `2026.10.05.1`:** any EXISTING parameter by exact name (printable ASCII,
+1-64 characters). Never written: `Designator`, `Footprint` and the component properties that the
+parameter table shows but that are not parameters (`Component Kind`, `Library Reference`,
+`Library Name`, `Pin Info`, `Signal Integrity`, `Simulation`, `Ibis Model`, `PCB3D`). The
+finder now matches the name exactly (was case-insensitive), so a misspelt field finds nothing
+and is refused; nothing is ever created. Every other rule of section 7 is unchanged.
+
+**Workflow (Stefan):** read every parameter, write a change log, Stefan approves it, then apply
+it (PLT-hw `tools/eda-agent/bom_plan.py` writes the log and the batches from the same plan).
