@@ -1,0 +1,120 @@
+# Proposal: a placement-write increment (move components from a checked plan)
+
+**Status: proposal, 2026-10-07. Nothing is built. It needs the operator's approval before any
+code, and a qualification sitting on a disposable copy before any live use.** It follows the
+pattern of the [metadata-write increment](PROPOSAL-2026-09-28-metadata-write-increment.md), which
+is live since 2026-10-05: a narrow new handler instead of an exposed upstream one, the operator's
+tick per batch, compare-and-set, read-back, never save.
+
+## 1. Why this, why now
+
+The HDMI board's U501 (TC358870, 0.65 mm BGA) has a checked layout plan: 16 parts beside the
+package, on their PLT_lib pads, with positions and rotations that two independent checkers pass
+(PLT-hw `hdmi-adapter/reviews/bga-fanout-2026-10-05.plan.json`). Placing them by hand means typing
+about 16 x / y / rotation triples into the Properties panel, relative to wherever U501 ends up.
+
+That transcription is where errors come in. The plan itself carried one until 2026-10-07: five
+caps and R501 had their pins the other way round from the CAD, which only the new
+`bridge.cmd plancheck` (read-only, PLT-hw `plan_compare.py`) caught. A batch generated from the
+checked plan removes the transcription. The same `plancheck` then verifies the result before
+anything is saved.
+
+Moves are a low-risk write class: no connectivity, no ECO, no copper (placement precedes routing,
+and this increment refuses parts with routing attached). `plancheck` and Altium's own DRC verify
+the result.
+
+## 2. Where writes are blocked today (keep both)
+
+Unchanged from the metadata increment: the Python `ALLOWED` set in PLT `shared_server.py`, and
+`Dispatcher.pas` routing every command to `ProcessSelectedCommand` while
+`SELECTED_PROJECT_READ_ONLY`. The increment adds **one command to both**. It does not flip
+`SELECTED_PROJECT_READ_ONLY`.
+
+## 3. Audit of the candidate handlers: do not expose them as-is
+
+`PCB_MoveComponent` and `PCB_BatchMoveComponents` (`scripts/altium/PCB.pas`, around lines 1806 and
+3594) do the move itself correctly: `PreProcess`, `PCBM_BeginModify`, set `x` / `y` / `Rotation`,
+`PCBM_EndModify`, `PostProcess` per component, then mark the document dirty. Read line by line,
+they have these problems for our use:
+
+| # | Finding | Why it matters |
+|---|---|---|
+| M1 | **Board = `GetPCBBoardAnywhere(0)`**: the focused or first open board | Violates *never infer the target from the focused window*. With the 22p and HDMI boards both open, a batch could land on the wrong board |
+| M2 | **Coordinates in whole mils** (`StrToIntDef`, `MilsToCoord`) | 0.0254 mm steps. The plan has parts at exactly 0.30 mm from their limits; rounding can cost 0.013 mm of that. Altium's internal unit is 1/10000 mil |
+| M3 | **A malformed number becomes 0** (`StrToIntDef(.., 0)`, `StrToFloatDef(.., 0)`) | A typo moves the part to the board origin, or rotates it to 0, and reports success |
+| M4 | **Locked parts are moved anyway** | The operator's lock is the one signal that a part is final |
+| M5 | **Batch failures are counted, not named**; an unknown designator is skipped silently | The response cannot say which part did not move |
+| M6 | **No side check.** The layer is untouched, so a part on the wrong side stays there | Single-sided board: a flip is never what a plan move means. This increment refuses side changes rather than performing them |
+| M7 | The batch's header comment says *"Save runs once at the end"*; **the code does not save** | The behaviour (no save) is what we want; the comment is stale |
+| M8 | Undo: one `PreProcess` / `PostProcess` pair per component | **Undo is plausible, per part, not qualified** (T9) |
+| M9 | Rotation is set on the component, which turns about its origin | Correct for a plan that records the footprint origin (`parts[].at`). Qualify that the pads land where the plan says (T14) |
+| M10 | Tracks attached to the part's pads are not dragged by an API move | Irrelevant before routing; the increment refuses parts with routing attached |
+
+**Verdict:** write a narrow PLT handler on the ForBoard pattern that reuses the move sequence and
+fixes M1-M6 and M10. Do not patch the upstream handlers in place.
+
+## 4. The increment
+
+**Command:** `pcb.move_components_checked` (native) / `pcb_move_components_checked` (MCP). One
+board per call: the selected project's PcbDoc, resolved exactly.
+
+| Rule | Detail |
+|---|---|
+| **Target** | The selected project's PcbDoc only. No focused-board fallback (M1) |
+| **Session grant** | Native refusal unless the operator has ticked **"Allow placement edits (this session)"** on the StatusForm. This is a separate box from parameter edits. One tick covers one batch, and the grant clears on session end, Detach and a selection switch. The agent cannot tick it |
+| **Coordinates** | Raw Altium coordinates as integers (M2), rotation 0 / 90 / 180 / 270 only. Anything else is refused in preflight (M3) |
+| **Compare-and-set** | Each move carries the part's x / y / rotation / layer as read at preview. Preflight the whole batch and refuse **all** of it if any part has moved since |
+| **Refusals** | Locked part (M4), a side or layer change (M6), an unknown designator (M5), and a pad with a track or arc attached (M10) |
+| **Clean baseline** | Refuse if the PcbDoc is already dirty. One batch per save |
+| **Honest result** | Per part: `moved` / `unchanged` / `refused` and the reason, with x / y / rotation **read back** after the write |
+| **Never save** | The document is left dirty. The operator's save approves the result; close without saving is the recovery |
+
+**Client (PLT `bridge_write.py`, new subcommand `moves`):**
+
+1. `bridge.cmd plancheck --plan <plan> --emit-moves <batch.json>` writes the batch: for every
+   planned part not yet within tolerance, the target origin and rotation in the board frame,
+   derived from the anchor's live position. **The anchor (U501) is placed by the operator**; the
+   plan follows wherever it goes.
+2. `bridge_write.py moves preview <batch.json>` reads each part live and prints
+   `ref: (x, y, rot) -> (x, y, rot)`, with distances in mm and an approval hash. It is dry, and
+   the default.
+3. `bridge_write.py moves apply <batch.json> --hash <h>` refuses if the hash or any part changed
+   since preview, sends one native call, and reads back.
+4. Then `bridge.cmd plancheck` again: every moved part should report `ok`.
+
+## 5. Qualification: one non-CAD sitting, disposable copy
+
+Pinned runtime version, on a copy of the HDMI project. Record the Altium version and hashes.
+
+| Test | Pass means |
+|---|---|
+| T1 happy path | 16 planned parts moved in one batch; read-back exact; `plancheck` all ok; netlist unchanged (`ecopreview` and `nets --expect` as before) |
+| T2 precision | a target off the mil grid lands within one internal unit |
+| T3 malformed | a non-numeric coordinate or a 45 degree rotation: refused in preflight, nothing moved |
+| T4 no fallback | another PcbDoc focused: the selected project's board is the one written, or the call is refused; the other board stays clean |
+| T5 stale | one part nudged by hand after preview: whole batch refused |
+| T6 locked | a locked part in the batch: refused, nothing moved |
+| T7 side | a part on the bottom, or a target on the other side: refused |
+| T8 unknown | a designator not on the board: refused in preflight |
+| T9 **undo** | record what one Ctrl+Z reverts: the batch, one part, or nothing. This decides the recovery story |
+| T10 recovery | close without saving and reopen: every part at its pre-batch position |
+| T11 grant | grant off: refused natively, including a direct native request that bypasses Python; Detach and selection switch clear it |
+| T12 dirty target | the PcbDoc pre-dirtied by hand: refused |
+| T13 disconnect | client killed mid-apply: outcome reported unknown; the next preview shows the true state; no automatic retry |
+| T14 rotation pivot | a part rotated by 90 / 180 / 270 has its pads where the plan puts them (pad read within 1 mil) |
+| T15 routed part | a part with a track on one pad: refused |
+
+**Exit:** all 15 pass on the copy. Only then does the command go into the live PLT runtime.
+
+## 6. Out of scope
+
+Flips and bottom-side placement, creating or deleting components, moving the anchor, tracks,
+vias, rooms, rules, classes and the stackup (each a later increment if it earns one), and saving.
+
+## 7. Effort
+
+- **Native handler:** about 150 lines of Pascal on the ForBoard pattern, from the metadata
+  handler's grant and compare-and-set code.
+- **The rest:** the Python server entry, the client `moves` subcommand, `plancheck --emit-moves`,
+  and offline tests.
+- **Operator's time:** a deploy window and one qualification sitting of about an hour in Altium.

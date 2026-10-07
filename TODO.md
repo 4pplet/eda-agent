@@ -1166,6 +1166,14 @@ requires native qualification and remains read-only.
   identical old values across the parts and read all of them back (HDMI U501 has six parts on one
   sheet, CON401 two; today refused by design, T14, and set by hand). (b) DONE 2026-10-05 in script
   2026.10.05.1: any existing parameter by exact name, never Designator / Footprint / component properties.
+- [ ] **Placement-write increment (proposed 2026-10-07, awaiting operator approval):**
+  [docs/PROPOSAL-2026-10-07-placement-write-increment.md](docs/PROPOSAL-2026-10-07-placement-write-increment.md).
+  - A narrow `pcb_move_components_checked`: the selected board only, raw coordinates,
+    compare-and-set, refusals for locked, flipped and routed parts, its own session tick, read-back,
+    never save.
+  - It is fed by PLT `plancheck --emit-moves` from a checked layout plan.
+  - The upstream `PCB_MoveComponent` / `PCB_BatchMoveComponents` are not exposed: focused-board
+    target, mil rounding, parse-failure-to-zero, locks ignored (audit M1-M10).
 - [ ] Add assignment/change of existing library footprints with explicit model
   identity, package and pin-pad/pin-1 checks, library availability and assembly
   review. Preview schematic-to-PCB ECO separately; require approval before
