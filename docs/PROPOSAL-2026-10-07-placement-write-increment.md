@@ -205,3 +205,8 @@ target, grant ended. `plancheck`: 38 / 38 planned parts in place (largest pad of
 nothing floating; its outline fallback (pads + 0.25 mm) flagged unplanned neighbours (U301's caps),
 not the moved parts.
 
+**Fourth live batch, 2026-10-07:** after Stefan's own adjustments (saved, PLT-hw 7a37341), a 3-part
+batch (C509 0.05 mm, TP503 1.3 mm, C506 3.4 mm) on his standing approval and tick: applied, read
+back, grant ended; plancheck 38 / 38, nothing floating. The tool moved parts a person had moved by
+hand without trouble: the compare-and-set read his positions as the old ones.
+
