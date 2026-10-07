@@ -198,3 +198,10 @@ read back at target, grant ended. `plancheck`: 16 / 16, largest pad offset 0.015
 48 864 checks including the new outline check, nothing floating; two gaps under one mil short of
 their rule are listed as read resolution (plan 0.100 / 0.162, read 0.091 / 0.149).
 
+**Third live batch, 2026-10-07 (same runtime):** the six rail groups, 22 parts brought onto the board
+from the parking area (190-264 mm each, rotations changed). Rollback PLT-hw f274060. Preview refused
+nothing; Stefan had pre-approved the batch and ticked. Applied: 22 moved, 0 partial, read back at
+target, grant ended. `plancheck`: 38 / 38 planned parts in place (largest pad offset 0.016 mm),
+nothing floating; its outline fallback (pads + 0.25 mm) flagged unplanned neighbours (U301's caps),
+not the moved parts.
+
