@@ -187,7 +187,14 @@ the live project with git as the rollback.
 
 | Test | Result |
 |---|---|
-| T1 | **Pass, apart from the post-save netlist check.** `plancheck --emit-moves` wrote 16 moves; the preview refused none. One tick, then apply with hash `5b1088ad...6738`: 16 moved, 0 partial, every part read back at its target, verify preview clean, grant ended. `plancheck` on the unsaved board: 16 / 16 in place, largest pad offset 0.016 mm (the read's 1-mil resolution), 0 clearance violations, nothing floating. Open: after Stefan's save, `ecopreview` must still show only the 16 pending ESD pad changes |
+| T1 | **Pass.** `plancheck --emit-moves` wrote 16 moves; the preview refused none. One tick, then apply with hash `5b1088ad...6738`: 16 moved, 0 partial, every part read back at its target, verify preview clean, grant ended. `plancheck` on the unsaved board: 16 / 16 in place, largest pad offset 0.016 mm (the read's 1-mil resolution), 0 clearance violations, nothing floating. After Stefan's save, `ecopreview` showed only the 16 pending ESD pad changes: the moves changed no nets (PLT-hw a80ef7d) |
 | T14 | **Pass.** Parts at 90, 180 and 270 degrees have their pads where the plan puts them: rotation turns about the footprint origin, and setting x / y after the rotation lands the origin exactly |
 | T2-T13, T15 | Open |
+
+**Second live batch, 2026-10-07 afternoon (same runtime):** the plan re-fitted on footprint outlines
+(PLT-hw c410605). Saved board committed first (a80ef7d). Preview: 16 to move (0.15-0.60 mm, no
+rotation change), nothing refused. One tick, apply with hash `b92dd32f...ff11`: 16 moved, 0 partial,
+read back at target, grant ended. `plancheck`: 16 / 16, largest pad offset 0.015 mm, 0 violations of
+48 864 checks including the new outline check, nothing floating; two gaps under one mil short of
+their rule are listed as read resolution (plan 0.100 / 0.162, read 0.091 / 0.149).
 
