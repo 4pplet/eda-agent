@@ -177,3 +177,17 @@ the live project with git as the rollback.
 | T14 | After T1, `bridge.cmd pads` on parts at 90 / 180 / 270 | pads where the plan puts them, within 1 mil (`plancheck` ok) |
 | T15 | A short track on one pad of a part; preview | `refused: copper routing overlaps the part` |
 
+## 10. Qualification log
+
+**2026-10-07, runtime `selected-edits-20261007` (scripts `2026.10.07.1`), live HDMI project.**
+- **Setup:** Stefan chose the live project with git as the rollback, as for parameter edits. The
+  design files were committed first (PLT-hw b2d05a7).
+- **First compile:** the new Pascal compiled at its first load, with no script error.
+- **Ping:** profile `eda-selected-edits-v1`. The selection identity carries both grant states.
+
+| Test | Result |
+|---|---|
+| T1 | **Pass, apart from the post-save netlist check.** `plancheck --emit-moves` wrote 16 moves; the preview refused none. One tick, then apply with hash `5b1088ad...6738`: 16 moved, 0 partial, every part read back at its target, verify preview clean, grant ended. `plancheck` on the unsaved board: 16 / 16 in place, largest pad offset 0.016 mm (the read's 1-mil resolution), 0 clearance violations, nothing floating. Open: after Stefan's save, `ecopreview` must still show only the 16 pending ESD pad changes |
+| T14 | **Pass.** Parts at 90, 180 and 270 degrees have their pads where the plan puts them: rotation turns about the footprint origin, and setting x / y after the rotation lands the origin exactly |
+| T2-T13, T15 | Open |
+

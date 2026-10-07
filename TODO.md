@@ -1166,8 +1166,9 @@ requires native qualification and remains read-only.
   identical old values across the parts and read all of them back (HDMI U501 has six parts on one
   sheet, CON401 two; today refused by design, T14, and set by hand). (b) DONE 2026-10-05 in script
   2026.10.05.1: any existing parameter by exact name, never Designator / Footprint / component properties.
-- [ ] **Placement-write increment (approved 2026-10-07, implemented in scripts 2026.10.07.1; deploy and
-  qualify T1-T15 on a disposable copy next):**
+- [ ] **Placement-write increment (approved 2026-10-07, scripts 2026.10.07.1, deployed as runtime
+  selected-edits-20261007 the same day; T1 and T14 pass on the live HDMI project, T2-T13 and T15
+  open, proposal section 10):**
   [docs/PROPOSAL-2026-10-07-placement-write-increment.md](docs/PROPOSAL-2026-10-07-placement-write-increment.md).
   - A narrow `pcb_move_components_checked`: the selected board only, raw coordinates,
     compare-and-set, refusals for locked, flipped and routed parts, its own session tick, read-back,
