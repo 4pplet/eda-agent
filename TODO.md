@@ -1176,6 +1176,16 @@ requires native qualification and remains read-only.
   - It is fed by PLT `plancheck --emit-moves` from a checked layout plan.
   - The upstream `PCB_MoveComponent` / `PCB_BatchMoveComponents` are not exposed: focused-board
     target, mil rounding, parse-failure-to-zero, locks ignored (audit M1-M10).
+  - Learned on the HDMI rough placement (2026-10-07, 4 batches, ~180 moves): the routed-part refusal
+    uses `Comp.BoundingRectangle`, which includes the designator / comment text, so a part whose
+    LABEL reaches a mounting-hole via is refused (C205, C206, TP206) and the post-apply verify flags
+    parts that sit exactly at target. Consider the pads' and body's extent instead of the text.
+- [ ] **Silkscreen designator edits (Stefan 2026-10-07, "very low risk"):** hide / show, move and
+  resize the designator (and comment) text of placed components on the selected board, as a gated
+  batch like the placement write: preview -> approval hash -> its own tick -> compare-and-set ->
+  read back -> never save. Only text position, rotation, height / stroke width and visibility; no
+  other primitive. Feeds a PLT-side "designator tidy" (outside the courtyard, readable rotation,
+  off pads and vias).
 - [ ] Add assignment/change of existing library footprints with explicit model
   identity, package and pin-pad/pin-1 checks, library availability and assembly
   review. Preview schematic-to-PCB ECO separately; require approval before
