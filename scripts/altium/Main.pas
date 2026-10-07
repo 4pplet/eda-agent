@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.10.05.1';
+    SCRIPT_VERSION = '2026.10.07.1';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
     { Checked parameter edits (PROPOSAL-2026-09-28-metadata-write-increment):
@@ -22,6 +22,11 @@ Const
       the reviewed read-only runtime keeps it False and the command is
       refused there exactly like any other write. }
     SELECTED_PARAM_EDITS = False;
+    { Checked placement edits (PROPOSAL-2026-10-07-placement-write-increment,
+      approved by Stefan 2026-10-07): one command, pcb.move_components_checked,
+      behind its own operator-ticked session grant. Only a runtime generated
+      with --place-edits sets this; that runtime has SELECTED_PARAM_EDITS too. }
+    SELECTED_PLACE_EDITS = False;
 
     // How far up the mechanical layers a pair tidy looks. Altium allows 1024,
     // and checking every combination of those is a million probes for a stack

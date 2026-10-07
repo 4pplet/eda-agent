@@ -26,6 +26,7 @@ Var
     { What the grant checkbox last showed, so an end of grant the operator   }
     { did not click (a batch applied, a project switch) is logged once.      }
     ParamGrantShown  : Boolean;
+    PlaceGrantShown  : Boolean;
     OnlySlowFlag     : Boolean;
     AlwaysOnTopFlag  : Boolean;
 
@@ -628,13 +629,51 @@ Begin
         Else
         Begin
             chk_AllowParams.Caption := '  ' + HollowDot(0)
-                + '  Allow parameter edits (LCSC Part #, Instruction)';
+                + '  Allow parameter edits (existing parameters)';
             chk_AllowParams.Color := $00202126;
         End;
         chk_AllowParams.Hint := 'Grant for ONE proj_set_component_params_checked batch: one sheet, '
-            + 'existing LCSC Part # / Instruction parameters only, compare-and-set, never saves. '
+            + 'existing parameters only (never Designator / Footprint), compare-and-set, never saves. '
             + 'Ends after a batch is applied, and on a project switch, Detach or session end. '
             + 'You review the sheet and save it.';
+    Except End;
+End;
+
+{ The operator's placement-edit grant, painted like the parameter grant. }
+Procedure RefreshPlaceGrantCheck(Dummy : Integer);
+Var
+    Granted : Boolean;
+Begin
+    If Not (SELECTED_PROJECT_READ_ONLY And SELECTED_PLACE_EDITS) Then Exit;
+    Granted := PlaceEditGrantActive(0);
+    Try
+        If PlaceGrantShown And (Not Granted) Then
+            mmo_Log.Lines.Insert(0, 'Placement edit grant ended (a batch was applied, '
+                + 'or the selection changed). Tick again for the next batch.');
+        PlaceGrantShown := Granted;
+        If Granted Then
+        Begin
+            chk_AllowPlace.Caption := '  ' + FilledDot(0)
+                + '  Placement edits GRANTED for ONE batch - click to revoke';
+            chk_AllowPlace.Color := $00303848;
+            If SelectedPath <> '' Then
+            Begin
+                StatusForm.Caption := ExtractFileName(SelectedPath)
+                    + ' - EDA (PLACEMENT EDITS GRANTED)' + KeyboardWarningSuffix(0);
+                lbl_SelectedProject.Caption := 'Selected: ' + ExtractFileName(SelectedPath)
+                    + #13#10 + 'PLACEMENT EDITS GRANTED for one batch (never saves)';
+            End;
+        End
+        Else
+        Begin
+            chk_AllowPlace.Caption := '  ' + HollowDot(0)
+                + '  Allow placement edits (move parts, top side)';
+            chk_AllowPlace.Color := $00202126;
+        End;
+        chk_AllowPlace.Hint := 'Grant for ONE pcb_move_components_checked batch: the selected '
+            + 'project''s PcbDoc, unlocked top-side parts without routing, compare-and-set, never saves. '
+            + 'Ends after a batch is applied, and on a project switch, Detach or session end. '
+            + 'You review the board and save it.';
     Except End;
 End;
 
@@ -666,6 +705,7 @@ Begin
     Try lbl_ValUp.Caption  := UpStr; Except End;
     If SELECTED_PROJECT_READ_ONLY Then RefreshSelectedLabel(0);
     RefreshParamGrantCheck(0);
+    RefreshPlaceGrantCheck(0);
     Try lbl_ValReq.Caption := IntToStr(Requests); Except End;
     Try lbl_ValMs.Caption  := MsStr; Except End;
     ColorCountdown(IdleSecToShutdown);
@@ -840,6 +880,7 @@ Begin
         EnsureStatusBuffers(0);
         HidePingsFlag   := True;
         ParamGrantShown := False;
+        PlaceGrantShown := False;
         OnlySlowFlag    := False;
         AlwaysOnTopFlag := True;
         PausedFlag      := False;
@@ -887,9 +928,13 @@ Begin
         lbl_SelectedProject.Visible := SELECTED_PROJECT_READ_ONLY;
         lbl_Permissions.Visible := SELECTED_PROJECT_READ_ONLY;
         chk_AllowParams.Visible := SELECTED_PROJECT_READ_ONLY And SELECTED_PARAM_EDITS;
+        chk_AllowPlace.Visible := SELECTED_PROJECT_READ_ONLY And SELECTED_PLACE_EDITS;
         If SELECTED_PROJECT_READ_ONLY Then
         Begin
-            If SELECTED_PARAM_EDITS Then
+            If SELECTED_PLACE_EDITS Then
+                lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
+                    + #13#10 + 'Parameter / placement edits only while ticked; never saves'
+            Else If SELECTED_PARAM_EDITS Then
                 lbl_Permissions.Caption := 'Allowed: reads / compile (no CAD save)'
                     + #13#10 + 'Parameter edits only while ticked below; never saves'
             Else
@@ -905,7 +950,10 @@ Begin
                 + 'earlier runtime, and the presses replayed as a burst on detach).';
             { Children have already been DPI-scaled by the native form loader.
               Use their bounds and the scaled button/label gap, not raw pixels. }
-            If SELECTED_PARAM_EDITS Then
+            If SELECTED_PLACE_EDITS Then
+                pnl_Header.Height := chk_AllowPlace.Top + chk_AllowPlace.Height
+                    + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height)
+            Else If SELECTED_PARAM_EDITS Then
                 pnl_Header.Height := chk_AllowParams.Top + chk_AllowParams.Height
                     + (lbl_Permissions.Top - lbl_SelectedProject.Top - lbl_SelectedProject.Height)
             Else
@@ -915,6 +963,7 @@ Begin
                 + KeyboardWarningSuffix(0);
             RefreshProjectChoices(Nil);
             RefreshParamGrantCheck(0);
+            RefreshPlaceGrantCheck(0);
         End;
         { Non-shared mode retains the DFM's naturally scaled header height. }
         { Button is always enabled: dashboard can run standalone. }
@@ -1047,6 +1096,32 @@ Begin
     Except End;
     RefreshSelectedLabel(0);
     RefreshParamGrantCheck(0);
+    RefreshPlaceGrantCheck(0);
+End;
+
+{ The only way the placement-edit grant is given or taken: an operator click. }
+Procedure chk_AllowPlaceClick(Sender : TObject);
+Begin
+    If Not (SELECTED_PROJECT_READ_ONLY And SELECTED_PLACE_EDITS) Then Exit;
+    If SelectedBusy Or InFlightActive Then Exit;
+    If Not TogglePlaceEditGrant(0) Then
+    Begin
+        Try lbl_LastErr.Caption := 'Select a project first (Use this project).'; Except End;
+        RefreshPlaceGrantCheck(0);
+        Exit;
+    End;
+    Try
+        If PlaceEditGrantActive(0) Then
+            mmo_Log.Lines.Insert(0, 'Placement edits GRANTED by the operator, generation '
+                + IntToStr(SelectedGeneration))
+        Else
+            mmo_Log.Lines.Insert(0, 'Placement edits revoked by the operator, generation '
+                + IntToStr(SelectedGeneration));
+        PlaceGrantShown := PlaceEditGrantActive(0);
+    Except End;
+    RefreshSelectedLabel(0);
+    RefreshParamGrantCheck(0);
+    RefreshPlaceGrantCheck(0);
 End;
 
 Procedure btn_DetachClick(Sender : TObject);

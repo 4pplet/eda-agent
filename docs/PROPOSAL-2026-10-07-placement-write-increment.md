@@ -1,7 +1,8 @@
 # Proposal: a placement-write increment (move components from a checked plan)
 
-**Status: proposal, 2026-10-07. Nothing is built. It needs the operator's approval before any
-code, and a qualification sitting on a disposable copy before any live use.** It follows the
+**Status: approved by the operator 2026-10-07 and implemented in source the same day (scripts
+`2026.10.07.1`, section 8). NOT deployed; the native qualification (section 5) is open, on a
+disposable copy, before any live use.** It follows the
 pattern of the [metadata-write increment](PROPOSAL-2026-09-28-metadata-write-increment.md), which
 is live since 2026-10-05: a narrow new handler instead of an exposed upstream one, the operator's
 tick per batch, compare-and-set, read-back, never save.
@@ -118,3 +119,61 @@ vias, rooms, rules, classes and the stackup (each a later increment if it earns 
 - **The rest:** the Python server entry, the client `moves` subcommand, `plancheck --emit-moves`,
   and offline tests.
 - **Operator's time:** a deploy window and one qualification sitting of about an hour in Altium.
+
+## 8. Implementation, 2026-10-07
+
+Scripts `2026.10.07.1` (eda-agent `scripts/altium`), client PLT-hw `tools/eda-agent`.
+
+- **Native** (`SelectedProject.pas`, `SelectedMoveComponentsChecked`): the selected project's
+  PcbDoc through `ResolveSelectedBoard`, never `GetPCBBoardAnywhere` (M1).
+  - Raw coordinates as integers; a strict integer parser refuses anything else (M2, M3).
+  - Rotation 0 / 90 / 180 / 270 only.
+  - Refusals, each named (M5): not on the board, locked (`Moveable = False`, M4), not on
+    TopLayer (M6), copper track / arc / via overlapping the part's bounding rectangle (M10),
+    moved since the preview.
+  - Apply: every part re-read; rotation set before x / y, so the origin lands where asked
+    whatever the pivot; read back. Then mark dirty, never save; one tick, one batch.
+  - At most 100 moves; `PCB_DIRTY` refuses a board with unsaved edits.
+- **Gate:** `Main.pas` `SELECTED_PLACE_EDITS`, set only by
+  `create_shared_runtime.py --place-edits`. That runtime also has `SELECTED_PARAM_EDITS`: mode
+  `selected-project-edits`, ping profile `eda-selected-edits-v1`, `place_edits` in the selection
+  identity.
+- **Operator grant:** a second StatusForm tick, "Allow placement edits". Ticking either grant
+  moves the selection generation, so the two can never be active at once.
+- **Server:** `pcb_move_components_checked` with the same NO_WRITE / OUTCOME_UNKNOWN
+  classification as the parameter tool; `PCB_DIRTY` and the board-resolution codes count as
+  pre-write.
+- **Client:** `bridge_write.py moves preview|apply BATCH [--hash]`. The batch comes from
+  `bridge.cmd plancheck --plan P --emit-moves BATCH`, which leaves out missing parts, parts on
+  the wrong side and parts whose pin nets differ from the plan.
+- **Tests:** PLT-hw `test_place_edits.py` and `test_plan_compare.py`, offline. What Altium does
+  with the move is what section 5 qualifies.
+- **Differences from section 4:** the routing check is the bounding-rectangle overlap
+  (conservative, before routing), not a per-pad connection test. The StatusForm's
+  parameter-grant caption no longer says "LCSC Part #, Instruction" (stale since the widening).
+
+## 9. Qualification runbook (for the sitting)
+
+Runtime: `create_shared_runtime.py --place-edits` into a new directory. Point `bridge.cmd` at it
+with `EDA_AGENT_SHARED_ROOT`, and `bridge_write.py` with `--shared-root`. Commit the design files
+first. The target is a copy of the HDMI project, or, if the operator chooses as on 2026-10-05,
+the live project with git as the rollback.
+
+| Test | Do | Expect |
+|---|---|---|
+| T1 | Place U501 by hand. `bridge.cmd plancheck --plan <plan> --emit-moves m.json`; `bridge_write.py moves preview m.json`; tick; `moves apply m.json --hash H` | all 16 moved, read-back exact; `plancheck` 16/16 ok; `ecopreview` and `nets --expect` as before |
+| T2 | A batch entry with x = 1234567 (off the mil grid) | read-back 1234567 |
+| T3 | Hand-edit a batch to x 1.5, then to rotation 45 | refused by the client and, sent raw, by the native side; nothing moved |
+| T4 | Open another PcbDoc and focus it; preview and apply | the selected project's board is the one read and written; the other stays clean |
+| T5 | Preview, nudge one part by hand, save, apply with the old hash | hash refusal; or with a fresh hash and a nudge after it, `moved since preview`; nothing moved |
+| T6 | Lock one part (Properties > Locked); preview | `refused: the part is locked` |
+| T7 | Put one part on the bottom; preview | `refused: the part is not on the top layer` |
+| T8 | A designator not on the board | `refused: designator not on the board` |
+| T9 | After T1, one Ctrl+Z, then Edit > Undo | record what each reverts: the batch, one part, or nothing |
+| T10 | After T1, close the PcbDoc without saving, reopen | every part at its pre-batch position |
+| T11 | Untick; apply. Then tick, Detach, apply. Then tick, switch project, apply | refused each time, also on a direct native request |
+| T12 | Edit the board by hand (unsaved); apply | `PCB_DIRTY`, nothing moved |
+| T13 | Kill the client during an apply | `OUTCOME UNKNOWN`; the next preview shows the true state; no retry |
+| T14 | After T1, `bridge.cmd pads` on parts at 90 / 180 / 270 | pads where the plan puts them, within 1 mil (`plancheck` ok) |
+| T15 | A short track on one pad of a part; preview | `refused: copper routing overlaps the part` |
+

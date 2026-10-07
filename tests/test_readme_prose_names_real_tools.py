@@ -58,6 +58,8 @@ NOT_TOOLS: dict[str, str] = {
     # Names from the PLT companion runtime (PLT-hw tools/eda-agent/shared_server.py),
     # which registers its own restricted tool set rather than this package's.
     "proj_get_erc_messages": "a tool of the PLT shared selected-project server",
+    "pcb_move_components_checked": "the PLT edit runtime's placement write tool "
+        "(registered by PLT's shared_server.py, not by a backend)",
     "proj_set_component_params_checked": "the PLT param-edit runtime's one write tool "
                                          "(PROPOSAL-2026-09-28), registered only there",
     # Fields of the proposed (unbuilt) library-read grant in LIBRARY-READS-DESIGN.md.

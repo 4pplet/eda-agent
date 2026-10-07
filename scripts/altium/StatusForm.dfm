@@ -115,6 +115,28 @@ object StatusForm: TStatusForm
       Visible = False
       OnClick = chk_AllowParamsClick
     end
+    object chk_AllowPlace: TPanel
+      Left = 14
+      Top = 230
+      Width = 352
+      Height = 20
+      Anchors = [akLeft, akTop, akRight]
+      BevelOuter = bvNone
+      Alignment = taLeftJustify
+      Caption = '  o  Allow placement edits'
+      Color = $00202126
+      Cursor = crHandPoint
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = $00589EE0
+      Font.Height = -11
+      Font.Name = 'Segoe UI'
+      Font.Style = [fsBold]
+      ParentFont = False
+      ShowHint = True
+      TabOrder = 3
+      Visible = False
+      OnClick = chk_AllowPlaceClick
+    end
     object pnl_StatusDot: TPanel
       Left = 14
       Top = 19

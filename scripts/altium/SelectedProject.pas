@@ -10,12 +10,16 @@ Var
     { valid only for the selection generation it was ticked in. }
     ParamEditGrant : Boolean;
     ParamEditGrantGeneration : Integer;
+    { Checked placement edits: the same rules, a grant of their own. }
+    PlaceEditGrant : Boolean;
+    PlaceEditGrantGeneration : Integer;
 
 Procedure ClearSelectedProject(Dummy : Integer);
 Begin
     SelectedPath := '';
     SelectedReference := Nil;
     ParamEditGrant := False;
+    PlaceEditGrant := False;
     Inc(SelectedGeneration);
     SelectedCompileReady := False;
     SelectedCompileProject := Nil;
@@ -27,6 +31,7 @@ Begin
     SelectedGeneration := 0;
     SelectedBusy := False;
     ParamEditGrantGeneration := -1;
+    PlaceEditGrantGeneration := -1;
     SelectedSession := FormatDateTime('yyyymmddhhnnsszzz', Now)
         + '-' + IntToStr(GetTickCount);
     ClearSelectedProject(0);
@@ -86,6 +91,31 @@ Begin
     Result := True;
 End;
 
+Function PlaceEditGrantActive(Dummy : Integer) : Boolean;
+Begin
+    Result := SELECTED_PLACE_EDITS And PlaceEditGrant
+        And (PlaceEditGrantGeneration = SelectedGeneration)
+        And (SelectedPath <> '');
+End;
+
+{ Operator UI only. Like the parameter grant it bumps the generation, so the }
+{ two grants can never be active at once: ticking one ends the other.         }
+Function TogglePlaceEditGrant(Dummy : Integer) : Boolean;
+Begin
+    Result := False;
+    If Not SELECTED_PLACE_EDITS Then Exit;
+    If SelectedBusy Then Exit;
+    If CurrentSelectedProject(0) = Nil Then
+    Begin
+        PlaceEditGrant := False;
+        Exit;
+    End;
+    PlaceEditGrant := Not PlaceEditGrant;
+    Inc(SelectedGeneration);
+    PlaceEditGrantGeneration := SelectedGeneration;
+    Result := True;
+End;
+
 Function UseSelectedProject(Path : String) : Boolean;
 Var
     Candidate : IProject;
@@ -117,6 +147,13 @@ Begin
             Result := Result + ',"param_edits":"granted"'
         Else
             Result := Result + ',"param_edits":"off"';
+    End;
+    If SELECTED_PLACE_EDITS Then
+    Begin
+        If PlaceEditGrantActive(0) Then
+            Result := Result + ',"place_edits":"granted"'
+        Else
+            Result := Result + ',"place_edits":"off"';
     End;
     Result := Result + '}';
 End;
@@ -904,6 +941,414 @@ Begin
     End;
 End;
 
+{ ---- Checked placement edits ------------------------------------------------ }
+{ PROPOSAL-2026-10-07-placement-write-increment. Reachable only when the runtime }
+{ was generated with SELECTED_PLACE_EDITS = True; apply additionally needs the   }
+{ operator's own placement grant (status form). Fixes the audited upstream       }
+{ PCB_MoveComponent / PCB_BatchMoveComponents M1-M6 and M10: the selected        }
+{ project's own PcbDoc only (ResolveSelectedBoard, never the focused board);     }
+{ raw coordinates as integers, never mils; a malformed number refuses the batch  }
+{ instead of becoming 0; locked parts, parts off the top layer and parts with    }
+{ copper routing over them are refused; every refusal is named; rotation 0, 90,  }
+{ 180 or 270 only; the side never changes. Never saves.                          }
+
+Function PlaceEditIntOk(S : String) : Boolean;
+Var
+    I : Integer;
+    Ch : String;
+Begin
+    Result := (Length(S) >= 1) And (Length(S) <= 12);
+    If Not Result Then Exit;
+    For I := 1 To Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        If (Ch = '-') And (I = 1) And (Length(S) > 1) Then Continue;
+        If Pos(Ch, '0123456789') = 0 Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+End;
+
+Function PlaceEditNameOk(S : String) : Boolean;
+Var
+    I : Integer;
+    Ch : String;
+Begin
+    Result := (Length(S) >= 1) And (Length(S) <= 40);
+    If Not Result Then Exit;
+    For I := 1 To Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        If Pos(Ch, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-') = 0 Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+End;
+
+Function PlaceEditRotation(Comp : IPCB_Component) : Integer;
+Begin
+    Result := Round(Comp.Rotation) Mod 360;
+    If Result < 0 Then Result := Result + 360;
+End;
+
+{ True when a track, arc or via (not part of a footprint) on copper overlaps the }
+{ component's bounding rectangle: routing is attached, or runs where it sits.    }
+{ Conservative on purpose: placement comes before routing.                       }
+Function PlaceEditRouted(Board : IPCB_Board; Comp : IPCB_Component) : Boolean;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    CB, PB : TCoordRect;
+    Copper : Boolean;
+Begin
+    Result := False;
+    CB := Comp.BoundingRectangle;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eViaObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While (Prim <> Nil) And (Not Result) Do
+        Begin
+            If Not Prim.InComponent Then
+            Begin
+                Copper := (Prim.ObjectId = eViaObject);
+                If Not Copper Then
+                    Copper := PCB_IsCopperLayerName(GetLayerString(Prim.Layer));
+                If Copper Then
+                Begin
+                    PB := Prim.BoundingRectangle;
+                    If (PB.X1 <= CB.X2) And (CB.X1 <= PB.X2) And (PB.Y1 <= CB.Y2) And (CB.Y1 <= PB.Y2) Then
+                        Result := True;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Params: mode (preview | apply), batch_hash (64 hex, echoed), moves:          }
+{ 'designator|x|y|rotation|old_x|old_y|old_rotation|old_layer;...' with x / y  }
+{ in raw Altium coordinates (integers) and rotation in degrees. Preview leaves  }
+{ the old fields empty and reports what each move would do. Apply refuses the   }
+{ whole batch unless every part still sits where the preview read it. An apply  }
+{ that touched anything clears the grant: one tick, one batch.                   }
+Function SelectedMoveComponentsChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, MovesStr, BatchHash, Rest, OpStr, D, Status, Problems, MovesJson, Binding, Blank : String;
+    PcbPath, ErrCode, ErrMsg, LayerStr : String;
+    OpDes, OpX, OpY, OpR, OpOX, OpOY, OpOR, OpOL, OpCX, OpCY, OpCR, OpCL, OpStatus, OpBX, OpBY, OpBR : TStringList;
+    J, Count, WouldMove, Unchanged, Refused, Moved, NotMoved, NewX, NewY, NewR : Integer;
+    Apply, PcbModified, Partial, Touched, Ok : Boolean;
+    Board : IPCB_Board;
+    Comp : IPCB_Component;
+    { Eight named locals, not Array[0..7] Of String: fixed-size string arrays as }
+    { function locals corrupt the return slot in DelphiScript (see             }
+    { PCB_BatchMoveComponents).                                                 }
+    F0, F1, F2, F3, F4, F5, F6, F7 : String;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    MovesStr := ExtractJsonValue(Params, 'moves');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Placement edits are not granted: the operator ticks "Allow placement edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    OpDes := TStringList.Create;
+    OpX := TStringList.Create;
+    OpY := TStringList.Create;
+    OpR := TStringList.Create;
+    OpOX := TStringList.Create;
+    OpOY := TStringList.Create;
+    OpOR := TStringList.Create;
+    OpOL := TStringList.Create;
+    OpCX := TStringList.Create;
+    OpCY := TStringList.Create;
+    OpCR := TStringList.Create;
+    OpCL := TStringList.Create;
+    OpStatus := TStringList.Create;
+    OpBX := TStringList.Create;
+    OpBY := TStringList.Create;
+    OpBR := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        If SelectedFreshnessJSON(P) = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P) + '); save or discard the named document');
+            Exit;
+        End;
+
+        { Parse. A malformed batch is a client defect: refused in both modes. }
+        Rest := MovesStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 100) Or (ParamEditCountChar(OpStr, '|') <> 7) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Move ' + IntToStr(Count) + ': expected designator|x|y|rotation|old_x|old_y|old_rotation|old_layer, at most 100 moves');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|');
+            F1 := ParamEditTake(OpStr, '|');
+            F2 := ParamEditTake(OpStr, '|');
+            F3 := ParamEditTake(OpStr, '|');
+            F4 := ParamEditTake(OpStr, '|');
+            F5 := ParamEditTake(OpStr, '|');
+            F6 := ParamEditTake(OpStr, '|');
+            F7 := OpStr;
+            Ok := PlaceEditNameOk(F0) And PlaceEditIntOk(F1) And PlaceEditIntOk(F2)
+                And PlaceEditIntOk(F3);
+            If Ok Then
+            Begin
+                NewR := StrToInt(F3);
+                Ok := (NewR = 0) Or (NewR = 90) Or (NewR = 180) Or (NewR = 270);
+            End;
+            If Ok And Apply Then
+                Ok := PlaceEditIntOk(F4) And PlaceEditIntOk(F5) And PlaceEditIntOk(F6)
+                    And PlaceEditNameOk(F7);
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Move ' + IntToStr(Count) + ': bad designator, coordinate or rotation (0 / 90 / 180 / 270, raw integer coordinates)');
+                Exit;
+            End;
+            If OpDes.IndexOf(F0) >= 0 Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Duplicate move: ' + F0);
+                Exit;
+            End;
+            OpDes.Add(F0);
+            OpX.Add(F1);
+            OpY.Add(F2);
+            OpR.Add(F3);
+            OpOX.Add(F4);
+            OpOY.Add(F5);
+            OpOR.Add(F6);
+            OpOL.Add(F7);
+            OpCX.Add(Blank);
+            OpCY.Add(Blank);
+            OpCR.Add(Blank);
+            OpCL.Add(Blank);
+            OpStatus.Add(Blank);
+            OpBX.Add(Blank);
+            OpBY.Add(Blank);
+            OpBR.Add(Blank);
+        End;
+        If OpDes.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No moves');
+            Exit;
+        End;
+
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+
+        { Read and classify every part. }
+        Problems := '';
+        Refused := 0;
+        WouldMove := 0;
+        Unchanged := 0;
+        For J := 0 To OpDes.Count - 1 Do
+        Begin
+            Comp := Board.GetPcbComponentByRefDes(OpDes[J]);
+            Status := '';
+            If Comp = Nil Then
+                Status := 'refused: designator not on the board'
+            Else
+            Begin
+                OpCX[J] := IntToStr(Comp.x);
+                OpCY[J] := IntToStr(Comp.y);
+                OpCR[J] := IntToStr(PlaceEditRotation(Comp));
+                Try LayerStr := GetLayerString(Comp.Layer); Except LayerStr := 'Unknown'; End;
+                OpCL[J] := LayerStr;
+                If Not Comp.Moveable Then Status := 'refused: the part is locked'
+                Else If LayerStr <> 'TopLayer' Then Status := 'refused: the part is not on the top layer (no side changes)'
+                Else If PlaceEditRouted(Board, Comp) Then Status := 'refused: copper routing overlaps the part (placement comes before routing)'
+                Else If Apply And ((OpCX[J] <> OpOX[J]) Or (OpCY[J] <> OpOY[J]) Or (OpCR[J] <> OpOR[J]) Or (OpCL[J] <> OpOL[J])) Then
+                    Status := 'refused: moved since preview'
+                Else If (OpCX[J] = OpX[J]) And (OpCY[J] = OpY[J]) And (OpCR[J] = OpR[J]) Then
+                    Status := 'unchanged'
+                Else
+                    Status := 'would_move';
+            End;
+            OpStatus[J] := Status;
+            If Copy(Status, 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 600 Then
+                    Problems := Problems + OpDes[J] + ': ' + Copy(Status, 10, 200) + '; ';
+            End
+            Else If Status = 'unchanged' Then Inc(Unchanged)
+            Else Inc(WouldMove);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing moved. ' + Problems);
+            Exit;
+        End;
+
+        { Apply: per part, read again, then rotate and move inside one          }
+        { PreProcess / PostProcess pair, and read back. Rotation first, then    }
+        { x / y, so the origin ends where asked whatever the pivot. Stops at    }
+        { the first surprise; what moved is reported, never rolled back.        }
+        Moved := 0;
+        NotMoved := 0;
+        Partial := False;
+        If Apply And (WouldMove > 0) Then
+        Begin
+            Try
+                For J := 0 To OpDes.Count - 1 Do
+                Begin
+                    If Partial Or (OpStatus[J] <> 'would_move') Then Continue;
+                    Comp := Board.GetPcbComponentByRefDes(OpDes[J]);
+                    If (Comp = Nil) Or (IntToStr(Comp.x) <> OpOX[J]) Or (IntToStr(Comp.y) <> OpOY[J])
+                        Or (IntToStr(PlaceEditRotation(Comp)) <> OpOR[J]) Then
+                    Begin
+                        OpStatus[J] := 'not_moved: changed during apply';
+                        Partial := True;
+                        Continue;
+                    End;
+                    NewX := StrToInt(OpX[J]);
+                    NewY := StrToInt(OpY[J]);
+                    NewR := StrToInt(OpR[J]);
+                    Touched := True;
+                    PCBServer.PreProcess;
+                    Try
+                        PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast,
+                            PCBM_BeginModify, c_NoEventData);
+                        Comp.Rotation := NewR;
+                        Comp.x := NewX;
+                        Comp.y := NewY;
+                        PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast,
+                            PCBM_EndModify, c_NoEventData);
+                    Finally
+                        PCBServer.PostProcess;
+                    End;
+                    OpBX[J] := IntToStr(Comp.x);
+                    OpBY[J] := IntToStr(Comp.y);
+                    OpBR[J] := IntToStr(PlaceEditRotation(Comp));
+                    If (OpBX[J] = OpX[J]) And (OpBY[J] = OpY[J]) And (OpBR[J] = OpR[J]) Then
+                    Begin
+                        OpStatus[J] := 'moved';
+                        Inc(Moved);
+                    End
+                    Else
+                    Begin
+                        OpStatus[J] := 'moved_readback_differs';
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            For J := 0 To OpDes.Count - 1 Do
+                If OpStatus[J] = 'would_move' Then
+                Begin
+                    OpStatus[J] := 'not_moved';
+                    Inc(NotMoved);
+                End;
+        End;
+
+        MovesJson := '';
+        For J := 0 To OpDes.Count - 1 Do
+        Begin
+            If J > 0 Then MovesJson := MovesJson + ',';
+            MovesJson := MovesJson + '{"designator":"' + EscapeJsonString(OpDes[J])
+                + '","x":"' + OpCX[J] + '","y":"' + OpCY[J] + '","rotation":"' + OpCR[J]
+                + '","layer":"' + EscapeJsonString(OpCL[J])
+                + '","target_x":"' + OpX[J] + '","target_y":"' + OpY[J] + '","target_rotation":"' + OpR[J]
+                + '","status":"' + EscapeJsonString(OpStatus[J]) + '"';
+            If Apply Then
+                MovesJson := MovesJson + ',"readback_x":"' + OpBX[J] + '","readback_y":"' + OpBY[J]
+                    + '","readback_rotation":"' + OpBR[J] + '"';
+            MovesJson := MovesJson + '}';
+        End;
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again before trusting the board'
+                + ' (moved: ' + IntToStr(Moved) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode
+                + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash)
+                + '","move_count":' + IntToStr(OpDes.Count)
+                + ',"would_move":' + IntToStr(WouldMove)
+                + ',"unchanged":' + IntToStr(Unchanged)
+                + ',"refused":' + IntToStr(Refused)
+                + ',"moved":' + IntToStr(Moved)
+                + ',"not_moved":' + IntToStr(NotMoved)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"moves":[' + MovesJson + ']}}');
+    Finally
+        { One tick, one batch. }
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        OpDes.Free;
+        OpX.Free;
+        OpY.Free;
+        OpR.Free;
+        OpOX.Free;
+        OpOY.Free;
+        OpOR.Free;
+        OpOL.Free;
+        OpCX.Free;
+        OpCY.Free;
+        OpCR.Free;
+        OpCL.Free;
+        OpStatus.Free;
+        OpBX.Free;
+        OpBY.Free;
+        OpBR.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -920,7 +1365,11 @@ Begin
     Begin
         { A param-edit runtime names itself differently, so neither client can  }
         { be pointed at the other kind of runtime by mistake. }
-        If SELECTED_PARAM_EDITS Then
+        If SELECTED_PLACE_EDITS Then
+            Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
+                + SCRIPT_VERSION + '","plt_profile":"eda-selected-edits-v1"'
+                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+        Else If SELECTED_PARAM_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-paramedit-v1"'
                 + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
@@ -947,7 +1396,8 @@ Begin
        (Command <> 'project.get_component_info_batch') And
        (Command <> 'project.get_messages') And
        (Not IsSelectedPcbReadCommand(Command)) And
-       (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) Then
+       (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.move_components_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -966,6 +1416,11 @@ Begin
     If Command = 'project.set_component_params_checked' Then
     Begin
         Result := SelectedSetParamsChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.move_components_checked' Then
+    Begin
+        Result := SelectedMoveComponentsChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);
