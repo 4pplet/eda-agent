@@ -995,9 +995,51 @@ Begin
     If Result < 0 Then Result := Result + 360;
 End;
 
+{ The component's own extent: the union of its pads, tracks, arcs, regions and   }
+{ fills (its courtyard lines are tracks, so they count). Comp.BoundingRectangle   }
+{ also spans the designator and comment text, which can reach copper the part    }
+{ itself does not: on 2026-10-07/08 it refused eight parts whose labels touched a }
+{ mounting-hole ring (Stefan: "we should not be blocking based on designator      }
+{ text"). Falls back to the bounding rectangle for a component with no such      }
+{ primitive.                                                                       }
+Function PlaceEditExtent(Comp : IPCB_Component) : TCoordRect;
+Var
+    GrIter : IPCB_GroupIterator;
+    Prim : IPCB_Primitive;
+    R : TCoordRect;
+    First : Boolean;
+Begin
+    Result := Comp.BoundingRectangle;
+    First := True;
+    GrIter := Comp.GroupIterator_Create;
+    Try
+        GrIter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, ePadObject, eRegionObject, eFillObject));
+        Prim := GrIter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            R := Prim.BoundingRectangle;
+            If First Then
+            Begin
+                Result := R;
+                First := False;
+            End
+            Else
+            Begin
+                If R.X1 < Result.X1 Then Result.X1 := R.X1;
+                If R.Y1 < Result.Y1 Then Result.Y1 := R.Y1;
+                If R.X2 > Result.X2 Then Result.X2 := R.X2;
+                If R.Y2 > Result.Y2 Then Result.Y2 := R.Y2;
+            End;
+            Prim := GrIter.NextPCBObject;
+        End;
+    Finally
+        Comp.GroupIterator_Destroy(GrIter);
+    End;
+End;
+
 { True when a track, arc or via (not part of a footprint) on copper overlaps the }
-{ component's bounding rectangle: routing is attached, or runs where it sits.    }
-{ Conservative on purpose: placement comes before routing.                       }
+{ component's own extent (PlaceEditExtent): routing is attached, or runs where   }
+{ it sits. Conservative on purpose: placement comes before routing.              }
 Function PlaceEditRouted(Board : IPCB_Board; Comp : IPCB_Component) : Boolean;
 Var
     Iter : IPCB_BoardIterator;
@@ -1006,7 +1048,7 @@ Var
     Copper : Boolean;
 Begin
     Result := False;
-    CB := Comp.BoundingRectangle;
+    CB := PlaceEditExtent(Comp);
     Iter := Board.BoardIterator_Create;
     Try
         Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eViaObject));

@@ -3,8 +3,11 @@
 For the latest scoped test results and remaining work, read the
 [current-state handoff](CURRENT-STATE.md) first.
 
-Current local source: **`2026.10.07.1`**, the version app_ping reports once this
-source is deployed. It adds the gated placement-edit command
+Current local source: **`2026.10.08.1`**, the version app_ping reports once this
+source is deployed. It changes the placement-edit command's routed-part refusal to test the
+component's own extent (pads, tracks, arcs, regions, fills), not `BoundingRectangle`, which spans
+the designator text and refused parts whose labels touched a mounting-hole ring (2026-10-08).
+The script before it added the gated placement-edit command
 ([PROPOSAL-2026-10-07](PROPOSAL-2026-10-07-placement-write-increment.md) section 8), on a runtime
 made with `--place-edits`; it is not deployed or qualified yet. The script before it widened the gated
 parameter-edit command to any existing parameter
@@ -174,7 +177,7 @@ objects you can delete afterwards.
 app_ping
 ```
 
-Expect `altium_script_version` = `2026.10.07.1`, `version_match` =
+Expect `altium_script_version` = `2026.10.08.1`, `version_match` =
 `true`, and `mcp_server_version` = `0.5.0`.
 
 Those are two different versions and they fail differently.

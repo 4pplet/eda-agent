@@ -148,6 +148,10 @@ Scripts `2026.10.07.1` (eda-agent `scripts/altium`), client PLT-hw `tools/eda-ag
   the wrong side and parts whose pin nets differ from the plan.
 - **Tests:** PLT-hw `test_place_edits.py` and `test_plan_compare.py`, offline. What Altium does
   with the move is what section 5 qualifies.
+- **2026-10-08 (scripts `2026.10.08.1`):** the routed-part refusal tests the component's own
+  extent (`PlaceEditExtent`: pads, tracks, arcs, regions, fills), not `BoundingRectangle`, which
+  spans the designator / comment text; eight parts had been refused because their labels reached a
+  mounting-hole ring (Stefan: not on designator text).
 - **Differences from section 4:** the routing check is the bounding-rectangle overlap
   (conservative, before routing), not a per-pad connection test. The StatusForm's
   parameter-grant caption no longer says "LCSC Part #, Instruction" (stale since the widening).
