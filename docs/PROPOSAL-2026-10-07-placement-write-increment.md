@@ -214,3 +214,10 @@ batch (C509 0.05 mm, TP503 1.3 mm, C506 3.4 mm) on his standing approval and tic
 back, grant ended; plancheck 38 / 38, nothing floating. The tool moved parts a person had moved by
 hand without trouble: the compare-and-set read his positions as the old ones.
 
+**Fifth and sixth live batches, 2026-10-08 (the board arrangement, USB-C west):** batch A, 92 parts
+on `selected-edits-20261007`; eight parts refused because their designator text reached a
+mounting-hole ring. Scripts `2026.10.08.1` (`PlaceEditExtent`) deployed as `selected-edits-20261008`,
+compiled at first load, ping `2026.10.08.1`; batch B, 10 parts, including seven of those eight.
+TP208 stays refused on the new script and rightly: its own pad is on the ring (by hand). Both
+batches read back at target, grant ended each time.
+
