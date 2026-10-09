@@ -1633,6 +1633,20 @@ Begin
                         Try What := What + ' of ' + Prim.Component.Name.Text; Except End;
                     End;
                     If PrimNet <> '' Then What := What + ' on ' + PrimNet;
+                    { The prim's bounding rectangle, raw units: the first live run (2026-10-09)  }
+                    { refused spots the offline geometry found clear, so the refusal shows what  }
+                    { Altium reported.                                                           }
+                    What := What + ' rect [' + IntToStr(R.X1) + ',' + IntToStr(R.Y1) + ','
+                        + IntToStr(R.X2) + ',' + IntToStr(R.Y2) + ']';
+                    If Prim.ObjectId = ePadObject Then
+                    Begin
+                        Try
+                            What := What + ' pad ' + Pad.Name + ' at ' + IntToStr(Pad.x) + ',' + IntToStr(Pad.y)
+                                + ' size ' + IntToStr(Pad.TopXSize) + 'x' + IntToStr(Pad.TopYSize)
+                                + ' shape ' + IntToStr(Pad.TopShape) + ' layer ' + GetLayerString(Pad.Layer);
+                        Except
+                        End;
+                    End;
                 End;
             End;
             Prim := Iter.NextPCBObject;
