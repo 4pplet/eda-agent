@@ -118,4 +118,36 @@ deploy window and one qualification sitting of about an hour.
 
 ## 9. Qualification log
 
-(none yet)
+**2026-10-09, live HDMI project (Stefan's choice, git as rollback: PLT-hw 8078953 before, 68971b1
+between the two applies), runtimes `selected-edits-20261009` to `-20261009d`.**
+
+- **First compile:** the new Pascal compiled at its first load (scripts 2026.10.09.1); profile
+  `eda-selected-edits-v1`, the grant state carried in the selection identity.
+- **Three defects found by the first previews, each fixed and reloaded the same hour:**
+  1. `2026.10.09.1`: seven refusals on spots the offline geometry found clear. `.2` added the
+     nearest prim's rectangle to the refusal: a pad's `BoundingRectangle` includes its solder-mask
+     expansion (0.85 x 0.80 mm read as 1.05 x 1.00), and DelphiScript kept integer arithmetic for
+     the typed-Double parameters, overflowing on products of raw coordinates.
+  2. `.3`: pads measured from centre and size (turned with the pad), every distance forced to
+     floating point. Two refusals left, both 0.148 against 0.15: a segment leaving the BGA room had
+     the outside rule for its whole length, and the fit to the balls is in whole mils. Fixed in the
+     emitter (the strictest rule along the object, less the read resolution), not natively.
+  3. `.3` apply: 66 vias placed and read back exact, then stopped after the first track because
+     Altium stored its ends in the other order (`placed_readback_differs`); 214 not placed, the
+     result honest. `.4` accepts either end order. Stefan saved the 66 vias + 1 track; the second
+     apply found all 67 `unchanged` (the idempotence test on a real board) and placed the 214.
+- **A wrong selection caught:** one preview ran against the 22p project (every net "not on the
+  board", free copper 525 / 2300); nothing is written by a preview, and `--expect-project` now
+  guards every run.
+
+| Test | Result |
+|---|---|
+| C1 | **Pass.** The U501 plan's 66 vias and 215 segments on the board; a second preview reads all 281 `unchanged`; `plancheck --copper` complete (see the PLT-hw record); DRC pending the rules |
+| C2 | **Pass** by the batch itself: every coordinate is an off-mil-grid raw value and read back exact |
+| C6 | **Pass** (unplanned): the second apply read the first apply's 67 objects as `unchanged`, free counts 72 / 117 |
+| C4 | **Pass** (unplanned): the 22p board refused every object with `net not on the board` |
+| C3, C5, C7-C12 | Open |
+
+Timing: a preview of 281 objects takes about three minutes on this board (one board iteration per
+object); an apply about three more plus the verifying preview. Acceptable for a fanout; a candidate
+list built once per call would cut it if a later board needs it.
