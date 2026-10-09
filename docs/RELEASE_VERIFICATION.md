@@ -3,7 +3,7 @@
 For the latest scoped test results and remaining work, read the
 [current-state handoff](CURRENT-STATE.md) first.
 
-Current local source: **`2026.10.09.2`**, the version app_ping reports once this
+Current local source: **`2026.10.09.3`**, the version app_ping reports once this
 source is deployed. It changes the placement-edit command's routed-part refusal to test the
 component's own extent (pads, tracks, arcs, regions, fills), not `BoundingRectangle`, which spans
 the designator text and refused parts whose labels touched a mounting-hole ring (2026-10-08).
@@ -177,7 +177,7 @@ objects you can delete afterwards.
 app_ping
 ```
 
-Expect `altium_script_version` = `2026.10.09.2`, `version_match` =
+Expect `altium_script_version` = `2026.10.09.3`, `version_match` =
 `true`, and `mcp_server_version` = `0.5.0`.
 
 Those are two different versions and they fail differently.

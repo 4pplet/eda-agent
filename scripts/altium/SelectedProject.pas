@@ -1432,6 +1432,15 @@ Function CopperPtSeg(PX, PY, AX, AY, BX, BY : Double) : Double;
 Var
     DX, DY, T, QX, QY : Double;
 Begin
+    { DelphiScript keeps integer arithmetic for integer inputs whatever the parameter }
+    { type says, and a product of two raw coordinates overflows 32 bits: the first  }
+    { live preview (2026-10-09) called clear spots overlaps. Force floating point.   }
+    PX := PX * 1.0;
+    PY := PY * 1.0;
+    AX := AX * 1.0;
+    AY := AY * 1.0;
+    BX := BX * 1.0;
+    BY := BY * 1.0;
     DX := BX - AX;
     DY := BY - AY;
     If (DX = 0) And (DY = 0) Then T := 0
@@ -1451,6 +1460,14 @@ Function CopperSegsCross(AX, AY, BX, BY, CX, CY, DX, DY : Double) : Boolean;
 Var
     D1, D2, D3, D4 : Double;
 Begin
+    AX := AX * 1.0;
+    AY := AY * 1.0;
+    BX := BX * 1.0;
+    BY := BY * 1.0;
+    CX := CX * 1.0;
+    CY := CY * 1.0;
+    DX := DX * 1.0;
+    DY := DY * 1.0;
     D1 := (DX - CX) * (AY - CY) - (DY - CY) * (AX - CX);
     D2 := (DX - CX) * (BY - CY) - (DY - CY) * (BX - CX);
     D3 := (BX - AX) * (CY - AY) - (BY - AY) * (CX - AX);
@@ -1545,11 +1562,18 @@ Var
     Track : IPCB_Track;
     R : TCoordRect;
     LayerStr, PrimNet : String;
-    Gap, Reach, LoX, LoY, HiX, HiY, Half : Double;
+    Gap, Reach, LoX, LoY, HiX, HiY, Half, HX, HY, PRX1, PRY1, PRX2, PRY2 : Double;
+    PadRot : Integer;
     Relevant, IsRound : Boolean;
 Begin
     Result := 1.0E12;
     What := '';
+    AX := AX * 1.0;
+    AY := AY * 1.0;
+    BX := BX * 1.0;
+    BY := BY * 1.0;
+    HW := HW * 1.0;
+    Clearance := Clearance * 1.0;
     Reach := HW + Clearance;
     If AX < BX Then Begin LoX := AX; HiX := BX; End Else Begin LoX := BX; HiX := AX; End;
     If AY < BY Then Begin LoY := AY; HiY := BY; End Else Begin LoY := BY; HiY := AY; End;
@@ -1579,8 +1603,44 @@ Begin
             If Relevant Then
             Begin
                 R := Prim.BoundingRectangle;
+                If Prim.ObjectId = ePadObject Then
+                Begin
+                    { A pad's BoundingRectangle includes its solder-mask expansion (an 0.85 x }
+                    { 0.80 mm pad reported 1.05 x 1.00 on 2026-10-09): build the copper      }
+                    { rectangle from the centre and size instead, turned with the pad. A pad  }
+                    { at an odd angle gets the circumscribed square (conservative).           }
+                    Pad := Prim;
+                    HX := Pad.TopXSize / 2;
+                    HY := Pad.TopYSize / 2;
+                    PadRot := 0;
+                    Try PadRot := Round(Pad.Rotation) Mod 180; Except PadRot := 0; End;
+                    If PadRot < 0 Then PadRot := PadRot + 180;
+                    If PadRot = 90 Then
+                    Begin
+                        Half := HX;
+                        HX := HY;
+                        HY := Half;
+                    End
+                    Else If PadRot <> 0 Then
+                    Begin
+                        Half := Sqrt(HX * HX + HY * HY);
+                        HX := Half;
+                        HY := Half;
+                    End;
+                    PRX1 := Pad.x - HX;
+                    PRY1 := Pad.y - HY;
+                    PRX2 := Pad.x + HX;
+                    PRY2 := Pad.y + HY;
+                End
+                Else
+                Begin
+                    PRX1 := R.X1 * 1.0;
+                    PRY1 := R.Y1 * 1.0;
+                    PRX2 := R.X2 * 1.0;
+                    PRY2 := R.Y2 * 1.0;
+                End;
                 { Cheap box test before any geometry. }
-                If (R.X1 - Reach > HiX) Or (R.X2 + Reach < LoX) Or (R.Y1 - Reach > HiY) Or (R.Y2 + Reach < LoY) Then
+                If (PRX1 - Reach > HiX) Or (PRX2 + Reach < LoX) Or (PRY1 - Reach > HiY) Or (PRY2 + Reach < LoY) Then
                     Relevant := False;
             End;
             If Relevant Then
@@ -1612,7 +1672,7 @@ Begin
                         Gap := CopperPtSeg(Pad.x, Pad.y, AX, AY, BX, BY) - HW - Half;
                     End
                     Else
-                        Gap := CopperSegRect(AX, AY, BX, BY, R.X1, R.Y1, R.X2, R.Y2) - HW;
+                        Gap := CopperSegRect(AX, AY, BX, BY, PRX1, PRY1, PRX2, PRY2) - HW;
                 End
                 Else If Prim.ObjectId = eTrackObject Then
                 Begin
@@ -1620,7 +1680,7 @@ Begin
                     Gap := CopperSegSeg(AX, AY, BX, BY, Track.x1, Track.y1, Track.x2, Track.y2) - HW - Track.Width / 2;
                 End
                 Else
-                    Gap := CopperSegRect(AX, AY, BX, BY, R.X1, R.Y1, R.X2, R.Y2) - HW;
+                    Gap := CopperSegRect(AX, AY, BX, BY, R.X1 * 1.0, R.Y1 * 1.0, R.X2 * 1.0, R.Y2 * 1.0) - HW;
                 If Gap < Result Then
                 Begin
                     Result := Gap;
