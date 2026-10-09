@@ -1,0 +1,118 @@
+# Proposal: board setup from a spec (stackup, classes, pairs, rooms, rules), 2026-10-09
+
+Status: **approved and built the same day** (Stefan, 2026-10-09: "let's add support for the bridge
+to do the rules and stackup edits"); native qualification pending (section 5). Scripts
+`2026.10.09.5`, client PLT-hw `tools/eda-agent`. Third checked board write after
+[placement](PROPOSAL-2026-10-07-placement-write-increment.md) and
+[copper](PROPOSAL-2026-10-09-copper-write-increment.md); same gates.
+
+## 1. Why this, why now
+
+The HDMI board's rule set is written down (PLT-hw `hdmi-adapter/reviews/hdmi-rules-expected.json`,
+14 rules, 2 of 14 on the board) and checked by `bridge.cmd rules --expect`; its stackup
+(JLC04161H-7628) and the U501 room are in the fanout record and the plan. Entering them by hand is
+half an hour of dialogs per board, and every later board (the 22p re-spin has the same set) repeats
+it. With the fanout placed, DRC is the next gate and needs the rules first.
+
+## 2. Where writes are blocked today (keep both)
+
+The native allowlist in `SelectedProject.pas` and the Python `SharedReader.send` policy; one more
+command admitted, only in a `--place-edits` runtime.
+
+## 3. Audit of the candidate handlers: do not expose them as-is
+
+Upstream `PCB.pas`: `PCB_CreateDesignRule`, `PCB_SetRuleProperties`, `PCB_CreateNetClass`,
+`PCB_CreateDiffPair`, `PCB_CreateRoom`, `PCB_ModifyLayer`. Read 2026-10-09:
+
+| | Finding |
+|---|---|
+| S1 | Focused board (`GetPCBBoardAnywhere`), not the selected project's |
+| S2 | Whole mils everywhere: 0.2104 mm prepreg, 0.127 mm width, 0.15 mm gap all round |
+| S3 | `PCB_CreateDesignRule` knows clearance, width, hole size and diff-pair gaps; no via style, matched lengths, routing layers or polygon connect, no min / max / preferred triples for width |
+| S4 | No compare-and-set, no batch, no read-back on creation (the layer modifier reads back; the rule creator does not) |
+| S5 | `PCB_CreateDesignRule` with an existing name creates a duplicate rule |
+| S6 | The upstream note that diff-pair width constraints are not on the rule interface is a claim, not a measurement; the dialog has them |
+
+Confirmed in Altium's own DLLs (Advpcb.dll, Altium.SDK.Interfaces.dll, 2026-10-09): the interface
+names `IPCB_RoutingViaStyleRule` (PreferedHoleWidth), `IPCB_RoutingLayersRule` (LayerAllowed),
+`IPCB_PolygonConnectStyleRule` (ConnectStyle, ReliefConductorWidth, ReliefEntries, ReliefAirGap),
+`IPCB_MatchedNetLengthsConstraint` (Tolerance), `IPCB_ConfinementConstraint`,
+`IPCB_DifferentialPair`, the kinds `eRule_MatchedLengths`, `eRule_RoutingLayers`,
+`eRule_PolygonConnectStyle`, `eRule_RoutingViaStyle`, and `eDirectConnect`,
+`eNetScope_DifferentNetsOnly`, `eClassMemberKind_DifferentialPair`.
+
+## 4. The increment
+
+**Command:** `pcb.setup_board_checked` (native) / `pcb_setup_board_checked` (MCP). The selected
+project's PcbDoc only. Items in batch order, each compare-and-set:
+
+| Kind | Writes | State read for compare-and-set and read-back |
+|---|---|---|
+| `layer` | copper thickness; the dielectric below it (type, height, constant, material); optional rename | name, copper, type, height, constant |
+| `netclass` | creates the class, adds the listed nets (never removes) | sorted members |
+| `pair` | creates the differential pair from two nets, or re-points it | positive, negative |
+| `pairclass` | creates the pair class, adds the listed pairs | sorted members |
+| `room` | creates or updates a confinement rule: rectangle, scope | rectangle, scope |
+| `rule` | creates or updates in place a rule of kind clearance, width, via, diffpair, matched, layers or polygon: scopes, net scope, enabled, the kind's values | descriptor, scopes, enabled; priority reported |
+
+| Rule | Detail |
+|---|---|
+| **Gate and grant** | `SELECTED_PLACE_EDITS` runtime; apply behind the operator tick, now captioned "Allow board edits"; one tick, one batch, cleared when anything was written |
+| **Units** | Every length a raw Altium coordinate as an integer (S2) |
+| **Existing objects** | Updated in place by name; a rule of another kind under the name is refused (S5). Nothing is ever deleted |
+| **Priority** | Read back and reported, never written (writing `Priority` crashes the engine, `PCB_SetRuleProperties`). The batch writes the specific rule before the default of its kind so the priority Altium gives a new rule is seen on the first run |
+| **Compare-and-set** | Preview returns each item's state string; apply carries it back and refuses the batch if any differs (S4) |
+| **Clean baseline** | `PCB_DIRTY` refuses an unsaved PcbDoc |
+| **Honest result** | Per item `would_create` / `would_update` / `unchanged` / `refused: reason` at preview; `created` / `updated` / `unchanged` / `not_done` (with the reason) at apply, plus the read-back. Stops at the first problem, never rolls back |
+| **Never save** | The operator reviews the Rules, Classes and Layer Stack dialogs and saves |
+
+**Known gaps, by design:** the matched-length rule's "Within Differential Pair Length" option has
+no API property we could confirm, so R11 is created with its scope and tolerance and that tick is
+by hand; the diff-pair width setters (`MinWidth(L)` and friends on
+`IPCB_DifferentialPairsRoutingRule`) are attempted inside `Try` and read back through the
+descriptor (S6); R8 (pair-to-pair clearance) stays held per Stefan 2026-10-07.
+
+**Client:** PLT-hw `hdmi-adapter/reviews/board_setup.py` writes the spec
+(`board-setup-2026-10-09.json`, mm, board frame: the stackup, class PWR, nine pairs, classes TMDS
+and DSI, the room from the plan's rectangle and the live anchor fit, 13 rules);
+`bridge_write.py setup preview|apply <spec>` converts to raw items, previews, hashes the previewed
+states, applies with them, prints every read-back. Verification afterwards is the existing reads:
+`rules --expect`, `stackup`, `netclasses`, `diffpairs`, `rooms`, then DRC.
+
+## 5. Qualification: one native sitting, live board with git as rollback (Stefan's pattern)
+
+| Test | Pass means |
+|---|---|
+| S1 happy path | the HDMI spec applied: four layers read back as JLC04161H-7628, class PWR with 14 nets, 9 pairs, 2 pair classes, the room at the plan's rectangle, 13 rules with the expected descriptors; `rules --expect` 12 of 14 or better (R8 held, R11's option by hand) |
+| S2 priorities | each specific rule (`_BGA`, `_Power`, `_HS`) outranks its default in the Rules dialog, or the report says which do not and the order is fixed by hand once |
+| S3 idempotent | the same spec previewed again: layers, classes, pairs read `unchanged`; rules `would_update` with identical descriptors |
+| S4 stale | a rule edited by hand (saved) between preview and apply: `refused: changed since preview` |
+| S5 dirty | an unsaved edit: `PCB_DIRTY` |
+| S6 wrong kind | a spec rule whose name exists as another kind: refused, nothing written |
+| S7 grant | untick, Detach, project switch: refused each time |
+| S8 recovery | close without saving restores the board |
+
+## 6. Out of scope
+
+Deleting rules, classes or pairs; rule priorities; the matched-length pair option; polygons; DRC
+itself; saving.
+
+## 7. Effort
+
+Native about 650 lines (six item kinds, the typed rule writers), server tool and validation,
+client subcommand, spec generator, tests: most of a working day. Qualification: one sitting.
+
+## 8. Implementation, 2026-10-09
+
+- **Native** (`SelectedProject.pas`, `SelectedSetupBoardChecked` with `SetupWriteRule`,
+  `SetupRuleState`, `SetupLayerState`, `SetupClassMembers`, `SetupPairState`, `SetupRoomState`).
+- **Gate:** `SELECTED_PLACE_EDITS`; StatusForm caption "Allow board edits (move parts; plan copper;
+  stackup, classes, rooms, rules)".
+- **Server:** `pcb_setup_board_checked` with `validate_setup_items` / `validate_setup_result`.
+- **Client:** `bridge_write.py setup preview|apply`, `board_setup.py`.
+- **Tests:** PLT-hw `test_setup_edits.py` (encoding, results, classification, the HDMI spec loads
+  in batch order and passes the client gate), tool surface in `test_place_edits.py`.
+
+## 9. Qualification log
+
+(none yet)

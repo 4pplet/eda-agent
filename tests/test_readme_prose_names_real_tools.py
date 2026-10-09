@@ -62,6 +62,8 @@ NOT_TOOLS: dict[str, str] = {
         "(registered by PLT's shared_server.py, not by a backend)",
     "pcb_place_copper_checked": "the PLT edit runtime's copper write tool "
         "(PROPOSAL-2026-10-09; registered by PLT's shared_server.py, not by a backend)",
+    "pcb_setup_board_checked": "the PLT edit runtime's board-setup write tool (stackup, classes, "
+        "rooms, rules; PROPOSAL-2026-10-09-setup; registered by PLT's shared_server.py)",
     "proj_set_component_params_checked": "the PLT param-edit runtime's one write tool "
                                          "(PROPOSAL-2026-09-28), registered only there",
     # Fields of the proposed (unbuilt) library-read grant in LIBRARY-READS-DESIGN.md.

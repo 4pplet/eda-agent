@@ -2264,6 +2264,928 @@ Begin
     End;
 End;
 
+{ ---- Checked board setup: stackup, classes, pairs, rooms and rules ----------- }
+{ PROPOSAL-2026-10-09-setup-write-increment (Stefan 2026-10-09: "let's add       }
+{ support for the bridge to do the rules and stackup edits"). One command,       }
+{ pcb.setup_board_checked, in the SELECTED_PLACE_EDITS runtime behind the same   }
+{ operator tick as the moves and the copper ("Allow board edits": one tick, one }
+{ batch). Items, each compare-and-set on the state the preview read:             }
+{   layer     a stack layer's copper thickness and the dielectric below it       }
+{   netclass  a net class and its members (created, or members added)           }
+{   pair      a differential pair from two nets                                  }
+{   pairclass a differential-pair class and its members                          }
+{   room      a confinement rule (the room other rules scope on)                 }
+{   rule      a design rule by name: created, or updated in place; kinds         }
+{             clearance, width, via, diffpair, matched, layers, polygon          }
+{ Every number is a raw Altium coordinate (never mils; the upstream rule and    }
+{ layer handlers round to mils), every write is read back, priorities are       }
+{ reported and never written (writing Priority crashes the engine, see          }
+{ PCB_SetRuleProperties). Nothing is deleted. Never saves.                       }
+
+{ The value of key K in 'k=v^k=v^...' ('' when absent). }
+Function SetupField(Fields, K : String) : String;
+Var
+    Rest, Item, Key : String;
+Begin
+    Result := '';
+    Rest := Fields;
+    While Rest <> '' Do
+    Begin
+        Item := ParamEditTake(Rest, '^');
+        Key := ParamEditTake(Item, '=');
+        If Key = K Then
+        Begin
+            Result := Item;
+            Exit;
+        End;
+    End;
+End;
+
+Function SetupFieldInt(Fields, K : String; Var Ok : Boolean) : Integer;
+Var
+    V : String;
+Begin
+    Result := 0;
+    V := SetupField(Fields, K);
+    If V = '' Then Exit;
+    If Not PlaceEditIntOk(V) Then
+    Begin
+        Ok := False;
+        Exit;
+    End;
+    Result := StrToInt(V);
+End;
+
+Function SetupIsCopperLayer(L : TLayer) : Boolean;
+Begin
+    Result := False;
+    Try Result := PCB_IsCopperLayerName(GetLayerString(L)); Except Result := False; End;
+End;
+
+Function SetupFindRule(Board : IPCB_Board; Name : String) : IPCB_Rule;
+Begin
+    Result := PCB_FindRuleByName(Board, Name);
+End;
+
+Function SetupFindClass(Board : IPCB_Board; Name : String; MemberKind : Integer) : IPCB_ObjectClass;
+Var
+    Iter : IPCB_BoardIterator;
+    C : IPCB_ObjectClass;
+Begin
+    Result := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.SetState_FilterAll;
+        Iter.AddFilter_ObjectSet(MkSet(eClassObject));
+        C := Iter.FirstPCBObject;
+        While (C <> Nil) And (Result = Nil) Do
+        Begin
+            If (C.MemberKind = MemberKind) And (C.Name = Name) Then Result := C;
+            C := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ The members of a class, sorted, comma-joined (the compare-and-set state). }
+Function SetupClassMembers(C : IPCB_ObjectClass) : String;
+Var
+    L : TStringList;
+    I : Integer;
+    N : String;
+Begin
+    Result := '';
+    If C = Nil Then Exit;
+    L := TStringList.Create;
+    Try
+        I := 0;
+        While I < 10000 Do
+        Begin
+            N := '';
+            Try N := C.MemberName(I); Except N := ''; End;
+            If N = '' Then Break;
+            L.Add(N);
+            Inc(I);
+        End;
+        L.Sort;
+        Result := L.CommaText;
+    Finally
+        L.Free;
+    End;
+End;
+
+Function SetupFindPair(Board : IPCB_Board; Name : String) : IPCB_DifferentialPair;
+Var
+    Iter : IPCB_BoardIterator;
+    P : IPCB_DifferentialPair;
+Begin
+    Result := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eDifferentialPairObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        P := Iter.FirstPCBObject;
+        While (P <> Nil) And (Result = Nil) Do
+        Begin
+            If P.Name = Name Then Result := P;
+            P := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function SetupPairState(P : IPCB_DifferentialPair) : String;
+Var
+    A, B : String;
+Begin
+    Result := '';
+    If P = Nil Then Exit;
+    A := '';
+    B := '';
+    Try If P.PositiveNet <> Nil Then A := P.PositiveNet.Name; Except A := ''; End;
+    Try If P.NegativeNet <> Nil Then B := P.NegativeNet.Name; Except B := ''; End;
+    Result := A + ',' + B;
+End;
+
+{ A rule's compare-and-set state: descriptor, scopes, enabled. }
+Function SetupRuleState(R : IPCB_Rule) : String;
+Var
+    D, S1, S2, E : String;
+Begin
+    Result := '';
+    If R = Nil Then Exit;
+    D := '';
+    S1 := '';
+    S2 := '';
+    E := '';
+    Try D := R.Descriptor; Except D := ''; End;
+    Try S1 := R.Scope1Expression; Except S1 := ''; End;
+    Try S2 := R.Scope2Expression; Except S2 := ''; End;
+    Try E := BoolToJsonStr(R.Enabled); Except E := ''; End;
+    Result := D + ' / ' + S1 + ' / ' + S2 + ' / ' + E;
+End;
+
+Function SetupRulePriority(R : IPCB_Rule) : String;
+Begin
+    Result := '';
+    Try Result := IntToStr(R.Priority); Except Result := ''; End;
+End;
+
+Function SetupLayerState(LayerObj : IPCB_LayerObject_V7) : String;
+Var
+    N, T : String;
+    C, H : Integer;
+    K : Double;
+Begin
+    Result := '';
+    If LayerObj = Nil Then Exit;
+    N := '';
+    T := '';
+    C := -1;
+    H := -1;
+    K := -1;
+    Try N := LayerObj.Name; Except N := ''; End;
+    Try C := LayerObj.CopperThickness; Except C := -1; End;
+    Try T := DielectricTypeToken(LayerObj); Except T := ''; End;
+    Try H := LayerObj.Dielectric.DielectricHeight; Except H := -1; End;
+    Try K := LayerObj.Dielectric.DielectricConstant; Except K := -1; End;
+    Result := N + ',' + IntToStr(C) + ',' + T + ',' + IntToStr(H) + ',' + FloatToJsonStr(K);
+End;
+
+Function SetupRoomState(R : IPCB_ConfinementConstraint) : String;
+Var
+    Rect : TCoordRect;
+    S : String;
+Begin
+    Result := '';
+    If R = Nil Then Exit;
+    S := '';
+    Try S := R.Scope1Expression; Except S := ''; End;
+    Try
+        Rect := R.BoundingRect;
+        Result := IntToStr(Rect.Left) + ',' + IntToStr(Rect.Bottom) + ',' + IntToStr(Rect.Right) + ',' + IntToStr(Rect.Top) + ',' + S;
+    Except
+        Result := '?,' + S;
+    End;
+End;
+
+{ The rule kind word for a batch 'rule' item, from the live rule's RuleKind. }
+Function SetupKindWord(R : IPCB_Rule) : String;
+Var
+    K : Integer;
+Begin
+    Result := '';
+    K := -1;
+    Try K := R.RuleKind; Except K := -1; End;
+    If K = eRule_Clearance Then Result := 'clearance'
+    Else If K = eRule_MaxMinWidth Then Result := 'width'
+    Else If K = eRule_RoutingViaStyle Then Result := 'via'
+    Else If K = eRule_DifferentialPairsRouting Then Result := 'diffpair'
+    Else If K = eRule_MatchedLengths Then Result := 'matched'
+    Else If K = eRule_RoutingLayers Then Result := 'layers'
+    Else If K = eRule_PolygonConnectStyle Then Result := 'polygon'
+    Else If K = eRule_ConfinementConstraint Then Result := 'room'
+    Else Result := 'kind' + IntToStr(K);
+End;
+
+{ Write a rule's values from the fields; the rule is already of the right kind.  }
+{ Each kind takes its typed view (constraint setters live on the subtype; a   }
+{ base IPCB_Rule write faults with "Undeclared identifier", which Try cannot  }
+{ catch). Returns '' or the first problem.                                     }
+Function SetupWriteRule(Board : IPCB_Board; R : IPCB_Rule; Kind, Fields : String) : String;
+Var
+    RC : IPCB_ClearanceConstraint;
+    RW : IPCB_MaxMinWidthConstraint;
+    RV : IPCB_RoutingViaStyleRule;
+    RD : IPCB_DifferentialPairsRoutingRule;
+    RM : IPCB_MatchedNetLengthsConstraint;
+    RL : IPCB_RoutingLayersRule;
+    RP : IPCB_PolygonConnectStyleRule;
+    L : TLayer;
+    V, Allowed, Lyr, Rest : String;
+    Ok : Boolean;
+    N : Integer;
+Begin
+    Result := '';
+    Ok := True;
+    V := SetupField(Fields, 'scope1');
+    If V <> '' Then
+    Begin
+        Try R.Scope1Expression := V; Except Result := 'scope1 not accepted'; End;
+    End;
+    V := SetupField(Fields, 'scope2');
+    If V <> '' Then
+    Begin
+        Try R.Scope2Expression := V; Except Result := 'scope2 not accepted'; End;
+    End;
+    V := SetupField(Fields, 'enabled');
+    If V <> '' Then
+    Begin
+        Try R.Enabled := (V = 'true'); Except Result := 'enabled not accepted'; End;
+    End;
+    V := SetupField(Fields, 'netscope');
+    If V = 'different' Then
+    Begin
+        Try R.NetScope := eNetScope_DifferentNetsOnly; Except Result := 'netscope not accepted'; End;
+    End
+    Else If V = 'any' Then
+    Begin
+        Try R.NetScope := eNetScope_AnyNet; Except Result := 'netscope not accepted'; End;
+    End;
+    If Result <> '' Then Exit;
+
+    If Kind = 'clearance' Then
+    Begin
+        RC := R;
+        N := SetupFieldInt(Fields, 'gap', Ok);
+        If Ok And (SetupField(Fields, 'gap') <> '') Then
+        Begin
+            Try RC.Gap := N; Except Result := 'gap not accepted'; End;
+        End;
+    End
+    Else If Kind = 'width' Then
+    Begin
+        RW := R;
+        For L := MinLayer To MaxLayer Do
+        Begin
+            If SetupField(Fields, 'wmin') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'wmin', Ok);
+                Try RW.MinWidth(L) := N; Except Result := 'wmin not accepted'; End;
+            End;
+            If SetupField(Fields, 'wmax') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'wmax', Ok);
+                Try RW.MaxWidth(L) := N; Except Result := 'wmax not accepted'; End;
+            End;
+            If SetupField(Fields, 'wpref') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'wpref', Ok);
+                Try RW.FavoredWidth(L) := N; Except Result := 'wpref not accepted'; End;
+            End;
+        End;
+    End
+    Else If Kind = 'via' Then
+    Begin
+        RV := R;
+        If SetupField(Fields, 'hmin') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'hmin', Ok);
+            Try RV.MinHoleWidth := N; Except Result := 'hmin not accepted'; End;
+        End;
+        If SetupField(Fields, 'hmax') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'hmax', Ok);
+            Try RV.MaxHoleWidth := N; Except Result := 'hmax not accepted'; End;
+        End;
+        If SetupField(Fields, 'hpref') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'hpref', Ok);
+            Try RV.PreferedHoleWidth := N; Except Result := 'hpref not accepted'; End;
+        End;
+        If SetupField(Fields, 'vmin') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'vmin', Ok);
+            Try RV.MinWidth := N; Except Result := 'vmin not accepted'; End;
+        End;
+        If SetupField(Fields, 'vmax') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'vmax', Ok);
+            Try RV.MaxWidth := N; Except Result := 'vmax not accepted'; End;
+        End;
+        If SetupField(Fields, 'vpref') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'vpref', Ok);
+            Try RV.PreferedWidth := N; Except Result := 'vpref not accepted'; End;
+        End;
+    End
+    Else If Kind = 'diffpair' Then
+    Begin
+        RD := R;
+        For L := MinLayer To MaxLayer Do
+        Begin
+            If SetupField(Fields, 'gmin') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'gmin', Ok);
+                Try RD.MinGap(L) := N; Except Result := 'gmin not accepted'; End;
+            End;
+            If SetupField(Fields, 'gmax') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'gmax', Ok);
+                Try RD.MaxGap(L) := N; Except Result := 'gmax not accepted'; End;
+            End;
+            If SetupField(Fields, 'gpref') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'gpref', Ok);
+                Try RD.PreferedGap(L) := N; Except Result := 'gpref not accepted'; End;
+            End;
+            If SetupField(Fields, 'pwmin') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwmin', Ok);
+                Try RD.MinWidth(L) := N; Except Result := 'pwmin not accepted'; End;
+            End;
+            If SetupField(Fields, 'pwmax') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwmax', Ok);
+                Try RD.MaxWidth(L) := N; Except Result := 'pwmax not accepted'; End;
+            End;
+            If SetupField(Fields, 'pwpref') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwpref', Ok);
+                Try RD.PreferedWidth(L) := N; Except Result := 'pwpref not accepted'; End;
+            End;
+        End;
+        If SetupField(Fields, 'uncoupled') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'uncoupled', Ok);
+            Try RD.MaxUncoupledLength := N; Except Result := 'uncoupled not accepted'; End;
+        End;
+    End
+    Else If Kind = 'matched' Then
+    Begin
+        RM := R;
+        If SetupField(Fields, 'tol') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'tol', Ok);
+            Try RM.Tolerance := N; Except Result := 'tol not accepted'; End;
+        End;
+    End
+    Else If Kind = 'layers' Then
+    Begin
+        RL := R;
+        Allowed := ',' + SetupField(Fields, 'layers') + ',';
+        For L := MinLayer To MaxLayer Do
+        Begin
+            If SetupIsCopperLayer(L) Then
+            Begin
+                Lyr := GetLayerString(L);
+                Try RL.LayerAllowed(L) := (Pos(',' + Lyr + ',', Allowed) > 0); Except Result := 'layers not accepted'; End;
+            End;
+        End;
+    End
+    Else If Kind = 'polygon' Then
+    Begin
+        RP := R;
+        V := SetupField(Fields, 'style');
+        If V = 'direct' Then
+        Begin
+            Try RP.ConnectStyle := eDirectConnect; Except Result := 'style not accepted'; End;
+        End
+        Else If V = 'relief' Then
+        Begin
+            Try RP.ConnectStyle := eReliefConnect; Except Result := 'style not accepted'; End;
+        End;
+        If SetupField(Fields, 'relief_w') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'relief_w', Ok);
+            Try RP.ReliefConductorWidth := N; Except Result := 'relief_w not accepted'; End;
+        End;
+        If SetupField(Fields, 'relief_entries') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'relief_entries', Ok);
+            Try RP.ReliefEntries := N; Except Result := 'relief_entries not accepted'; End;
+        End;
+        If SetupField(Fields, 'relief_gap') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'relief_gap', Ok);
+            Try RP.ReliefAirGap := N; Except Result := 'relief_gap not accepted'; End;
+        End;
+    End
+    Else
+        Result := 'unknown rule kind ' + Kind;
+    If (Result = '') And (Not Ok) Then Result := 'a value is not an integer';
+End;
+
+Function SetupRuleKindId(Kind : String) : Integer;
+Begin
+    Result := -1;
+    If Kind = 'clearance' Then Result := eRule_Clearance
+    Else If Kind = 'width' Then Result := eRule_MaxMinWidth
+    Else If Kind = 'via' Then Result := eRule_RoutingViaStyle
+    Else If Kind = 'diffpair' Then Result := eRule_DifferentialPairsRouting
+    Else If Kind = 'matched' Then Result := eRule_MatchedLengths
+    Else If Kind = 'layers' Then Result := eRule_RoutingLayers
+    Else If Kind = 'polygon' Then Result := eRule_PolygonConnectStyle;
+End;
+
+{ Params: mode (preview | apply), batch_hash, items: 'kind|name|fields|old;...'  }
+{ where fields is 'k=v^k=v' (raw integer coordinates, lists comma-joined, scope }
+{ expressions verbatim) and old is the state the preview reported for that item }
+{ (apply refuses the batch if any differs now). At most 80 items.               }
+Function SelectedSetupBoardChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, ItemsStr, BatchHash, Rest, OpStr, Problems, Binding, Blank, ItemsJson : String;
+    PcbPath, ErrCode, ErrMsg, State, Kind, Name, Fields, Old, Problem, Lyr, Members, Net : String;
+    IKind, IName, IFields, IOld, IState, IStatus, IBack, IPrio : TStringList;
+    J, Count, WouldChange, Unchanged, Refused, Done, NotDone : Integer;
+    Apply, PcbModified, Partial, Touched, Ok, Exists : Boolean;
+    Board : IPCB_Board;
+    LayerStack : IPCB_LayerStack_V7;
+    LayerObj : IPCB_LayerObject_V7;
+    Rule : IPCB_Rule;
+    Room : IPCB_ConfinementConstraint;
+    NetClass : IPCB_ObjectClass;
+    Pair : IPCB_DifferentialPair;
+    NetA, NetB : IPCB_Net;
+    Rect : TCoordRect;
+    N, KindId : Integer;
+    KD : Double;
+    F0, F1, F2, F3 : String;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    ItemsStr := ExtractJsonValue(Params, 'items');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Board edits are not granted: the operator ticks "Allow board edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    IKind := TStringList.Create;
+    IName := TStringList.Create;
+    IFields := TStringList.Create;
+    IOld := TStringList.Create;
+    IState := TStringList.Create;
+    IStatus := TStringList.Create;
+    IBack := TStringList.Create;
+    IPrio := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        If SelectedFreshnessJSON(P) = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P) + '); save or discard the named document');
+            Exit;
+        End;
+
+        { Parse. }
+        Rest := ItemsStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 80) Or (ParamEditCountChar(OpStr, '|') <> 3) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Item ' + IntToStr(Count) + ': expected kind|name|fields|old, at most 80 items');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|');
+            F1 := ParamEditTake(OpStr, '|');
+            F2 := ParamEditTake(OpStr, '|');
+            F3 := OpStr;
+            Ok := (F0 = 'layer') Or (F0 = 'netclass') Or (F0 = 'pair') Or (F0 = 'pairclass') Or (F0 = 'room') Or (F0 = 'rule');
+            Ok := Ok And (Length(F1) >= 1) And (Length(F1) <= 60);
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': bad kind or name');
+                Exit;
+            End;
+            IKind.Add(F0);
+            IName.Add(F1);
+            IFields.Add(F2);
+            IOld.Add(F3);
+            IState.Add(Blank);
+            IStatus.Add(Blank);
+            IBack.Add(Blank);
+            IPrio.Add(Blank);
+        End;
+        If IKind.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No items');
+            Exit;
+        End;
+
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+        LayerStack := Board.LayerStack_V7;
+
+        { Read and classify. The state string is what apply compares with.        }
+        Problems := '';
+        Refused := 0;
+        WouldChange := 0;
+        Unchanged := 0;
+        For J := 0 To IKind.Count - 1 Do
+        Begin
+            Kind := IKind[J];
+            Name := IName[J];
+            Fields := IFields[J];
+            State := '';
+            Problem := '';
+            If Kind = 'layer' Then
+            Begin
+                LayerObj := Nil;
+                If LayerStack <> Nil Then
+                Begin
+                    Try LayerObj := ResolveStackLayerObject(LayerStack, Name); Except LayerObj := Nil; End;
+                End;
+                If LayerObj = Nil Then Problem := 'layer not in the stack'
+                Else State := SetupLayerState(LayerObj);
+            End
+            Else If Kind = 'netclass' Then
+            Begin
+                NetClass := SetupFindClass(Board, Name, eClassMemberKind_Net);
+                State := SetupClassMembers(NetClass);
+                Members := SetupField(Fields, 'nets');
+                If Members = '' Then Problem := 'no nets';
+            End
+            Else If Kind = 'pairclass' Then
+            Begin
+                NetClass := SetupFindClass(Board, Name, eClassMemberKind_DifferentialPair);
+                State := SetupClassMembers(NetClass);
+                If SetupField(Fields, 'pairs') = '' Then Problem := 'no pairs';
+            End
+            Else If Kind = 'pair' Then
+            Begin
+                Pair := SetupFindPair(Board, Name);
+                State := SetupPairState(Pair);
+                NetA := FindNetByName(Board, SetupField(Fields, 'pos'));
+                NetB := FindNetByName(Board, SetupField(Fields, 'neg'));
+                If (NetA = Nil) Or (NetB = Nil) Then Problem := 'a net is not on the board';
+            End
+            Else If Kind = 'room' Then
+            Begin
+                Rule := SetupFindRule(Board, Name);
+                If Rule <> Nil Then
+                Begin
+                    If SetupKindWord(Rule) <> 'room' Then Problem := 'a rule of another kind has this name'
+                    Else
+                    Begin
+                        Room := Rule;
+                        State := SetupRoomState(Room);
+                    End;
+                End;
+                Ok := True;
+                N := SetupFieldInt(Fields, 'x1', Ok);
+                N := SetupFieldInt(Fields, 'y1', Ok);
+                N := SetupFieldInt(Fields, 'x2', Ok);
+                N := SetupFieldInt(Fields, 'y2', Ok);
+                If Not Ok Then Problem := 'bad rectangle';
+            End
+            Else If Kind = 'rule' Then
+            Begin
+                KindId := SetupRuleKindId(SetupField(Fields, 'kind'));
+                If KindId < 0 Then Problem := 'unknown rule kind'
+                Else
+                Begin
+                    Rule := SetupFindRule(Board, Name);
+                    If Rule <> Nil Then
+                    Begin
+                        If SetupKindWord(Rule) <> SetupField(Fields, 'kind') Then
+                            Problem := 'the existing rule is of kind ' + SetupKindWord(Rule)
+                        Else
+                        Begin
+                            State := SetupRuleState(Rule);
+                            IPrio[J] := SetupRulePriority(Rule);
+                        End;
+                    End;
+                End;
+            End;
+            IState[J] := State;
+            If Problem <> '' Then IStatus[J] := 'refused: ' + Problem
+            Else If Apply And (State <> IOld[J]) Then IStatus[J] := 'refused: changed since preview'
+            Else If (Kind = 'netclass') And (State = SetupField(Fields, 'nets')) Then IStatus[J] := 'unchanged'
+            Else If (Kind = 'pairclass') And (State = SetupField(Fields, 'pairs')) Then IStatus[J] := 'unchanged'
+            Else If (Kind = 'pair') And (State = SetupField(Fields, 'pos') + ',' + SetupField(Fields, 'neg')) Then IStatus[J] := 'unchanged'
+            Else If State = '' Then IStatus[J] := 'would_create'
+            Else IStatus[J] := 'would_update';
+            If Copy(IStatus[J], 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 800 Then
+                    Problems := Problems + Kind + ' ' + Name + ': ' + Copy(IStatus[J], 10, 200) + '; ';
+            End
+            Else If IStatus[J] = 'unchanged' Then Inc(Unchanged)
+            Else Inc(WouldChange);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing written. ' + Problems);
+            Exit;
+        End;
+
+        { Apply, item by item in batch order, each read back. Stops at the first   }
+        { surprise; what was done is reported, never rolled back.                  }
+        Done := 0;
+        NotDone := 0;
+        Partial := False;
+        If Apply And (WouldChange > 0) Then
+        Begin
+            Try
+                For J := 0 To IKind.Count - 1 Do
+                Begin
+                    If Partial Or ((IStatus[J] <> 'would_create') And (IStatus[J] <> 'would_update')) Then Continue;
+                    Kind := IKind[J];
+                    Name := IName[J];
+                    Fields := IFields[J];
+                    Problem := '';
+                    Touched := True;
+                    PCBServer.PreProcess;
+                    Try
+                        If Kind = 'layer' Then
+                        Begin
+                            LayerObj := ResolveStackLayerObject(LayerStack, Name);
+                            Ok := True;
+                            If SetupField(Fields, 'rename') <> '' Then
+                            Begin
+                                Try LayerObj.Name := SetupField(Fields, 'rename'); Except Problem := 'rename not accepted'; End;
+                            End;
+                            If SetupField(Fields, 'copper') <> '' Then
+                            Begin
+                                N := SetupFieldInt(Fields, 'copper', Ok);
+                                Try LayerObj.CopperThickness := N; Except Problem := 'copper not accepted'; End;
+                            End;
+                            Lyr := SetupField(Fields, 'dtype');
+                            If Lyr = 'none' Then
+                            Begin
+                                Try LayerObj.Dielectric.DielectricType := eNoDielectric; Except Problem := 'dtype not accepted'; End;
+                            End
+                            Else If Lyr = 'core' Then
+                            Begin
+                                Try LayerObj.Dielectric.DielectricType := eCore; Except Problem := 'dtype not accepted'; End;
+                            End
+                            Else If Lyr = 'prepreg' Then
+                            Begin
+                                Try LayerObj.Dielectric.DielectricType := ePrePreg; Except Problem := 'dtype not accepted'; End;
+                            End;
+                            If SetupField(Fields, 'dheight') <> '' Then
+                            Begin
+                                N := SetupFieldInt(Fields, 'dheight', Ok);
+                                Try LayerObj.Dielectric.DielectricHeight := N; Except Problem := 'dheight not accepted'; End;
+                            End;
+                            If SetupField(Fields, 'dconst') <> '' Then
+                            Begin
+                                KD := StrToFloatDef(SetupField(Fields, 'dconst'), -1);
+                                Try LayerObj.Dielectric.DielectricConstant := KD; Except Problem := 'dconst not accepted'; End;
+                            End;
+                            If SetupField(Fields, 'material') <> '' Then
+                            Begin
+                                Try LayerObj.Dielectric.DielectricMaterial := SetupField(Fields, 'material'); Except Problem := 'material not accepted'; End;
+                            End;
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, c_NoEventData);
+                            IBack[J] := SetupLayerState(LayerObj);
+                        End
+                        Else If Kind = 'netclass' Then
+                        Begin
+                            NetClass := SetupFindClass(Board, Name, eClassMemberKind_Net);
+                            If NetClass = Nil Then
+                            Begin
+                                NetClass := PCBServer.PCBClassFactoryByClassMember(eClassMemberKind_Net);
+                                NetClass.SuperClass := False;
+                                NetClass.Name := Name;
+                                Board.AddPCBObject(NetClass);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NetClass.I_ObjectAddress);
+                            End;
+                            Members := SetupField(Fields, 'nets');
+                            While Members <> '' Do
+                            Begin
+                                Net := ParamEditTake(Members, ',');
+                                If Net <> '' Then NetClass.AddMemberByName(Net);
+                            End;
+                            IBack[J] := SetupClassMembers(NetClass);
+                        End
+                        Else If Kind = 'pairclass' Then
+                        Begin
+                            NetClass := SetupFindClass(Board, Name, eClassMemberKind_DifferentialPair);
+                            If NetClass = Nil Then
+                            Begin
+                                NetClass := PCBServer.PCBClassFactoryByClassMember(eClassMemberKind_DifferentialPair);
+                                NetClass.SuperClass := False;
+                                NetClass.Name := Name;
+                                Board.AddPCBObject(NetClass);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, NetClass.I_ObjectAddress);
+                            End;
+                            Members := SetupField(Fields, 'pairs');
+                            While Members <> '' Do
+                            Begin
+                                Net := ParamEditTake(Members, ',');
+                                If Net <> '' Then NetClass.AddMemberByName(Net);
+                            End;
+                            IBack[J] := SetupClassMembers(NetClass);
+                        End
+                        Else If Kind = 'pair' Then
+                        Begin
+                            Pair := SetupFindPair(Board, Name);
+                            NetA := FindNetByName(Board, SetupField(Fields, 'pos'));
+                            NetB := FindNetByName(Board, SetupField(Fields, 'neg'));
+                            If Pair = Nil Then
+                            Begin
+                                Pair := PCBServer.PCBObjectFactory(eDifferentialPairObject, eNoDimension, eCreate_Default);
+                                Pair.Name := Name;
+                                Pair.PositiveNet := NetA;
+                                Pair.NegativeNet := NetB;
+                                Board.AddPCBObject(Pair);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pair.I_ObjectAddress);
+                            End
+                            Else
+                            Begin
+                                Pair.PositiveNet := NetA;
+                                Pair.NegativeNet := NetB;
+                            End;
+                            IBack[J] := SetupPairState(Pair);
+                        End
+                        Else If Kind = 'room' Then
+                        Begin
+                            Rule := SetupFindRule(Board, Name);
+                            Ok := True;
+                            If Rule = Nil Then
+                            Begin
+                                Room := PCBServer.PCBRuleFactory(eRule_ConfinementConstraint);
+                                Room.Name := Name;
+                                Room.Comment := 'Room: ' + Name;
+                                Room.NetScope := eNetScope_AnyNet;
+                                Room.LayerKind := eRuleLayerKind_SameLayer;
+                                Room.Kind := eConfineIn;
+                                Room.Enabled := True;
+                                Exists := False;
+                            End
+                            Else
+                            Begin
+                                Room := Rule;
+                                Exists := True;
+                            End;
+                            If SetupField(Fields, 'scope') <> '' Then Room.Scope1Expression := SetupField(Fields, 'scope');
+                            Rect := Room.BoundingRect;
+                            Rect.Left := SetupFieldInt(Fields, 'x1', Ok);
+                            Rect.Bottom := SetupFieldInt(Fields, 'y1', Ok);
+                            Rect.Right := SetupFieldInt(Fields, 'x2', Ok);
+                            Rect.Top := SetupFieldInt(Fields, 'y2', Ok);
+                            Room.BoundingRect := Rect;
+                            If Not Exists Then
+                            Begin
+                                Board.AddPCBObject(Room);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Room.I_ObjectAddress);
+                            End;
+                            IBack[J] := SetupRoomState(Room);
+                        End
+                        Else If Kind = 'rule' Then
+                        Begin
+                            Rule := SetupFindRule(Board, Name);
+                            KindId := SetupRuleKindId(SetupField(Fields, 'kind'));
+                            Exists := (Rule <> Nil);
+                            If Rule = Nil Then
+                            Begin
+                                Rule := PCBServer.PCBRuleFactory(KindId);
+                                Rule.Name := Name;
+                                Rule.Enabled := True;
+                            End;
+                            Problem := SetupWriteRule(Board, Rule, SetupField(Fields, 'kind'), Fields);
+                            If Not Exists Then
+                            Begin
+                                Board.AddPCBObject(Rule);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
+                            End;
+                            IBack[J] := SetupRuleState(Rule);
+                            IPrio[J] := SetupRulePriority(Rule);
+                        End;
+                    Finally
+                        PCBServer.PostProcess;
+                    End;
+                    If Problem <> '' Then
+                    Begin
+                        IStatus[J] := 'not_done: ' + Problem;
+                        Partial := True;
+                    End
+                    Else If IStatus[J] = 'would_create' Then
+                    Begin
+                        IStatus[J] := 'created';
+                        Inc(Done);
+                    End
+                    Else
+                    Begin
+                        IStatus[J] := 'updated';
+                        Inc(Done);
+                    End;
+                End;
+            Finally
+                If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            For J := 0 To IKind.Count - 1 Do
+                If (IStatus[J] = 'would_create') Or (IStatus[J] = 'would_update') Then
+                Begin
+                    IStatus[J] := 'not_done';
+                    Inc(NotDone);
+                End;
+        End;
+
+        ItemsJson := '';
+        For J := 0 To IKind.Count - 1 Do
+        Begin
+            If J > 0 Then ItemsJson := ItemsJson + ',';
+            ItemsJson := ItemsJson + '{"kind":"' + EscapeJsonString(IKind[J]) + '","name":"' + EscapeJsonString(IName[J])
+                + '","state":"' + EscapeJsonString(IState[J]) + '","priority":"' + EscapeJsonString(IPrio[J])
+                + '","status":"' + EscapeJsonString(IStatus[J]) + '"';
+            If Apply Then ItemsJson := ItemsJson + ',"readback":"' + EscapeJsonString(IBack[J]) + '"';
+            ItemsJson := ItemsJson + '}';
+        End;
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again before trusting the board'
+                + ' (done: ' + IntToStr(Done) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode
+                + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash)
+                + '","item_count":' + IntToStr(IKind.Count)
+                + ',"would_change":' + IntToStr(WouldChange)
+                + ',"unchanged":' + IntToStr(Unchanged)
+                + ',"refused":' + IntToStr(Refused)
+                + ',"done":' + IntToStr(Done)
+                + ',"not_done":' + IntToStr(NotDone)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"items":[' + ItemsJson + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        IKind.Free;
+        IName.Free;
+        IFields.Free;
+        IOld.Free;
+        IState.Free;
+        IStatus.Free;
+        IBack.Free;
+        IPrio.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -2313,7 +3235,8 @@ Begin
        (Not IsSelectedPcbReadCommand(Command)) And
        (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.move_components_checked'))) And
-       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_copper_checked'))) Then
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_copper_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.setup_board_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -2342,6 +3265,11 @@ Begin
     If Command = 'pcb.place_copper_checked' Then
     Begin
         Result := SelectedPlaceCopperChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.setup_board_checked' Then
+    Begin
+        Result := SelectedSetupBoardChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);
