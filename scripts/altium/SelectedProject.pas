@@ -2622,9 +2622,24 @@ Begin
                 N := SetupFieldInt(Fields, 'gpref', Ok);
                 Try RD.PreferedGap(L) := N; Except Result := 'gpref not accepted'; End;
             End;
-            { The pair rule's width triple is not written (pwmin / pwmax / pwpref are      }
-            { accepted by the client and ignored here): the property names are unverified }
-            { and an unknown identifier is a script error no Try catches (2026-10-09).     }
+            { Width triple through the SetState_ methods, whose names and signatures were  }
+            { read from Altium.SDK.Interfaces.dll (2026-10-09): SetState_MinWidth(Layer,  }
+            { Value), SetState_MaxWidth, SetState_PreferedWidth.                           }
+            If SetupField(Fields, 'pwmin') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwmin', Ok);
+                Try RD.SetState_MinWidth(L, N); Except Result := 'pwmin not accepted'; End;
+            End;
+            If SetupField(Fields, 'pwmax') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwmax', Ok);
+                Try RD.SetState_MaxWidth(L, N); Except Result := 'pwmax not accepted'; End;
+            End;
+            If SetupField(Fields, 'pwpref') <> '' Then
+            Begin
+                N := SetupFieldInt(Fields, 'pwpref', Ok);
+                Try RD.SetState_PreferedWidth(L, N); Except Result := 'pwpref not accepted'; End;
+            End;
         End;
         If SetupField(Fields, 'uncoupled') <> '' Then
         Begin
@@ -2643,19 +2658,34 @@ Begin
     End
     Else If Kind = 'layers' Then
     Begin
-        { The allowed-layer flags are NOT written: on 2026-10-09 the first live apply raised  }
-        { "Undeclared identifier: LayerAllowed" as a script error, which no Try catches and  }
-        { which stops the loop with a dialog. The rule is created with its name and scope;    }
-        { the operator ticks the layers in the dialog (the client says so).                   }
+        { SetState_RoutingLayers(Layer, Boolean) per copper layer (Altium.SDK.Interfaces.dll,   }
+        { 2026-10-09); the property form LayerAllowed was an unknown identifier to DelphiScript. }
         RL := R;
+        Allowed := ',' + SetupField(Fields, 'layers') + ',';
+        For L := MinLayer To MaxLayer Do
+        Begin
+            If SetupIsCopperLayer(L) Then
+            Begin
+                Lyr := GetLayerString(L);
+                Try RL.SetState_RoutingLayers(L, (Pos(',' + Lyr + ',', Allowed) > 0)); Except Result := 'layers not accepted'; End;
+            End;
+        End;
     End
     Else If Kind = 'polygon' Then
     Begin
-        { The connect style and relief values are NOT written: eDirectConnect is not a       }
-        { constant DelphiScript knows (script error on the first live apply, 2026-10-09, the }
-        { last item of the batch), and the relief property names are unverified. The rule's  }
-        { scopes and enabled flag are written above; the style is one radio button by hand.  }
+        { SetState_ConnectStyle(Int32) (Altium.SDK.Interfaces.dll, 2026-10-09): 0 relief,     }
+        { 1 direct, 2 none, the order of TPlaneConnectStyle; the constant eDirectConnect is   }
+        { not known to DelphiScript. The descriptor read back says "Direct Connect".          }
         RP := R;
+        V := SetupField(Fields, 'style');
+        If V = 'direct' Then
+        Begin
+            Try RP.SetState_ConnectStyle(1); Except Result := 'style not accepted'; End;
+        End
+        Else If V = 'relief' Then
+        Begin
+            Try RP.SetState_ConnectStyle(0); Except Result := 'style not accepted'; End;
+        End;
     End
     Else
         Result := 'unknown rule kind ' + Kind;
