@@ -166,9 +166,15 @@ client subcommand, spec generator, tests: most of a working day. Qualification: 
   written and read back; Altium applies a pressed-thickness model on save. The apply set 0.2104
   again; what the Layer Stack Manager shows decides which figure the impedance calculation uses.
 
+- **Runs five to seven (scripts `.9`, `.10`), driven by the first DRCs:** four rule kinds added
+  (hole size, mask expansion, silk-to-mask, mask sliver, all through SDK-named setters) and the
+  room recreated on update after DRC showed a room's region is a polygon that only creation builds
+  (an updated bounding rectangle read back right while `WithinRoom` kept the old region). Each run
+  wrote its items and read them back; the fourth DRC confirmed every rule change took effect.
+
 | Test | Result |
 |---|---|
-| S1 | **Pass** (third and fourth runs); hand items left: R11's pair option, one priority swap |
+| S1 | **Pass** (runs three to seven); hand items left: R11's pair option, one priority swap |
 | S2 | **Measured**: new rules take priority 1 (batch order = priority); one swap needed on this board |
-| S3 | **Pass** in effect: the fourth run read 12 items `unchanged` |
+| S3 | **Pass**: every later run read the untouched items `unchanged` and updated the rest in place |
 | S4-S8 | Open |
