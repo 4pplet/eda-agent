@@ -2651,31 +2651,11 @@ Begin
     End
     Else If Kind = 'polygon' Then
     Begin
+        { The connect style and relief values are NOT written: eDirectConnect is not a       }
+        { constant DelphiScript knows (script error on the first live apply, 2026-10-09, the }
+        { last item of the batch), and the relief property names are unverified. The rule's  }
+        { scopes and enabled flag are written above; the style is one radio button by hand.  }
         RP := R;
-        V := SetupField(Fields, 'style');
-        If V = 'direct' Then
-        Begin
-            Try RP.ConnectStyle := eDirectConnect; Except Result := 'style not accepted'; End;
-        End
-        Else If V = 'relief' Then
-        Begin
-            Try RP.ConnectStyle := eReliefConnect; Except Result := 'style not accepted'; End;
-        End;
-        If SetupField(Fields, 'relief_w') <> '' Then
-        Begin
-            N := SetupFieldInt(Fields, 'relief_w', Ok);
-            Try RP.ReliefConductorWidth := N; Except Result := 'relief_w not accepted'; End;
-        End;
-        If SetupField(Fields, 'relief_entries') <> '' Then
-        Begin
-            N := SetupFieldInt(Fields, 'relief_entries', Ok);
-            Try RP.ReliefEntries := N; Except Result := 'relief_entries not accepted'; End;
-        End;
-        If SetupField(Fields, 'relief_gap') <> '' Then
-        Begin
-            N := SetupFieldInt(Fields, 'relief_gap', Ok);
-            Try RP.ReliefAirGap := N; Except Result := 'relief_gap not accepted'; End;
-        End;
     End
     Else
         Result := 'unknown rule kind ' + Kind;
