@@ -1391,6 +1391,801 @@ Begin
     End;
 End;
 
+{ ---- Checked copper placement from a plan ---------------------------------- }
+{ PROPOSAL-2026-10-09-copper-write-increment (Stefan 2026-10-09: "let's add the  }
+{ tool support"). One command, pcb.place_copper_checked: free vias and track    }
+{ segments from a checked layout plan (the U501 fanout), reachable only in a    }
+{ runtime generated with SELECTED_PLACE_EDITS = True and, for apply, behind the }
+{ same operator tick as the component moves ("Allow placement edits": one tick, }
+{ one batch). What the audited upstream PCB_PlaceVia / PCB_PlaceTracks lack and  }
+{ this has: the selected project's own PcbDoc (never the focused board), raw    }
+{ coordinates as integers (never mils: a 0.30 mm via is 11.8 mils), a net that  }
+{ must exist (upstream silently places an unassigned via), a clearance test     }
+{ against the copper already on the board, a duplicate test (an object already  }
+{ there is "unchanged", so a re-run is idempotent), compare-and-set on the       }
+{ board's free via / track counts between preview and apply, a read-back of     }
+{ every object, the dirty-board refusal, and never a save.                       }
+{ Not checked here, by design: the batch's objects against EACH OTHER (the plan  }
+{ checkers do that with the plan's own geometry), polygons and regions (none on  }
+{ the board yet), and design rules (Altium DRC after the save).                  }
+
+Function CopperLayerNameOk(S : String) : Boolean;
+Var
+    I : Integer;
+    Ch : String;
+Begin
+    Result := (Length(S) >= 1) And (Length(S) <= 40);
+    If Not Result Then Exit;
+    For I := 1 To Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        If Pos(Ch, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-() .') = 0 Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+End;
+
+{ Distance from point P to segment AB (all in raw coordinates, as Double). }
+Function CopperPtSeg(PX, PY, AX, AY, BX, BY : Double) : Double;
+Var
+    DX, DY, T, QX, QY : Double;
+Begin
+    DX := BX - AX;
+    DY := BY - AY;
+    If (DX = 0) And (DY = 0) Then T := 0
+    Else
+    Begin
+        T := ((PX - AX) * DX + (PY - AY) * DY) / (DX * DX + DY * DY);
+        If T < 0 Then T := 0;
+        If T > 1 Then T := 1;
+    End;
+    QX := AX + T * DX;
+    QY := AY + T * DY;
+    Result := Sqrt((PX - QX) * (PX - QX) + (PY - QY) * (PY - QY));
+End;
+
+{ True when segments AB and CD properly cross. }
+Function CopperSegsCross(AX, AY, BX, BY, CX, CY, DX, DY : Double) : Boolean;
+Var
+    D1, D2, D3, D4 : Double;
+Begin
+    D1 := (DX - CX) * (AY - CY) - (DY - CY) * (AX - CX);
+    D2 := (DX - CX) * (BY - CY) - (DY - CY) * (BX - CX);
+    D3 := (BX - AX) * (CY - AY) - (BY - AY) * (CX - AX);
+    D4 := (BX - AX) * (DY - AY) - (BY - AY) * (DX - AX);
+    Result := (((D1 > 0) And (D2 < 0)) Or ((D1 < 0) And (D2 > 0)))
+          And (((D3 > 0) And (D4 < 0)) Or ((D3 < 0) And (D4 > 0)));
+End;
+
+{ Distance between segments AB and CD: 0 when they cross. }
+Function CopperSegSeg(AX, AY, BX, BY, CX, CY, DX, DY : Double) : Double;
+Var
+    M, V : Double;
+Begin
+    If CopperSegsCross(AX, AY, BX, BY, CX, CY, DX, DY) Then
+    Begin
+        Result := 0;
+        Exit;
+    End;
+    M := CopperPtSeg(AX, AY, CX, CY, DX, DY);
+    V := CopperPtSeg(BX, BY, CX, CY, DX, DY);
+    If V < M Then M := V;
+    V := CopperPtSeg(CX, CY, AX, AY, BX, BY);
+    If V < M Then M := V;
+    V := CopperPtSeg(DX, DY, AX, AY, BX, BY);
+    If V < M Then M := V;
+    Result := M;
+End;
+
+{ Distance from segment AB to the axis-aligned rectangle R: 0 when an end lies inside. }
+Function CopperSegRect(AX, AY, BX, BY, RX1, RY1, RX2, RY2 : Double) : Double;
+Var
+    M, V : Double;
+Begin
+    If ((AX >= RX1) And (AX <= RX2) And (AY >= RY1) And (AY <= RY2))
+        Or ((BX >= RX1) And (BX <= RX2) And (BY >= RY1) And (BY <= RY2)) Then
+    Begin
+        Result := 0;
+        Exit;
+    End;
+    M := CopperSegSeg(AX, AY, BX, BY, RX1, RY1, RX2, RY1);
+    V := CopperSegSeg(AX, AY, BX, BY, RX2, RY1, RX2, RY2);
+    If V < M Then M := V;
+    V := CopperSegSeg(AX, AY, BX, BY, RX2, RY2, RX1, RY2);
+    If V < M Then M := V;
+    V := CopperSegSeg(AX, AY, BX, BY, RX1, RY2, RX1, RY1);
+    If V < M Then M := V;
+    Result := M;
+End;
+
+{ Free (not in a footprint) vias on the board, and free tracks on copper: the   }
+{ board's copper signature for compare-and-set between preview and apply.      }
+Procedure CopperCountFree(Board : IPCB_Board; Var Vias, Tracks : Integer);
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+Begin
+    Vias := 0;
+    Tracks := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eViaObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If Not Prim.InComponent Then
+            Begin
+                If Prim.ObjectId = eViaObject Then Inc(Vias)
+                Else If PCB_IsCopperLayerName(GetLayerString(Prim.Layer)) Then Inc(Tracks);
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ The nearest other-net copper to a new object: a segment AB (a via is A = B)   }
+{ of half-width HW on `Layer` (eNoLayer for a via: every copper layer counts).  }
+{ Pads, vias, tracks and arcs; a prim on the same net is a connection, not a    }
+{ conflict. Returns the gap (raw units, negative when overlapping) and names     }
+{ the nearest prim. The bounding-box test runs first so most prims cost one    }
+{ comparison.                                                                   }
+Function CopperNearest(Board : IPCB_Board; NetName : String; Layer : TLayer;
+    AX, AY, BX, BY, HW, Clearance : Double; Var What : String) : Double;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Pad : IPCB_Pad;
+    Via : IPCB_Via;
+    Track : IPCB_Track;
+    R : TCoordRect;
+    LayerStr, PrimNet : String;
+    Gap, Reach, LoX, LoY, HiX, HiY, Half : Double;
+    Relevant, IsRound : Boolean;
+Begin
+    Result := 1.0E12;
+    What := '';
+    Reach := HW + Clearance;
+    If AX < BX Then Begin LoX := AX; HiX := BX; End Else Begin LoX := BX; HiX := AX; End;
+    If AY < BY Then Begin LoY := AY; HiY := BY; End Else Begin LoY := BY; HiY := AY; End;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject, eTrackObject, eArcObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            Relevant := False;
+            If Prim.ObjectId = eViaObject Then Relevant := True
+            Else If Prim.ObjectId = ePadObject Then
+            Begin
+                If Prim.Layer = eMultiLayer Then Relevant := True
+                Else Relevant := (Layer = eNoLayer) Or (Prim.Layer = Layer);
+                If Relevant And (Layer <> eNoLayer) And (Prim.Layer <> eMultiLayer) Then
+                    Relevant := PCB_IsCopperLayerName(GetLayerString(Prim.Layer));
+            End
+            Else
+            Begin
+                LayerStr := GetLayerString(Prim.Layer);
+                If PCB_IsCopperLayerName(LayerStr) Then
+                    Relevant := (Layer = eNoLayer) Or (Prim.Layer = Layer);
+            End;
+            If Relevant Then
+            Begin
+                R := Prim.BoundingRectangle;
+                { Cheap box test before any geometry. }
+                If (R.X1 - Reach > HiX) Or (R.X2 + Reach < LoX) Or (R.Y1 - Reach > HiY) Or (R.Y2 + Reach < LoY) Then
+                    Relevant := False;
+            End;
+            If Relevant Then
+            Begin
+                PrimNet := '';
+                Try If Prim.Net <> Nil Then PrimNet := Prim.Net.Name; Except PrimNet := ''; End;
+                If PrimNet = NetName Then Relevant := False;
+            End;
+            If Relevant Then
+            Begin
+                Gap := 1.0E12;
+                If Prim.ObjectId = eViaObject Then
+                Begin
+                    Via := Prim;
+                    Gap := CopperPtSeg(Via.x, Via.y, AX, AY, BX, BY) - HW - Via.Size / 2;
+                End
+                Else If Prim.ObjectId = ePadObject Then
+                Begin
+                    Pad := Prim;
+                    IsRound := False;
+                    Try
+                        IsRound := (Pad.TopShape = eRounded) And (Pad.TopXSize = Pad.TopYSize);
+                    Except
+                        IsRound := False;
+                    End;
+                    If IsRound Then
+                    Begin
+                        Half := Pad.TopXSize / 2;
+                        Gap := CopperPtSeg(Pad.x, Pad.y, AX, AY, BX, BY) - HW - Half;
+                    End
+                    Else
+                        Gap := CopperSegRect(AX, AY, BX, BY, R.X1, R.Y1, R.X2, R.Y2) - HW;
+                End
+                Else If Prim.ObjectId = eTrackObject Then
+                Begin
+                    Track := Prim;
+                    Gap := CopperSegSeg(AX, AY, BX, BY, Track.x1, Track.y1, Track.x2, Track.y2) - HW - Track.Width / 2;
+                End
+                Else
+                    Gap := CopperSegRect(AX, AY, BX, BY, R.X1, R.Y1, R.X2, R.Y2) - HW;
+                If Gap < Result Then
+                Begin
+                    Result := Gap;
+                    If Prim.ObjectId = eViaObject Then What := 'via'
+                    Else If Prim.ObjectId = ePadObject Then What := 'pad'
+                    Else If Prim.ObjectId = eTrackObject Then What := 'track'
+                    Else What := 'arc';
+                    If Prim.InComponent Then
+                    Begin
+                        Try What := What + ' of ' + Prim.Component.Name.Text; Except End;
+                    End;
+                    If PrimNet <> '' Then What := What + ' on ' + PrimNet;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ An identical free via (same net, centre, size and hole) already on the board. }
+Function CopperViaExists(Board : IPCB_Board; NetName : String; X, Y, Size, Hole : Integer) : Boolean;
+Var
+    Iter : IPCB_BoardIterator;
+    Via : IPCB_Via;
+    PrimNet : String;
+Begin
+    Result := False;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eViaObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Via := Iter.FirstPCBObject;
+        While (Via <> Nil) And (Not Result) Do
+        Begin
+            If (Not Via.InComponent) And (Via.x = X) And (Via.y = Y) And (Via.Size = Size) And (Via.HoleSize = Hole) Then
+            Begin
+                PrimNet := '';
+                Try If Via.Net <> Nil Then PrimNet := Via.Net.Name; Except PrimNet := ''; End;
+                Result := (PrimNet = NetName);
+            End;
+            Via := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ An identical free track (same net, layer, width and ends in either order). }
+Function CopperTrackExists(Board : IPCB_Board; NetName : String; Layer : TLayer;
+    X1, Y1, X2, Y2, Width : Integer) : Boolean;
+Var
+    Iter : IPCB_BoardIterator;
+    Track : IPCB_Track;
+    PrimNet : String;
+    Same : Boolean;
+Begin
+    Result := False;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Track := Iter.FirstPCBObject;
+        While (Track <> Nil) And (Not Result) Do
+        Begin
+            If (Not Track.InComponent) And (Track.Width = Width) And (Track.Layer = Layer) Then
+            Begin
+                Same := ((Track.x1 = X1) And (Track.y1 = Y1) And (Track.x2 = X2) And (Track.y2 = Y2))
+                     Or ((Track.x1 = X2) And (Track.y1 = Y2) And (Track.x2 = X1) And (Track.y2 = Y1));
+                If Same Then
+                Begin
+                    PrimNet := '';
+                    Try If Track.Net <> Nil Then PrimNet := Track.Net.Name; Except PrimNet := ''; End;
+                    Result := (PrimNet = NetName);
+                End;
+            End;
+            Track := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Params: mode (preview | apply), batch_hash (64 hex, echoed), old_vias and    }
+{ old_tracks (apply: the free counts the preview reported; the batch is refused }
+{ if the board's copper changed since), vias: 'net|x|y|size|hole|clr;...' and  }
+{ tracks: 'net|layer|x1|y1|x2|y2|width|clr;...' with every number a raw Altium }
+{ coordinate (integer; clr = the clearance this object must keep from other    }
+{ nets' copper). Through vias (top to bottom). At most 300 vias and 500 tracks. }
+{ Per object: would_place / unchanged (already there) / refused: reason; apply  }
+{ places, reads back, marks the document dirty and clears the grant.            }
+Function SelectedPlaceCopperChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, ViasStr, TracksStr, BatchHash, Rest, OpStr, Problems, Binding, Blank, What : String;
+    PcbPath, ErrCode, ErrMsg, OldViasStr, OldTracksStr, LayerStr : String;
+    VNet, VX, VY, VS, VH, VC, VStatus, VBX, VBY, VBS, VBH : TStringList;
+    TNet, TLay, TX1, TY1, TX2, TY2, TW, TC, TStatus, TLayerName, TBX1, TBY1, TBX2, TBY2, TBW : TStringList;
+    J, Count, WouldPlace, Unchanged, Refused, Placed, NotPlaced, FreeVias, FreeTracks : Integer;
+    X, Y, S, H, C, X1, Y1, X2, Y2, W : Integer;
+    Apply, PcbModified, Partial, Touched, Ok : Boolean;
+    Board : IPCB_Board;
+    Net : IPCB_Net;
+    Via : IPCB_Via;
+    Track : IPCB_Track;
+    Lyr : TLayer;
+    Gap : Double;
+    F0, F1, F2, F3, F4, F5, F6, F7 : String;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    ViasStr := ExtractJsonValue(Params, 'vias');
+    TracksStr := ExtractJsonValue(Params, 'tracks');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    OldViasStr := ExtractJsonValue(Params, 'old_vias');
+    OldTracksStr := ExtractJsonValue(Params, 'old_tracks');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Placement edits are not granted: the operator ticks "Allow placement edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    If Apply And ((Not PlaceEditIntOk(OldViasStr)) Or (Not PlaceEditIntOk(OldTracksStr))) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'apply needs old_vias and old_tracks from the preview');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    VNet := TStringList.Create;
+    VX := TStringList.Create;
+    VY := TStringList.Create;
+    VS := TStringList.Create;
+    VH := TStringList.Create;
+    VC := TStringList.Create;
+    VStatus := TStringList.Create;
+    VBX := TStringList.Create;
+    VBY := TStringList.Create;
+    VBS := TStringList.Create;
+    VBH := TStringList.Create;
+    TNet := TStringList.Create;
+    TLay := TStringList.Create;
+    TX1 := TStringList.Create;
+    TY1 := TStringList.Create;
+    TX2 := TStringList.Create;
+    TY2 := TStringList.Create;
+    TW := TStringList.Create;
+    TC := TStringList.Create;
+    TStatus := TStringList.Create;
+    TLayerName := TStringList.Create;
+    TBX1 := TStringList.Create;
+    TBY1 := TStringList.Create;
+    TBX2 := TStringList.Create;
+    TBY2 := TStringList.Create;
+    TBW := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        If SelectedFreshnessJSON(P) = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P) + '); save or discard the named document');
+            Exit;
+        End;
+
+        { Parse. A malformed batch is a client defect: refused in both modes. }
+        Rest := ViasStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 300) Or (ParamEditCountChar(OpStr, '|') <> 5) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Via ' + IntToStr(Count) + ': expected net|x|y|size|hole|clr, at most 300 vias');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|');
+            F1 := ParamEditTake(OpStr, '|');
+            F2 := ParamEditTake(OpStr, '|');
+            F3 := ParamEditTake(OpStr, '|');
+            F4 := ParamEditTake(OpStr, '|');
+            F5 := OpStr;
+            Ok := PlaceEditNameOk(F0) And PlaceEditIntOk(F1) And PlaceEditIntOk(F2)
+                And PlaceEditIntOk(F3) And PlaceEditIntOk(F4) And PlaceEditIntOk(F5);
+            If Ok Then
+                Ok := (StrToInt(F3) > 0) And (StrToInt(F4) > 0) And (StrToInt(F4) < StrToInt(F3)) And (StrToInt(F5) >= 0);
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Via ' + IntToStr(Count) + ': bad net, coordinate, size, hole or clearance (raw integer coordinates, 0 < hole < size)');
+                Exit;
+            End;
+            VNet.Add(F0);
+            VX.Add(F1);
+            VY.Add(F2);
+            VS.Add(F3);
+            VH.Add(F4);
+            VC.Add(F5);
+            VStatus.Add(Blank);
+            VBX.Add(Blank);
+            VBY.Add(Blank);
+            VBS.Add(Blank);
+            VBH.Add(Blank);
+        End;
+        Rest := TracksStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 500) Or (ParamEditCountChar(OpStr, '|') <> 7) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Track ' + IntToStr(Count) + ': expected net|layer|x1|y1|x2|y2|width|clr, at most 500 tracks');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|');
+            F1 := ParamEditTake(OpStr, '|');
+            F2 := ParamEditTake(OpStr, '|');
+            F3 := ParamEditTake(OpStr, '|');
+            F4 := ParamEditTake(OpStr, '|');
+            F5 := ParamEditTake(OpStr, '|');
+            F6 := ParamEditTake(OpStr, '|');
+            F7 := OpStr;
+            Ok := PlaceEditNameOk(F0) And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3)
+                And PlaceEditIntOk(F4) And PlaceEditIntOk(F5) And PlaceEditIntOk(F6) And PlaceEditIntOk(F7);
+            If Ok Then
+                Ok := (StrToInt(F6) > 0) And (StrToInt(F7) >= 0)
+                    And ((StrToInt(F2) <> StrToInt(F4)) Or (StrToInt(F3) <> StrToInt(F5)));
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Track ' + IntToStr(Count) + ': bad net, layer, coordinate, width or clearance (raw integer coordinates, distinct ends)');
+                Exit;
+            End;
+            TNet.Add(F0);
+            TLay.Add(F1);
+            TX1.Add(F2);
+            TY1.Add(F3);
+            TX2.Add(F4);
+            TY2.Add(F5);
+            TW.Add(F6);
+            TC.Add(F7);
+            TStatus.Add(Blank);
+            TLayerName.Add(Blank);
+            TBX1.Add(Blank);
+            TBY1.Add(Blank);
+            TBX2.Add(Blank);
+            TBY2.Add(Blank);
+            TBW.Add(Blank);
+        End;
+        If (VNet.Count = 0) And (TNet.Count = 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No vias and no tracks');
+            Exit;
+        End;
+
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+        CopperCountFree(Board, FreeVias, FreeTracks);
+        If Apply And ((IntToStr(FreeVias) <> OldViasStr) Or (IntToStr(FreeTracks) <> OldTracksStr)) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED',
+                'Nothing placed. The board''s free copper changed since the preview (vias '
+                + IntToStr(FreeVias) + ', tracks ' + IntToStr(FreeTracks) + '); preview again');
+            Exit;
+        End;
+
+        { Classify every object. }
+        Problems := '';
+        Refused := 0;
+        WouldPlace := 0;
+        Unchanged := 0;
+        For J := 0 To VNet.Count - 1 Do
+        Begin
+            X := StrToInt(VX[J]);
+            Y := StrToInt(VY[J]);
+            S := StrToInt(VS[J]);
+            H := StrToInt(VH[J]);
+            C := StrToInt(VC[J]);
+            Net := FindNetByName(Board, VNet[J]);
+            If Net = Nil Then VStatus[J] := 'refused: net not on the board'
+            Else If CopperViaExists(Board, VNet[J], X, Y, S, H) Then VStatus[J] := 'unchanged'
+            Else
+            Begin
+                Gap := CopperNearest(Board, VNet[J], eNoLayer, X, Y, X, Y, S / 2, C, What);
+                If Gap < C Then
+                    VStatus[J] := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(C) + ')'
+                Else
+                    VStatus[J] := 'would_place';
+            End;
+            If Copy(VStatus[J], 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 800 Then
+                    Problems := Problems + 'via ' + IntToStr(J + 1) + ' (' + VNet[J] + '): ' + Copy(VStatus[J], 10, 200) + '; ';
+            End
+            Else If VStatus[J] = 'unchanged' Then Inc(Unchanged)
+            Else Inc(WouldPlace);
+        End;
+        For J := 0 To TNet.Count - 1 Do
+        Begin
+            X1 := StrToInt(TX1[J]);
+            Y1 := StrToInt(TY1[J]);
+            X2 := StrToInt(TX2[J]);
+            Y2 := StrToInt(TY2[J]);
+            W := StrToInt(TW[J]);
+            C := StrToInt(TC[J]);
+            Lyr := ResolveLayerId(Board, TLay[J]);
+            If Lyr <> eNoLayer Then
+            Begin
+                LayerStr := GetLayerString(Lyr);
+                If Not PCB_IsCopperLayerName(LayerStr) Then Lyr := eNoLayer;
+            End;
+            Net := FindNetByName(Board, TNet[J]);
+            If Lyr = eNoLayer Then TStatus[J] := 'refused: not a copper layer of this board'
+            Else If Net = Nil Then TStatus[J] := 'refused: net not on the board'
+            Else
+            Begin
+                TLayerName[J] := LayerStr;
+                If CopperTrackExists(Board, TNet[J], Lyr, X1, Y1, X2, Y2, W) Then TStatus[J] := 'unchanged'
+                Else
+                Begin
+                    Gap := CopperNearest(Board, TNet[J], Lyr, X1, Y1, X2, Y2, W / 2, C, What);
+                    If Gap < C Then
+                        TStatus[J] := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(C) + ')'
+                    Else
+                        TStatus[J] := 'would_place';
+                End;
+            End;
+            If Copy(TStatus[J], 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 800 Then
+                    Problems := Problems + 'track ' + IntToStr(J + 1) + ' (' + TNet[J] + '): ' + Copy(TStatus[J], 10, 200) + '; ';
+            End
+            Else If TStatus[J] = 'unchanged' Then Inc(Unchanged)
+            Else Inc(WouldPlace);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing placed. ' + Problems);
+            Exit;
+        End;
+
+        { Apply: every object inside one PreProcess / PostProcess, each one    }
+        { registered with the board and read back from the object itself.     }
+        { Stops at the first surprise; what was placed is reported, never      }
+        { rolled back.                                                         }
+        Placed := 0;
+        NotPlaced := 0;
+        Partial := False;
+        If Apply And (WouldPlace > 0) Then
+        Begin
+            Try
+                PCBServer.PreProcess;
+                Try
+                    For J := 0 To VNet.Count - 1 Do
+                    Begin
+                        If Partial Or (VStatus[J] <> 'would_place') Then Continue;
+                        Net := FindNetByName(Board, VNet[J]);
+                        Via := PCBServer.PCBObjectFactory(eViaObject, eNoDimension, eCreate_Default);
+                        If (Via = Nil) Or (Net = Nil) Then
+                        Begin
+                            VStatus[J] := 'not_placed: could not create the via';
+                            Partial := True;
+                            Continue;
+                        End;
+                        Touched := True;
+                        Via.x := StrToInt(VX[J]);
+                        Via.y := StrToInt(VY[J]);
+                        Via.Size := StrToInt(VS[J]);
+                        Via.HoleSize := StrToInt(VH[J]);
+                        Via.LowLayer := eTopLayer;
+                        Via.HighLayer := eBottomLayer;
+                        Via.Net := Net;
+                        Board.AddPCBObject(Via);
+                        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast,
+                            PCBM_BoardRegisteration, Via.I_ObjectAddress);
+                        VBX[J] := IntToStr(Via.x);
+                        VBY[J] := IntToStr(Via.y);
+                        VBS[J] := IntToStr(Via.Size);
+                        VBH[J] := IntToStr(Via.HoleSize);
+                        If (VBX[J] = VX[J]) And (VBY[J] = VY[J]) And (VBS[J] = VS[J]) And (VBH[J] = VH[J]) Then
+                        Begin
+                            VStatus[J] := 'placed';
+                            Inc(Placed);
+                        End
+                        Else
+                        Begin
+                            VStatus[J] := 'placed_readback_differs';
+                            Partial := True;
+                        End;
+                    End;
+                    For J := 0 To TNet.Count - 1 Do
+                    Begin
+                        If Partial Or (TStatus[J] <> 'would_place') Then Continue;
+                        Net := FindNetByName(Board, TNet[J]);
+                        Lyr := ResolveLayerId(Board, TLay[J]);
+                        Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                        If (Track = Nil) Or (Net = Nil) Or (Lyr = eNoLayer) Then
+                        Begin
+                            TStatus[J] := 'not_placed: could not create the track';
+                            Partial := True;
+                            Continue;
+                        End;
+                        Touched := True;
+                        Track.x1 := StrToInt(TX1[J]);
+                        Track.y1 := StrToInt(TY1[J]);
+                        Track.x2 := StrToInt(TX2[J]);
+                        Track.y2 := StrToInt(TY2[J]);
+                        Track.Width := StrToInt(TW[J]);
+                        Track.Layer := Lyr;
+                        Track.Net := Net;
+                        Board.AddPCBObject(Track);
+                        PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast,
+                            PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                        TBX1[J] := IntToStr(Track.x1);
+                        TBY1[J] := IntToStr(Track.y1);
+                        TBX2[J] := IntToStr(Track.x2);
+                        TBY2[J] := IntToStr(Track.y2);
+                        TBW[J] := IntToStr(Track.Width);
+                        If (TBX1[J] = TX1[J]) And (TBY1[J] = TY1[J]) And (TBX2[J] = TX2[J]) And (TBY2[J] = TY2[J]) And (TBW[J] = TW[J]) Then
+                        Begin
+                            TStatus[J] := 'placed';
+                            Inc(Placed);
+                        End
+                        Else
+                        Begin
+                            TStatus[J] := 'placed_readback_differs';
+                            Partial := True;
+                        End;
+                    End;
+                Finally
+                    PCBServer.PostProcess;
+                End;
+            Finally
+                If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            For J := 0 To VNet.Count - 1 Do
+                If VStatus[J] = 'would_place' Then
+                Begin
+                    VStatus[J] := 'not_placed';
+                    Inc(NotPlaced);
+                End;
+            For J := 0 To TNet.Count - 1 Do
+                If TStatus[J] = 'would_place' Then
+                Begin
+                    TStatus[J] := 'not_placed';
+                    Inc(NotPlaced);
+                End;
+        End;
+
+        ViasStr := '';
+        For J := 0 To VNet.Count - 1 Do
+        Begin
+            If J > 0 Then ViasStr := ViasStr + ',';
+            ViasStr := ViasStr + '{"net":"' + EscapeJsonString(VNet[J]) + '","x":"' + VX[J] + '","y":"' + VY[J]
+                + '","size":"' + VS[J] + '","hole":"' + VH[J] + '","clearance":"' + VC[J]
+                + '","status":"' + EscapeJsonString(VStatus[J]) + '"';
+            If Apply Then
+                ViasStr := ViasStr + ',"readback_x":"' + VBX[J] + '","readback_y":"' + VBY[J]
+                    + '","readback_size":"' + VBS[J] + '","readback_hole":"' + VBH[J] + '"';
+            ViasStr := ViasStr + '}';
+        End;
+        TracksStr := '';
+        For J := 0 To TNet.Count - 1 Do
+        Begin
+            If J > 0 Then TracksStr := TracksStr + ',';
+            TracksStr := TracksStr + '{"net":"' + EscapeJsonString(TNet[J]) + '","layer":"' + EscapeJsonString(TLay[J])
+                + '","board_layer":"' + EscapeJsonString(TLayerName[J])
+                + '","x1":"' + TX1[J] + '","y1":"' + TY1[J] + '","x2":"' + TX2[J] + '","y2":"' + TY2[J]
+                + '","width":"' + TW[J] + '","clearance":"' + TC[J]
+                + '","status":"' + EscapeJsonString(TStatus[J]) + '"';
+            If Apply Then
+                TracksStr := TracksStr + ',"readback_x1":"' + TBX1[J] + '","readback_y1":"' + TBY1[J]
+                    + '","readback_x2":"' + TBX2[J] + '","readback_y2":"' + TBY2[J] + '","readback_width":"' + TBW[J] + '"';
+            TracksStr := TracksStr + '}';
+        End;
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again before trusting the board'
+                + ' (placed: ' + IntToStr(Placed) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode
+                + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash)
+                + '","via_count":' + IntToStr(VNet.Count)
+                + ',"track_count":' + IntToStr(TNet.Count)
+                + ',"free_vias":' + IntToStr(FreeVias)
+                + ',"free_tracks":' + IntToStr(FreeTracks)
+                + ',"would_place":' + IntToStr(WouldPlace)
+                + ',"unchanged":' + IntToStr(Unchanged)
+                + ',"refused":' + IntToStr(Refused)
+                + ',"placed":' + IntToStr(Placed)
+                + ',"not_placed":' + IntToStr(NotPlaced)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"vias":[' + ViasStr + '],"tracks":[' + TracksStr + ']}}');
+    Finally
+        { One tick, one batch. }
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        VNet.Free;
+        VX.Free;
+        VY.Free;
+        VS.Free;
+        VH.Free;
+        VC.Free;
+        VStatus.Free;
+        VBX.Free;
+        VBY.Free;
+        VBS.Free;
+        VBH.Free;
+        TNet.Free;
+        TLay.Free;
+        TX1.Free;
+        TY1.Free;
+        TX2.Free;
+        TY2.Free;
+        TW.Free;
+        TC.Free;
+        TStatus.Free;
+        TLayerName.Free;
+        TBX1.Free;
+        TBY1.Free;
+        TBX2.Free;
+        TBY2.Free;
+        TBW.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -1439,7 +2234,8 @@ Begin
        (Command <> 'project.get_messages') And
        (Not IsSelectedPcbReadCommand(Command)) And
        (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) And
-       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.move_components_checked'))) Then
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.move_components_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_copper_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -1463,6 +2259,11 @@ Begin
     If Command = 'pcb.move_components_checked' Then
     Begin
         Result := SelectedMoveComponentsChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.place_copper_checked' Then
+    Begin
+        Result := SelectedPlaceCopperChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);

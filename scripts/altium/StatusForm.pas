@@ -667,11 +667,12 @@ Begin
         Else
         Begin
             chk_AllowPlace.Caption := '  ' + HollowDot(0)
-                + '  Allow placement edits (move parts, top side)';
+                + '  Allow placement edits (move parts, top side; place plan copper)';
             chk_AllowPlace.Color := $00202126;
         End;
-        chk_AllowPlace.Hint := 'Grant for ONE pcb_move_components_checked batch: the selected '
-            + 'project''s PcbDoc, unlocked top-side parts without routing, compare-and-set, never saves. '
+        chk_AllowPlace.Hint := 'Grant for ONE batch of pcb_move_components_checked (unlocked top-side '
+            + 'parts without routing) or pcb_place_copper_checked (vias and tracks from a checked plan, '
+            + 'clear of other nets'' copper): the selected project''s PcbDoc, compare-and-set, never saves. '
             + 'Ends after a batch is applied, and on a project switch, Detach or session end. '
             + 'You review the board and save it.';
     Except End;
