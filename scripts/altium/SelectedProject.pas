@@ -2622,21 +2622,9 @@ Begin
                 N := SetupFieldInt(Fields, 'gpref', Ok);
                 Try RD.PreferedGap(L) := N; Except Result := 'gpref not accepted'; End;
             End;
-            If SetupField(Fields, 'pwmin') <> '' Then
-            Begin
-                N := SetupFieldInt(Fields, 'pwmin', Ok);
-                Try RD.MinWidth(L) := N; Except Result := 'pwmin not accepted'; End;
-            End;
-            If SetupField(Fields, 'pwmax') <> '' Then
-            Begin
-                N := SetupFieldInt(Fields, 'pwmax', Ok);
-                Try RD.MaxWidth(L) := N; Except Result := 'pwmax not accepted'; End;
-            End;
-            If SetupField(Fields, 'pwpref') <> '' Then
-            Begin
-                N := SetupFieldInt(Fields, 'pwpref', Ok);
-                Try RD.PreferedWidth(L) := N; Except Result := 'pwpref not accepted'; End;
-            End;
+            { The pair rule's width triple is not written (pwmin / pwmax / pwpref are      }
+            { accepted by the client and ignored here): the property names are unverified }
+            { and an unknown identifier is a script error no Try catches (2026-10-09).     }
         End;
         If SetupField(Fields, 'uncoupled') <> '' Then
         Begin
@@ -2655,16 +2643,11 @@ Begin
     End
     Else If Kind = 'layers' Then
     Begin
+        { The allowed-layer flags are NOT written: on 2026-10-09 the first live apply raised  }
+        { "Undeclared identifier: LayerAllowed" as a script error, which no Try catches and  }
+        { which stops the loop with a dialog. The rule is created with its name and scope;    }
+        { the operator ticks the layers in the dialog (the client says so).                   }
         RL := R;
-        Allowed := ',' + SetupField(Fields, 'layers') + ',';
-        For L := MinLayer To MaxLayer Do
-        Begin
-            If SetupIsCopperLayer(L) Then
-            Begin
-                Lyr := GetLayerString(L);
-                Try RL.LayerAllowed(L) := (Pos(',' + Lyr + ',', Allowed) > 0); Except Result := 'layers not accepted'; End;
-            End;
-        End;
     End
     Else If Kind = 'polygon' Then
     Begin

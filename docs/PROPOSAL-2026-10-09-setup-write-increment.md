@@ -66,11 +66,12 @@ project's PcbDoc only. Items in batch order, each compare-and-set:
 | **Honest result** | Per item `would_create` / `would_update` / `unchanged` / `refused: reason` at preview; `created` / `updated` / `unchanged` / `not_done` (with the reason) at apply, plus the read-back. Stops at the first problem, never rolls back |
 | **Never save** | The operator reviews the Rules, Classes and Layer Stack dialogs and saves |
 
-**Known gaps, by design:** the matched-length rule's "Within Differential Pair Length" option has
-no API property we could confirm, so R11 is created with its scope and tolerance and that tick is
-by hand; the diff-pair width setters (`MinWidth(L)` and friends on
-`IPCB_DifferentialPairsRoutingRule`) are attempted inside `Try` and read back through the
-descriptor (S6); R8 (pair-to-pair clearance) stays held per Stefan 2026-10-07.
+**Known gaps, by design (hand items, named by the client after every apply):** the matched-length
+rule's "Within Differential Pair Length" option (no API property confirmed); a routing-layers
+rule's allowed layers (`LayerAllowed` is not reachable from DelphiScript, found live 2026-10-09);
+the pair rule's width triple (property names unverified; removed before use after the above);
+rule priorities. R8 (pair-to-pair clearance) stays held per Stefan 2026-10-07. The client refuses
+scope expressions with query functions outside a known list (`InRoom` is not one; `WithinRoom` is).
 
 **Client:** PLT-hw `hdmi-adapter/reviews/board_setup.py` writes the spec
 (`board-setup-2026-10-09.json`, mm, board frame: the stackup, class PWR, nine pairs, classes TMDS
@@ -115,4 +116,29 @@ client subcommand, spec generator, tests: most of a working day. Qualification: 
 
 ## 9. Qualification log
 
-(none yet)
+**2026-10-09, live HDMI project (git as rollback: PLT-hw 3ecd11e), runtime `selected-edits-20261009e`
+(scripts `.5`), then `-20261009f` (scripts `.6`).**
+
+- **First compile:** the new Pascal compiled at its first load. The preview ran clean on the first
+  call: 30 items, every current value read (the stack at Altium's defaults, the stock rules, nothing
+  else present), nothing refused.
+- **First apply, two script errors, both mine, both of the uncatchable kind:**
+  1. `Undeclared identifier: InRoom` from Altium's query compiler when `Clearance_BGA`'s scope was
+     written: the room test is `WithinRoom(...)`, `InRoom` is not a query function. Fixed in the spec
+     and guarded in the client (`check_query`: only known query functions leave the client).
+  2. `Undeclared identifier: LayerAllowed` when `RoutingLayers_HS` was written: the indexed property
+     is not reachable from DelphiScript in the form the width properties use. Scripts `.6` write a
+     routing-layers rule's name and scope only; the allowed layers are ticked by hand. The pair
+     rule's width triple (the other unverified property set) was removed the same way before it could
+     fail.
+  Lesson, now in the record: a `Try` protects against exceptions, not against an identifier the
+  script engine does not know, which stops the loop with a dialog. Every property written natively
+  must have been seen working in this codebase or Altium's own examples; otherwise it is a hand item.
+- The bridge loop did not survive the dialogs (status calls queued unanswered); the apply's partial
+  result (layers, classes, pairs, room, the Clearance update and some rules) is read by the next
+  preview, which is the compare-and-set's whole point.
+
+| Test | Result |
+|---|---|
+| S1 | In progress: second run on `.6` pending |
+| S2-S8 | Open |
