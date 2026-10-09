@@ -154,8 +154,21 @@ client subcommand, spec generator, tests: most of a working day. Qualification: 
   the 0.25 mm rail feeds inside the room would then fall under Width_Power's 0.30 minimum. One hand
   swap on this board; the spec order is corrected for the next.
 
+- **Fourth run, scripts `.8`, on Stefan's saved board:** the three settings that had been hand
+  items (pair width triples, routing layers, polygon connect style) were written through the
+  `SetState_` methods whose names and signatures were read from `Altium.SDK.Interfaces.dll` by
+  reflection (`SetState_MinWidth(IV7_Layer, Int32)`, `SetState_RoutingLayers(IV7_Layer, Boolean)`,
+  `SetState_ConnectStyle(Int32)`, 1 = direct). 18 written, 12 read `unchanged` (S3 in effect: the
+  class, the pairs and the pair classes), nothing partial. Read back: pair widths 0.19 / 0.21 / 0.20
+  and 0.10 / 0.21 / 0.20, PolygonConnect "Direct Connect". The routing-layers descriptor carries no
+  layer information; a layer read-back for that kind is a follow-up.
+- **Stackup observation:** after Stefan's save the two prepregs read 0.186 mm, not the 0.2104 mm
+  written and read back; Altium applies a pressed-thickness model on save. The apply set 0.2104
+  again; what the Layer Stack Manager shows decides which figure the impedance calculation uses.
+
 | Test | Result |
 |---|---|
-| S1 | **Pass** on the third run (above); hand items as listed in section 4 |
+| S1 | **Pass** (third and fourth runs); hand items left: R11's pair option, one priority swap |
 | S2 | **Measured**: new rules take priority 1 (batch order = priority); one swap needed on this board |
-| S3-S8 | Open |
+| S3 | **Pass** in effect: the fourth run read 12 items `unchanged` |
+| S4-S8 | Open |
