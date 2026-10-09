@@ -2488,6 +2488,10 @@ Begin
     Else If K = eRule_RoutingLayers Then Result := 'layers'
     Else If K = eRule_PolygonConnectStyle Then Result := 'polygon'
     Else If K = eRule_ConfinementConstraint Then Result := 'room'
+    Else If K = eRule_MaxMinHoleSize Then Result := 'hole'
+    Else If K = eRule_SolderMaskExpansion Then Result := 'maskexp'
+    Else If K = eRule_SilkToSolderMaskClearance Then Result := 'silkmask'
+    Else If K = eRule_MinimumSolderMaskSliver Then Result := 'sliver'
     Else Result := 'kind' + IntToStr(K);
 End;
 
@@ -2504,6 +2508,10 @@ Var
     RM : IPCB_MatchedNetLengthsConstraint;
     RL : IPCB_RoutingLayersRule;
     RP : IPCB_PolygonConnectStyleRule;
+    RH : IPCB_MaxMinHoleSizeConstraint;
+    RX : IPCB_SolderMaskExpansionRule;
+    RS : IPCB_SilkToSolderMaskClearanceRule;
+    RV2 : IPCB_MinimumSolderMaskSliverRule;
     L : TLayer;
     V, Allowed, Lyr, Rest : String;
     Ok : Boolean;
@@ -2687,6 +2695,50 @@ Begin
             Try RP.SetState_ConnectStyle(0); Except Result := 'style not accepted'; End;
         End;
     End
+    Else If Kind = 'hole' Then
+    Begin
+        { IPCB_MaxMinHoleSizeConstraint.SetState_MinLimit / MaxLimit (SDK assembly 2026-10-09). }
+        RH := R;
+        If SetupField(Fields, 'holemin') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'holemin', Ok);
+            Try RH.SetState_MinLimit(N); Except Result := 'holemin not accepted'; End;
+        End;
+        If SetupField(Fields, 'holemax') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'holemax', Ok);
+            Try RH.SetState_MaxLimit(N); Except Result := 'holemax not accepted'; End;
+        End;
+    End
+    Else If Kind = 'maskexp' Then
+    Begin
+        { IPCB_SolderMaskExpansionRule.SetState_Expansion; a negative expansion closes the      }
+        { opening (tented vias) since the rule interface has no tenting flag.                  }
+        RX := R;
+        If SetupField(Fields, 'expansion') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'expansion', Ok);
+            Try RX.SetState_Expansion(N); Except Result := 'expansion not accepted'; End;
+        End;
+    End
+    Else If Kind = 'silkmask' Then
+    Begin
+        RS := R;
+        If SetupField(Fields, 'silkgap') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'silkgap', Ok);
+            Try RS.SetState_SilkToMaskGap(N); Except Result := 'silkgap not accepted'; End;
+        End;
+    End
+    Else If Kind = 'sliver' Then
+    Begin
+        RV2 := R;
+        If SetupField(Fields, 'sliver') <> '' Then
+        Begin
+            N := SetupFieldInt(Fields, 'sliver', Ok);
+            Try RV2.SetState_MinSolderMaskSliver(N); Except Result := 'sliver not accepted'; End;
+        End;
+    End
     Else
         Result := 'unknown rule kind ' + Kind;
     If (Result = '') And (Not Ok) Then Result := 'a value is not an integer';
@@ -2701,7 +2753,11 @@ Begin
     Else If Kind = 'diffpair' Then Result := eRule_DifferentialPairsRouting
     Else If Kind = 'matched' Then Result := eRule_MatchedLengths
     Else If Kind = 'layers' Then Result := eRule_RoutingLayers
-    Else If Kind = 'polygon' Then Result := eRule_PolygonConnectStyle;
+    Else If Kind = 'polygon' Then Result := eRule_PolygonConnectStyle
+    Else If Kind = 'hole' Then Result := eRule_MaxMinHoleSize
+    Else If Kind = 'maskexp' Then Result := eRule_SolderMaskExpansion
+    Else If Kind = 'silkmask' Then Result := eRule_SilkToSolderMaskClearance
+    Else If Kind = 'sliver' Then Result := eRule_MinimumSolderMaskSliver;
 End;
 
 { Params: mode (preview | apply), batch_hash, items: 'kind|name|fields|old;...'  }
