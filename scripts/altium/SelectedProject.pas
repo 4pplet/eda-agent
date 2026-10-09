@@ -3106,6 +3106,15 @@ Begin
                         Begin
                             Rule := SetupFindRule(Board, Name);
                             Ok := True;
+                            { A room's region is a polygon that only its creation builds from the   }
+                            { bounding rectangle: on 2026-10-09 an updated rectangle read back      }
+                            { right while DRC kept scoping on the old region. So an existing room  }
+                            { is removed and created again (the one delete this command does).     }
+                            If Rule <> Nil Then
+                            Begin
+                                Board.RemovePCBObject(Rule);
+                                Rule := Nil;
+                            End;
                             If Rule = Nil Then
                             Begin
                                 Room := PCBServer.PCBRuleFactory(eRule_ConfinementConstraint);
