@@ -138,7 +138,24 @@ client subcommand, spec generator, tests: most of a working day. Qualification: 
   result (layers, classes, pairs, room, the Clearance update and some rules) is read by the next
   preview, which is the compare-and-set's whole point.
 
+- **Third script error on the second apply** (`.6`): `Undeclared identifier: eDirectConnect` on the
+  last item, PolygonConnect: the enum name is in Altium's DLL but not in DelphiScript's constant
+  table. Removed for `.7`; R14's direct connect is a hand item. Stefan force-quit Altium after
+  each dialog, so both partial applies were discarded and the third run started from the saved board.
+- **Third apply, runtime `-20261009g` (scripts `.7`): 29 of 29 written, 0 partial, every item read
+  back.** `rules --expect` afterwards: 11 of 14 matched (Clearance, Clearance_BGA, Width, Width_BGA,
+  Width_Power, RoutingVias, RoutingVias_BGA, both MatchedLength rules, RoutingLayers_HS,
+  PolygonConnect), R8 absent by decision, the two pair rules mismatched only in the width triple
+  (the known hand item). Stackup read back as JLC04161H-7628; class PWR with 14 nets; 9 pairs; 2
+  pair classes; room at the plan's rectangle.
+- **Priorities, measured:** Altium gives a rule created through the API priority 1 and pushes the
+  others of its kind down. So the batch order decides: default first, most specific last. The spec
+  wrote Width, Width_BGA, Width_Power in that order and got Width_Power 1 / Width_BGA 2 / Width 3;
+  the 0.25 mm rail feeds inside the room would then fall under Width_Power's 0.30 minimum. One hand
+  swap on this board; the spec order is corrected for the next.
+
 | Test | Result |
 |---|---|
-| S1 | In progress: second run on `.6` pending |
-| S2-S8 | Open |
+| S1 | **Pass** on the third run (above); hand items as listed in section 4 |
+| S2 | **Measured**: new rules take priority 1 (batch order = priority); one swap needed on this board |
+| S3-S8 | Open |
