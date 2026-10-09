@@ -2142,7 +2142,11 @@ Begin
                         TBX2[J] := IntToStr(Track.x2);
                         TBY2[J] := IntToStr(Track.y2);
                         TBW[J] := IntToStr(Track.Width);
-                        If (TBX1[J] = TX1[J]) And (TBY1[J] = TY1[J]) And (TBX2[J] = TX2[J]) And (TBY2[J] = TY2[J]) And (TBW[J] = TW[J]) Then
+                        { Altium stores a track with its ends in its own order (the first live   }
+                        { apply, 2026-10-09, read x1 / x2 swapped and stopped the batch after    }
+                        { one correct track): either order is the same track.                   }
+                        If (TBW[J] = TW[J]) And (((TBX1[J] = TX1[J]) And (TBY1[J] = TY1[J]) And (TBX2[J] = TX2[J]) And (TBY2[J] = TY2[J]))
+                            Or ((TBX1[J] = TX2[J]) And (TBY1[J] = TY2[J]) And (TBX2[J] = TX1[J]) And (TBY2[J] = TY1[J]))) Then
                         Begin
                             TStatus[J] := 'placed';
                             Inc(Placed);

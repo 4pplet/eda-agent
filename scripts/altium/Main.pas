@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.10.09.3';
+    SCRIPT_VERSION = '2026.10.09.4';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
     { Checked parameter edits (PROPOSAL-2026-09-28-metadata-write-increment):
