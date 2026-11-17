@@ -2,7 +2,9 @@
 
 Status: **asked for by Stefan 2026-11-17** ("let's try to make the ordering process better and
 smoother and try to get as much mcp improvements in before tomorrow"); built the same day, native
-qualification pending (section 6). Scripts `2026.11.17.1`, client PLT-hw `tools/eda-agent`.
+qualification pending (section 6). Scripts `2026.11.17.2` (annotate added the same evening, section 5a),
+runtime `selected-edits-20261117b` (the first, `selected-edits-20261117` at `.1`, was never started and
+is superseded), client PLT-hw `tools/eda-agent`.
 Increment 1 of the PLT-hw `TOOLS.md` bridge backlog (2026-10-16). Same selected-project model and
 gates as the [setup](PROPOSAL-2026-10-09-setup-write-increment.md) and
 [copper](PROPOSAL-2026-10-09-copper-write-increment.md) writes.
@@ -68,11 +70,22 @@ changed ones, so a container that wrote nothing is an error, not a success.
   `jlc_stock.py` → `bom_audit.py` → `gerber_render.py`, one summary file; stops at the first
   hard failure and says which step.
 
-## 5. Deliberately left out
+## 5a. Annotate of `?` designators (added 2026-11-17, scripts `.2`)
 
-- **Annotate:** `WorkspaceManager:DocumentOptions` `Action=AnnotateQuiet` is captioned
-  "Annotate Schematics Quietly..." and may confirm in a dialog; a native compare-and-set annotate
-  of `?` designators (preview of the new names, multi-part refused) is the next slice.
+`WorkspaceManager:DocumentOptions` `Action=AnnotateQuiet` is captioned "Annotate Schematics
+Quietly..." (it may confirm in a dialog) and numbers without the PLT sheet hundreds, so annotate is
+native and checked instead. `project.annotate_checked`, parameter-edit runtime flag and the
+"Allow parameter edits" tick:
+- preview lists every component of the project's schematics (sheet index, `UniqueId`, designator,
+  `LibReference`, `IsMultiPartComponent`, `DesignatorLocked`); every sheet must be open;
+- the client (`annotate_plan.py`) proposes names by sheet hundreds (sheet number from the file
+  name's leading digits, else the sheet's most common hundred; one past the highest in use);
+- apply writes `Designator.Text` per item by compare-and-set: sheet saved, component found once on
+  its sheet by `UniqueId`, current text equal to old and ending in `?`, not multi-part, not locked,
+  new unused in the project; any problem refuses the whole batch. One PreProcess / PostProcess per
+  sheet, read back, grant cleared, never saved. Update PCB stays Stefan's.
+
+## 5. Deliberately left out
 - STEP on its own: it is in the "Fab files" container.
 - Saving, Update PCB, and anything that deletes: unchanged, kept manual.
 
@@ -89,3 +102,6 @@ changed ones, so a container that wrote nothing is an error, not a success.
 | Q7 | OutJob "Fab files" | Gerber, drill, pick-and-place, BOM, STEP appear in the dated folder; the client lists them; `jlc_pack.py` packs them |
 | Q8 | OutJob unknown container / Printer container | refused, nothing run |
 | Q9 | the loop after all of the above | ping answers; reads still work |
+| Q10 | annotate preview with one `R?` placed by hand | proposal `R<sheet>NN` one past the highest; nothing written |
+| Q11 | annotate apply without the parameter tick, then with it | refused `NO_GRANT`; then written, read back, sheet dirty, not saved, tick cleared |
+| Q12 | annotate apply after renaming the part by hand | refused `PREFLIGHT_REFUSED`, nothing written |

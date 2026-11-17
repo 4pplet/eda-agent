@@ -3677,6 +3677,338 @@ Begin
     End;
 End;
 
+{ ---- Checked annotate of '?' designators (PROPOSAL-2026-11-17, slice 2) --- }
+{ Preview lists every component of the project's schematics: sheet index,     }
+{ unique id, designator, library reference, multi-part and locked flags. The  }
+{ client proposes the new names (sheet-hundreds numbering) and apply writes    }
+{ each one by compare-and-set: same sheet, same UniqueId, current text equal   }
+{ to old and ending in '?', new not used anywhere in the project. Multi-part   }
+{ and locked designators are refused. Parameter tick; never saves.            }
+
+Function AnnotateSheets(P : IProject; Paths : TStringList; Docs : TInterfaceList;
+    Var ErrCode, ErrMsg : String) : Boolean;
+Var
+    I : Integer;
+    D : IDocument;
+    Path : String;
+    S : IServerDocument;
+    SchDoc : ISch_Document;
+Begin
+    Result := False;
+    For I := 0 To P.DM_LogicalDocumentCount - 1 Do
+    Begin
+        D := P.DM_LogicalDocuments(I);
+        If D = Nil Then Continue;
+        If UpperCase(D.DM_DocumentKind) <> 'SCH' Then Continue;
+        Path := D.DM_FullPath;
+        S := Client.GetDocumentByPath(Path);
+        If S = Nil Then
+        Begin
+            ErrCode := 'SHEET_NOT_OPEN';
+            ErrMsg := 'Open every schematic of the selected project first (not open: ' + Path + ')';
+            Exit;
+        End;
+        SchDoc := Nil;
+        Try SchDoc := SchServer.GetSchDocumentByPath(Path); Except SchDoc := Nil; End;
+        If SchDoc = Nil Then
+        Begin
+            ErrCode := 'SHEET_NOT_AVAILABLE';
+            ErrMsg := 'Schematic editor did not resolve: ' + Path;
+            Exit;
+        End;
+        Paths.Add(Path);
+        Docs.Add(SchDoc);
+    End;
+    If Paths.Count = 0 Then
+    Begin
+        ErrCode := 'NO_SHEETS';
+        ErrMsg := 'The selected project has no schematic';
+        Exit;
+    End;
+    Result := True;
+End;
+
+Function AnnotateFind(Doc : ISch_Document; Uid : String; Var Hits : Integer) : ISch_Component;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    U : String;
+Begin
+    Result := Nil;
+    Hits := 0;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Comp := Obj;
+            U := '';
+            Try U := Comp.UniqueId; Except U := ''; End;
+            If U = Uid Then
+            Begin
+                Inc(Hits);
+                Result := Comp;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+    If Hits <> 1 Then Result := Nil;
+End;
+
+Function SelectedAnnotateChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, BatchHash, ItemsStr, Rest, OpStr, F0, F1, F2, F3, ErrCode, ErrMsg, Binding : String;
+    Rows, Status, Problems, Back, Uid, Txt, Lib, Blank : String;
+    Apply, Ok, Touched, Multi, Locked, Partial : Boolean;
+    Paths, Used, ISheet, IUid, IOld, INew, IStatus, IBack, TouchedPaths : TStringList;
+    Docs : TInterfaceList;
+    I, J, K, Hits, Count, Refused, Written, Pending : Integer;
+    Doc : ISch_Document;
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    ItemsStr := ExtractJsonValue(Params, 'items');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not ParamEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Parameter edits are not granted: the operator ticks "Allow parameter edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    Partial := False;
+    Paths := TStringList.Create;
+    Used := TStringList.Create;
+    ISheet := TStringList.Create;
+    IUid := TStringList.Create;
+    IOld := TStringList.Create;
+    INew := TStringList.Create;
+    IStatus := TStringList.Create;
+    IBack := TStringList.Create;
+    TouchedPaths := TStringList.Create;
+    Docs := CreateObject(TInterfaceList);
+    SelectedBusy := True;
+    Try
+        If Not AnnotateSheets(P, Paths, Docs, ErrCode, ErrMsg) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+
+        { Every designator in the project, and (preview) the component list. }
+        Rows := '';
+        Count := 0;
+        For I := 0 To Docs.Count - 1 Do
+        Begin
+            Doc := Docs[I];
+            Iter := Doc.SchIterator_Create;
+            Try
+                Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+                Obj := Iter.FirstSchObject;
+                While Obj <> Nil Do
+                Begin
+                    Comp := Obj;
+                    Txt := '';
+                    Try Txt := Comp.Designator.Text; Except Txt := ''; End;
+                    Used.Add(UpperCase(Txt));
+                    If Not Apply Then
+                    Begin
+                        Uid := ''; Lib := ''; Multi := False; Locked := False;
+                        Try Uid := Comp.UniqueId; Except End;
+                        Try Lib := Comp.LibReference; Except End;
+                        Try Multi := Comp.IsMultiPartComponent; Except Multi := True; End;
+                        Try Locked := Comp.DesignatorLocked; Except Locked := False; End;
+                        If Rows <> '' Then Rows := Rows + ',';
+                        Rows := Rows + '{"sheet":' + IntToStr(I)
+                            + ',"unique_id":"' + EscapeJsonString(Uid)
+                            + '","designator":"' + EscapeJsonString(Txt)
+                            + '","lib_ref":"' + EscapeJsonString(Lib)
+                            + '","multi_part":' + BoolToJsonStr(Multi)
+                            + ',"locked":' + BoolToJsonStr(Locked) + '}';
+                        Inc(Count);
+                    End;
+                    Obj := Iter.NextSchObject;
+                End;
+            Finally
+                Doc.SchIterator_Destroy(Iter);
+            End;
+        End;
+
+        If Not Apply Then
+        Begin
+            Problems := '';
+            For I := 0 To Paths.Count - 1 Do
+            Begin
+                If Problems <> '' Then Problems := Problems + ',';
+                Problems := Problems + '"' + EscapeJsonString(Paths[I]) + '"';
+            End;
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"preview","batch_hash":"' + LowerCase(BatchHash)
+                + '","sheets":[' + Problems + '],"component_count":' + IntToStr(Count)
+                + ',"saved":false,"touched":false,"components":[' + Rows + ']}}');
+            Exit;
+        End;
+
+        { Apply: parse sheet|uid|old|new items. }
+        Rest := ItemsStr;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            If (ISheet.Count >= 200) Or (ParamEditCountChar(OpStr, '|') <> 3) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Expected sheet|unique_id|old|new, at most 200 items');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|');
+            F1 := ParamEditTake(OpStr, '|');
+            F2 := ParamEditTake(OpStr, '|');
+            F3 := OpStr;
+            K := StrToIntDef(F0, -1);
+            If (K < 0) Or (K >= Docs.Count) Or (F1 = '') Or (Length(F3) < 2) Or (Length(F3) > 12)
+                Or (Copy(F2, Length(F2), 1) <> '?') Or (Pos('?', F3) > 0) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Bad item: ' + F0 + '|' + F1 + '|' + F2 + '|' + F3);
+                Exit;
+            End;
+            ISheet.Add(F0); IUid.Add(F1); IOld.Add(F2); INew.Add(F3);
+            IStatus.Add(Blank); IBack.Add(Blank);
+        End;
+        If ISheet.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No items');
+            Exit;
+        End;
+
+        { Preflight every item; refuse the whole batch on the first problem. }
+        Refused := 0;
+        Problems := '';
+        For J := 0 To ISheet.Count - 1 Do
+        Begin
+            Status := '';
+            K := StrToInt(ISheet[J]);
+            If Client.GetDocumentByPath(Paths[K]).Modified Then Status := 'sheet has unsaved edits'
+            Else
+            Begin
+                Comp := AnnotateFind(Docs[K], IUid[J], Hits);
+                If Comp = Nil Then Status := 'component not found once on its sheet (' + IntToStr(Hits) + ')'
+                Else If Comp.Designator.Text <> IOld[J] Then Status := 'designator changed since preview'
+                Else If Comp.IsMultiPartComponent Then Status := 'multi-part component (annotate by hand)'
+                Else If Comp.DesignatorLocked Then Status := 'designator is locked'
+                Else If Used.IndexOf(UpperCase(INew[J])) >= 0 Then Status := INew[J] + ' is already used in the project';
+            End;
+            For I := 0 To J - 1 Do
+                If UpperCase(INew[I]) = UpperCase(INew[J]) Then Status := INew[J] + ' twice in the batch';
+            If Status <> '' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 600 Then Problems := Problems + IOld[J] + ' -> ' + INew[J] + ': ' + Status + '; ';
+            End;
+        End;
+        If Refused > 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing written. ' + Problems);
+            Exit;
+        End;
+
+        { Write per sheet, one PreProcess / PostProcess pair per touched sheet. }
+        Written := 0;
+        For K := 0 To Docs.Count - 1 Do
+        Begin
+            Pending := 0;
+            For J := 0 To ISheet.Count - 1 Do
+                If StrToInt(ISheet[J]) = K Then Inc(Pending);
+            If (Pending = 0) Or Partial Then Continue;
+            Doc := Docs[K];
+            SchServer.ProcessControl.PreProcess(Doc, '');
+            Try
+                For J := 0 To ISheet.Count - 1 Do
+                Begin
+                    If (StrToInt(ISheet[J]) <> K) Or Partial Then Continue;
+                    Comp := AnnotateFind(Doc, IUid[J], Hits);
+                    If (Comp = Nil) Or (Comp.Designator.Text <> IOld[J]) Then
+                    Begin
+                        IStatus[J] := 'not_written: changed during apply';
+                        Partial := True;
+                        Continue;
+                    End;
+                    Touched := True;
+                    If TouchedPaths.IndexOf(Paths[K]) < 0 Then TouchedPaths.Add(Paths[K]);
+                    SchBeginModify(Comp.Designator);
+                    Comp.Designator.Text := INew[J];
+                    SchEndModify(Comp.Designator);
+                    Back := Comp.Designator.Text;
+                    IBack[J] := Back;
+                    If Back = INew[J] Then
+                    Begin
+                        IStatus[J] := 'written';
+                        Inc(Written);
+                    End
+                    Else
+                    Begin
+                        IStatus[J] := 'written_readback_differs';
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                Try SchServer.ProcessControl.PostProcess(Doc, 'Edit'); Except End;
+                Try Doc.GraphicallyInvalidate; Except End;
+            End;
+        End;
+        For I := 0 To TouchedPaths.Count - 1 Do MarkDocDirtyByPath(TouchedPaths[I]);
+        For J := 0 To ISheet.Count - 1 Do
+            If IStatus[J] = '' Then IStatus[J] := 'not_written';
+
+        Rows := '';
+        For J := 0 To ISheet.Count - 1 Do
+        Begin
+            If J > 0 Then Rows := Rows + ',';
+            Rows := Rows + '{"sheet":' + ISheet[J] + ',"unique_id":"' + EscapeJsonString(IUid[J])
+                + '","old":"' + EscapeJsonString(IOld[J]) + '","new":"' + EscapeJsonString(INew[J])
+                + '","readback":"' + EscapeJsonString(IBack[J]) + '","status":"' + EscapeJsonString(IStatus[J]) + '"}';
+        End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again (written: ' + IntToStr(Written) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"apply","batch_hash":"' + LowerCase(BatchHash)
+                + '","item_count":' + IntToStr(ISheet.Count)
+                + ',"written":' + IntToStr(Written)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"saved":false,"items":[' + Rows + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            ParamEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        Paths.Free; Used.Free; ISheet.Free; IUid.Free; IOld.Free; INew.Free;
+        IStatus.Free; IBack.Free; TouchedPaths.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -3730,7 +4062,8 @@ Begin
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.setup_board_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.run_drc_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.repour_checked'))) And
-       (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) Then
+       (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) And
+       (Not (SELECTED_PARAM_EDITS And (Command = 'project.annotate_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -3779,6 +4112,11 @@ Begin
     If Command = 'project.run_outjob_checked' Then
     Begin
         Result := SelectedRunOutJobChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'project.annotate_checked' Then
+    Begin
+        Result := SelectedAnnotateChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);
