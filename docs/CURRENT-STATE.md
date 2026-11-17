@@ -88,7 +88,8 @@ Parameter edits have their own tick ("Allow parameter edits").
   upstream lessons: four-digit `\uXXXX` response escaping, the micro sign in parameter
   edits (Ohm still refused), timed-out requests withdrawn, and via / pad size and hole
   written in an order that never leaves no annular ring. Current runtime on the second
-  workstation: `selected-edits-20261117e` (U1-U6 and G1-G8 pending).
+  workstation: `selected-edits-20261117f` (scripts `.6` adds the read-only `pcb.get_texts`;
+  U1-U7 and G1-G8 pending).
 
 ### Roadmap and known limitations
 

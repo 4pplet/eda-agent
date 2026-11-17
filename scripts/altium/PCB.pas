@@ -6523,6 +6523,109 @@ Begin
 End;
 
 {..............................................................................}
+{ PCB_GetTextsForBoard - free text objects, read-only (PLT 2026-11-17)        }
+{                                                                            }
+{ For the pre-order check: the "V-CUT" text on Mechanical 1, revision text,  }
+{ silk labels. Free text only (not in a component, polygon or dimension);    }
+{ component designators / comments are counted, not listed. Hidden texts are }
+{ skipped and counted. Raw TCoord units as in get_tracks ("coord_per_mil").  }
+{ Every property read is wrapped: one odd object must not stop the loop.     }
+{ Property names as used elsewhere in this fork (Audit.pas MirrorFlag / Text, }
+{ Generic.pas IsHidden / XLocation, SelectedProject.pas Size / Width /       }
+{ Rotation / UseTTFonts). At most 1000 rows; "truncated" says when.          }
+{..............................................................................}
+Function PCB_GetTextsForBoard(Board : IPCB_Board; RequestId : String) : String;
+Var
+    Iter : IPCB_BoardIterator;
+    Txt : IPCB_Text;
+    JsonItems, TextStr, LayerStr : String;
+    Count, InComp, Hidden, Total, Rot, X, Y, Sz, Wd : Integer;
+    Mirror, TTF, IsHid, Skip : Boolean;
+Begin
+    JsonItems := '';
+    Count := 0;
+    InComp := 0;
+    Hidden := 0;
+    Total := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTextObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Txt := Iter.FirstPCBObject;
+        While Txt <> Nil Do
+        Begin
+            Skip := False;
+            Try
+                If Txt.InComponent Or Txt.InPolygon Or Txt.InDimension Then
+                Begin
+                    Inc(InComp);
+                    Skip := True;
+                End;
+            Except
+                Skip := True;
+            End;
+            If Not Skip Then
+            Begin
+                IsHid := False;
+                Try IsHid := Txt.IsHidden; Except End;
+                If IsHid Then
+                Begin
+                    Inc(Hidden);
+                    Skip := True;
+                End;
+            End;
+            If Not Skip Then
+            Begin
+                Inc(Total);
+                If Count < 1000 Then
+                Begin
+                    TextStr := '';
+                    Try TextStr := Txt.Text; Except End;
+                    LayerStr := '';
+                    Try LayerStr := GetLayerString(Txt.Layer); Except End;
+                    Mirror := False;
+                    Try Mirror := Txt.MirrorFlag; Except End;
+                    TTF := False;
+                    Try TTF := Txt.UseTTFonts; Except End;
+                    Rot := 0;
+                    Try Rot := Round(Txt.Rotation); Except End;
+                    X := 0;
+                    Y := 0;
+                    Sz := 0;
+                    Wd := 0;
+                    Try X := Txt.XLocation; Except End;
+                    Try Y := Txt.YLocation; Except End;
+                    Try Sz := Txt.Size; Except End;
+                    Try Wd := Txt.Width; Except End;
+                    If Count > 0 Then JsonItems := JsonItems + ',';
+                    JsonItems := JsonItems + '{"text":"' + EscapeJsonString(TextStr) + '",'
+                        + '"layer":"' + EscapeJsonString(LayerStr) + '",'
+                        + '"x":' + IntToStr(X) + ','
+                        + '"y":' + IntToStr(Y) + ','
+                        + '"size":' + IntToStr(Sz) + ','
+                        + '"width":' + IntToStr(Wd) + ','
+                        + '"rotation":' + IntToStr(Rot) + ','
+                        + '"mirrored":' + BoolToJsonStr(Mirror) + ','
+                        + '"truetype":' + BoolToJsonStr(TTF) + '}';
+                    Inc(Count);
+                End;
+            End;
+            Txt := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+    Result := BuildSuccessResponse(RequestId,
+        '{"texts":[' + JsonItems + '],"count":' + IntToStr(Count)
+        + ',"total":' + IntToStr(Total)
+        + ',"truncated":' + BoolToJsonStr(Total > Count)
+        + ',"component_texts":' + IntToStr(InComp)
+        + ',"hidden":' + IntToStr(Hidden)
+        + ',"units":"coord","coord_per_mil":10000}');
+End;
+
+{..............................................................................}
 { PCB_GetTracksForBoard - routed copper geometry: tracks and arcs, read-only  }
 {                                                                            }
 { Added 2026-10-02 (PLT) for layout checks the rule engine does not summarise }

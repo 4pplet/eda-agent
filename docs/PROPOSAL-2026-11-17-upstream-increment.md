@@ -1,8 +1,8 @@
 # Proposal: three upstream lessons (micro sign, timed-out requests, annular ring), 2026-11-17
 
 Status: **asked for by Stefan 2026-11-17** ("let's do it tonight", after the upstream review in PLT-hw
-`tools/eda-agent/UPSTREAM-REVIEW-2026-11-17.md`); built the same night, **native qualification U1-U6
-pending**. Scripts `2026.11.17.5`, runtime `selected-edits-20261117e` (mail workstation), which also
+`tools/eda-agent/UPSTREAM-REVIEW-2026-11-17.md`); built the same night, **native qualification U1-U7
+pending**. Scripts `2026.11.17.5`, runtime `selected-edits-20261117e`; **qualify on `selected-edits-20261117f`** (scripts `.6`, which adds the read-only `pcb.get_texts`, U7). It also
 carries everything in `.4` (graphic objects, G1-G8 still pending).
 
 ## 1. What changed
@@ -22,9 +22,10 @@ Ohm signs in parameter writes; UTF-8 request files; changes to the wheel in the 
 
 | # | Check | Pass |
 |---|---|---|
-| U1 | ping `.5` on runtime `20261117e`; then G1 (drc and one OutJob refusal) on the same runtime | version and profile match |
+| U1 | ping `.6` on runtime `20261117f`; then G1 (drc and one OutJob refusal) on the same runtime | version and profile match |
 | U2 | `bridge_read parameters`: L202 Value reads `3.3 µH` with the micro sign (and any value holding an Ohm sign, if the project has one, reads as Ω, not ©) | characters exact |
 | U3 | param preview L202 Value `3.3 µH` -> `4.7 µH` | would_write, current read back exactly, nothing blocking |
 | U4 | apply with the tick; read back; then apply `4.7 µH` -> `3.3 µH` | written exactly both ways, sheet unsaved, tick cleared each time |
 | U5 | a graphics pad smaller than the default pad hole (e.g. 0.6 mm, hole 0.3 mm, NPTH) during G4 | placed with size and hole as asked |
 | U6 | withdrawal: with a modal open in Altium (e.g. Preferences), one read times out; close the modal | error says "withdrawn"; no request file left; nothing ran late (workspace log) |
+| U7 | (scripts `.6`, runtime `20261117f`, same night) `bridge_read texts` on the 22p: the free texts listed with layer and position; designators and comments counted, not listed | rows match what Altium shows; a hidden text is not listed |

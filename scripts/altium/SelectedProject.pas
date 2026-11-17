@@ -346,6 +346,7 @@ Begin
         Or (Command = 'pcb.get_differential_pairs')
         Or (Command = 'pcb.get_diff_pair_rules')
         Or (Command = 'pcb.get_vias')
+        Or (Command = 'pcb.get_texts')
         Or (Command = 'pcb.get_tracks')
         Or (Command = 'pcb.get_polygons')
         Or (Command = 'pcb.get_unrouted_nets')
@@ -4599,6 +4600,8 @@ Begin
                 Reply := PCB_GetDifferentialPairsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_vias' Then
                 Reply := PCB_GetViasForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_texts' Then
+                Reply := PCB_GetTextsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_tracks' Then
                 { Rebuilt params: only the whitelisted filter and page fields
                   cross into the handler, never the caller's object. }
