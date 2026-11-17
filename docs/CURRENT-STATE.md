@@ -83,8 +83,12 @@ Parameter edits have their own tick ("Allow parameter edits").
   Annotate of `?` designators followed (scripts `.2`); Q1-Q12 passed the same evening
   (proposal section 7); `.3` carries the two fixes from that run. Graphic objects
   ([PROPOSAL-2026-11-17-graphics](PROPOSAL-2026-11-17-graphics-write-increment.md), scripts
-  `.4`) are built, qualification pending. Current runtime on the second workstation:
-  `selected-edits-20261117d`.
+  `.4`) are built, qualification pending. Scripts `.5`
+  ([PROPOSAL-2026-11-17-upstream](PROPOSAL-2026-11-17-upstream-increment.md)) take three
+  upstream lessons: four-digit `\uXXXX` response escaping, the micro sign in parameter
+  edits (Ohm still refused), timed-out requests withdrawn, and via / pad size and hole
+  written in an order that never leaves no annular ring. Current runtime on the second
+  workstation: `selected-edits-20261117e` (U1-U6 and G1-G8 pending).
 
 ### Roadmap and known limitations
 

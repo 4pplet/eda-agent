@@ -390,8 +390,9 @@ End;
 
 { Values cross as printable ASCII with every byte outside [A-Za-z0-9 ._-]      }
 { written %XX. A raw separator, a bad escape, a control or non-ASCII byte      }
-{ fails the batch: nothing is guessed at, and micro / Ohm signs are refused    }
-{ until a Unicode round trip is qualified.                                     }
+{ fails the batch: nothing is guessed at. One exception since 2026.11.17.5:    }
+{ %B5, the micro sign (U+00B5, below 256 so Chr makes it exactly). An Ohm sign }
+{ (above 255, where Chr is unreliable per upstream f552f69) stays refused.     }
 Function ParamEditDecode(S : String; Var Ok : Boolean) : String;
 Var
     I, Hi, Lo, Code : Integer;
@@ -418,7 +419,7 @@ Begin
                 Exit;
             End;
             Code := Hi * 16 + Lo;
-            If (Code < 32) Or (Code > 126) Then
+            If ((Code < 32) Or (Code > 126)) And (Code <> 181) Then
             Begin
                 Ok := False;
                 Exit;
@@ -2091,8 +2092,19 @@ Begin
                         Touched := True;
                         Via.x := StrToInt(VX[J]);
                         Via.y := StrToInt(VY[J]);
-                        Via.Size := StrToInt(VS[J]);
-                        Via.HoleSize := StrToInt(VH[J]);
+                        { Never pass through a via with no annular ring (upstream   }
+                        { c5c46f9): a new size at or below the default hole goes    }
+                        { after the hole. The client refuses hole >= size.          }
+                        If StrToInt(VS[J]) > Via.HoleSize Then
+                        Begin
+                            Via.Size := StrToInt(VS[J]);
+                            Via.HoleSize := StrToInt(VH[J]);
+                        End
+                        Else
+                        Begin
+                            Via.HoleSize := StrToInt(VH[J]);
+                            Via.Size := StrToInt(VS[J]);
+                        End;
                         Via.LowLayer := eTopLayer;
                         Via.HighLayer := eBottomLayer;
                         Via.Net := Net;
@@ -4259,9 +4271,19 @@ Begin
                         Begin
                             Pad.X := X1;
                             Pad.Y := Y1;
-                            Pad.TopXSize := X2;
-                            Pad.TopYSize := X2;
-                            Pad.HoleSize := Y2;
+                            { Same no-ring order rule as the copper writer's vias. }
+                            If X2 > Pad.HoleSize Then
+                            Begin
+                                Pad.TopXSize := X2;
+                                Pad.TopYSize := X2;
+                                Pad.HoleSize := Y2;
+                            End
+                            Else
+                            Begin
+                                Pad.HoleSize := Y2;
+                                Pad.TopXSize := X2;
+                                Pad.TopYSize := X2;
+                            End;
                             Pad.Layer := Lyr;
                             If IText[J] = 'rect' Then Pad.TopShape := 2 Else Pad.TopShape := 1;
                             If Y2 > 0 Then Pad.Plated := (W = 1);

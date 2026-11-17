@@ -114,7 +114,7 @@ Begin
     End;
 End;
 
-{ HexNibble / ByteToHex4 / EscapeJsonString MUST be defined before the JSON  }
+{ HexNibble / CodeUnitHex4 / EscapeJsonString MUST be defined before the JSON}
 { prop builders below, which call EscapeJsonString. DelphiScript resolves     }
 { identifiers top-down within a unit and has no Forward declarations, so a    }
 { callee defined later in the file is "Undeclared identifier" at the caller.  }
@@ -124,9 +124,13 @@ Begin
     Else Result := Chr(Ord('A') + (N - 10));
 End;
 
-Function ByteToHex4(B : Integer) : String;
+{ All four hex digits of one UTF-16 code unit (upstream f552f69). Writing    }
+{ '00' plus the low byte sent an Ohm sign (U+03A9) back as U+00A9. A        }
+{ character outside the BMP comes out as its surrogate pair.                }
+Function CodeUnitHex4(B : Integer) : String;
 Begin
-    Result := '00' + HexNibble((B Shr 4) And $F) + HexNibble(B And $F);
+    Result := HexNibble((B Shr 12) And $F) + HexNibble((B Shr 8) And $F)
+        + HexNibble((B Shr 4) And $F) + HexNibble(B And $F);
 End;
 
 Function EscapeJsonString(S : String) : String;
@@ -173,17 +177,14 @@ Begin
         Exit;
     End;
 
-    // Slow path: char-by-char with \u00XX for any non-ASCII byte. Non-ASCII
-    // input is treated as Latin-1 / CP1252 (Pascal's native single-byte
-    // encoding); the escape produces valid JSON consumable as UTF-8 by any
-    // reader. This is the single mechanism that lets us drop the Latin-1
-    // read kludge on the Python side, output is always pure ASCII.
+    // Slow path: char-by-char with \uXXXX for any non-ASCII character, all
+    // four digits of its UTF-16 code unit. Output is always pure ASCII.
     For I := 1 To Length(Tmp) Do
     Begin
         Ch := Copy(Tmp, I, 1);
         O := Ord(Ch[1]);
         If O >= 128 Then
-            Result := Result + '\u' + ByteToHex4(O)
+            Result := Result + '\u' + CodeUnitHex4(O)
         Else If O = Ord('\') Then Result := Result + '\\'
         Else If O = Ord('"') Then Result := Result + '\"'
         Else If O = 13 Then Result := Result + '\r'
@@ -191,7 +192,7 @@ Begin
         Else If O = 9 Then Result := Result + '\t'
         Else If O = 8 Then Result := Result + '\b'
         Else If O = 12 Then Result := Result + '\f'
-        Else If O < 32 Then Result := Result + '\u' + ByteToHex4(O)
+        Else If O < 32 Then Result := Result + '\u' + CodeUnitHex4(O)
         Else Result := Result + Ch;
     End;
 End;
