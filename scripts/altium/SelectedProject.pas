@@ -4011,6 +4011,381 @@ Begin
     End;
 End;
 
+{ ---- Checked graphic objects (TOOLS.md backlog 2, PROPOSAL-2026-11-17-graphics) }
+{ Free pads (plated or not), rectangular fills, text and lines on non-copper     }
+{ layers, placed on the SELECTED project's PcbDoc from a checked plan. Add-only, }
+{ board-edits tick, one batch per save, compare-and-set on the counts of free    }
+{ objects, every object read back, never saves. Items:                           }
+{   kind|layer|x1|y1|x2|y2|w|net|text   (raw coordinates, integers)              }
+{   pad : x1,y1 centre; x2 size; y2 hole (0 = SMD); w 1 plated / 0 not; text     }
+{         round|rect. Through-hole pads go on MultiLayer.                        }
+{   fill: x1,y1,x2,y2 corners; any layer; net only on copper                     }
+{   text: x1,y1 location; x2 height; y2 rotation 0/90/180/270; w stroke; text    }
+{         the string (client-checked plain ASCII); non-copper layers only        }
+{   line: x1..y2, w width; non-copper layers only (copper goes through copper)   }
+{ Enum values as literals, read from AD23's SDK: eRounded 1, eRectangular 2.     }
+
+Procedure GraphicsCount(Board : IPCB_Board; Var Pads, Fills, Texts, Lines : Integer);
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+Begin
+    Pads := 0; Fills := 0; Texts := 0; Lines := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject, eFillObject, eTextObject, eTrackObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If Not Prim.InComponent Then
+            Begin
+                If Prim.ObjectId = ePadObject Then Inc(Pads)
+                Else If Prim.ObjectId = eFillObject Then Inc(Fills)
+                Else If Prim.ObjectId = eTextObject Then Inc(Texts)
+                Else If Not PCB_IsCopperLayerName(GetLayerString(Prim.Layer)) Then Inc(Lines);
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function SelectedPlaceGraphicsChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, ItemsStr, BatchHash, OldCounts, Rest, OpStr, Problems, Binding, Blank, What, ItemsJson : String;
+    PcbPath, ErrCode, ErrMsg, LayerStr, Counts, Back, Status : String;
+    IKind, ILay, IX1, IY1, IX2, IY2, IW, INet, IText, IStatus, IBack : TStringList;
+    J, Count, WouldPlace, Refused, Placed, NPads, NFills, NTexts, NLines, Clearance, A, B : Integer;
+    X1, Y1, X2, Y2, W : Integer;
+    Apply, PcbModified, Partial, Touched, Ok, IsCopper : Boolean;
+    Board : IPCB_Board;
+    Net : IPCB_Net;
+    Pad : IPCB_Pad;
+    Fill : IPCB_Fill;
+    TextObj : IPCB_Text;
+    Track : IPCB_Track;
+    Lyr : TLayer;
+    Gap : Double;
+    F0, F1, F2, F3, F4, F5, F6, F7, F8 : String;
+    LoX, LoY, HiX, HiY : Integer;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    ItemsStr := ExtractJsonValue(Params, 'items');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    OldCounts := ExtractJsonValue(Params, 'old_counts');
+    Clearance := StrToIntDef(ExtractJsonValue(Params, 'clearance'), -1);
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Board edits are not granted: the operator ticks "Allow board edits" in the bridge window');
+        Exit;
+    End;
+    If (Not ParamEditHashValid(BatchHash)) Or (Clearance < 0) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters and clearance a raw coordinate');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    Partial := False;
+    IKind := TStringList.Create; ILay := TStringList.Create; IX1 := TStringList.Create; IY1 := TStringList.Create;
+    IX2 := TStringList.Create; IY2 := TStringList.Create; IW := TStringList.Create; INet := TStringList.Create;
+    IText := TStringList.Create; IStatus := TStringList.Create; IBack := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        Rest := ItemsStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 100) Or (ParamEditCountChar(OpStr, '|') <> 8) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': expected 9 fields, at most 100 items');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|'); F1 := ParamEditTake(OpStr, '|'); F2 := ParamEditTake(OpStr, '|');
+            F3 := ParamEditTake(OpStr, '|'); F4 := ParamEditTake(OpStr, '|'); F5 := ParamEditTake(OpStr, '|');
+            F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
+            Ok := ((F0 = 'pad') Or (F0 = 'fill') Or (F0 = 'text') Or (F0 = 'line')) And CopperLayerNameOk(F1)
+                And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4) And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
+            If Ok And (F7 <> '') Then Ok := PlaceEditNameOk(F7);
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': bad kind, layer, number or net');
+                Exit;
+            End;
+            IKind.Add(F0); ILay.Add(F1); IX1.Add(F2); IY1.Add(F3); IX2.Add(F4); IY2.Add(F5);
+            IW.Add(F6); INet.Add(F7); IText.Add(F8); IStatus.Add(Blank); IBack.Add(Blank);
+        End;
+        If IKind.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No items');
+            Exit;
+        End;
+
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+        GraphicsCount(Board, NPads, NFills, NTexts, NLines);
+        Counts := IntToStr(NPads) + ',' + IntToStr(NFills) + ',' + IntToStr(NTexts) + ',' + IntToStr(NLines);
+        If Apply And (Counts <> OldCounts) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED',
+                'Nothing placed. The board''s free objects changed since the preview (' + Counts + '); preview again');
+            Exit;
+        End;
+
+        { Classify. }
+        Problems := '';
+        Refused := 0;
+        WouldPlace := 0;
+        For J := 0 To IKind.Count - 1 Do
+        Begin
+            X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]); X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+            W := StrToInt(IW[J]);
+            If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+            If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+            Status := '';
+            Lyr := ResolveLayerId(Board, ILay[J]);
+            LayerStr := '';
+            If Lyr <> eNoLayer Then LayerStr := GetLayerString(Lyr);
+            IsCopper := (Lyr = eMultiLayer) Or ((LayerStr <> '') And PCB_IsCopperLayerName(LayerStr));
+            Net := Nil;
+            If INet[J] <> '' Then Net := FindNetByName(Board, INet[J]);
+            If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+            Else If (INet[J] <> '') And (Net = Nil) Then Status := 'refused: net not on the board'
+            Else If (INet[J] <> '') And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
+            Else If IKind[J] = 'pad' Then
+            Begin
+                If (X2 <= 0) Or (Y2 < 0) Or (Y2 >= X2) Or ((W <> 0) And (W <> 1)) Or ((IText[J] <> 'round') And (IText[J] <> 'rect')) Then
+                    Status := 'refused: pad needs size > hole >= 0, plated 0/1, shape round|rect'
+                Else If (Y2 > 0) And (Lyr <> eMultiLayer) Then Status := 'refused: a drilled pad goes on MultiLayer'
+                Else If (Y2 = 0) And (Lyr = eMultiLayer) Then Status := 'refused: an SMD pad goes on a copper layer'
+                Else If Not IsCopper Then Status := 'refused: a pad goes on MultiLayer or a copper layer'
+            End
+            Else If IKind[J] = 'fill' Then
+            Begin
+                If (X1 = X2) Or (Y1 = Y2) Then Status := 'refused: empty rectangle'
+                Else If Lyr = eMultiLayer Then Status := 'refused: a fill goes on one layer'
+            End
+            Else If IKind[J] = 'text' Then
+            Begin
+                If IsCopper Then Status := 'refused: text goes on silk, mechanical or other non-copper layers'
+                Else If (X2 <= 0) Or (W <= 0) Or ((Y2 <> 0) And (Y2 <> 90) And (Y2 <> 180) And (Y2 <> 270))
+                    Or (Length(IText[J]) < 1) Or (Length(IText[J]) > 40) Then
+                    Status := 'refused: text needs height, stroke, rotation 0/90/180/270 and 1-40 characters'
+            End
+            Else If IKind[J] = 'line' Then
+            Begin
+                If IsCopper Then Status := 'refused: copper lines go through the copper writer'
+                Else If (W <= 0) Or ((X1 = X2) And (Y1 = Y2)) Then Status := 'refused: line needs width and two distinct ends'
+            End;
+            { Other-net copper within the clearance, for copper pads and fills. }
+            If (Status = '') And IsCopper And ((IKind[J] = 'pad') Or (IKind[J] = 'fill')) Then
+            Begin
+                If IKind[J] = 'pad' Then
+                Begin
+                    If Lyr = eMultiLayer Then
+                        Gap := CopperNearest(Board, INet[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, What)
+                    Else
+                        Gap := CopperNearest(Board, INet[J], Lyr, X1, Y1, X1, Y1, X2 / 2, Clearance, What);
+                End
+                Else If (HiX - LoX) >= (HiY - LoY) Then
+                    Gap := CopperNearest(Board, INet[J], Lyr, LoX + (HiY - LoY) Div 2, (LoY + HiY) Div 2,
+                        HiX - (HiY - LoY) Div 2, (LoY + HiY) Div 2, (HiY - LoY) / 2, Clearance, What)
+                Else
+                    Gap := CopperNearest(Board, INet[J], Lyr, (LoX + HiX) Div 2, LoY + (HiX - LoX) Div 2,
+                        (LoX + HiX) Div 2, HiY - (HiX - LoX) Div 2, (HiX - LoX) / 2, Clearance, What);
+                If Gap < Clearance Then
+                    Status := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(Clearance) + ')';
+            End;
+            If Status = '' Then Status := 'would_place';
+            IStatus[J] := Status;
+            If Copy(Status, 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 800 Then Problems := Problems + IKind[J] + ' ' + IntToStr(J + 1) + ': ' + Copy(Status, 10, 200) + '; ';
+            End
+            Else Inc(WouldPlace);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing placed. ' + Problems);
+            Exit;
+        End;
+
+        Placed := 0;
+        If Apply And (WouldPlace > 0) Then
+        Begin
+            PCBServer.PreProcess;
+            Try
+                For J := 0 To IKind.Count - 1 Do
+                Begin
+                    If Partial Or (IStatus[J] <> 'would_place') Then Continue;
+                    X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]); X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+                    W := StrToInt(IW[J]);
+                    If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+                    If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+                    Lyr := ResolveLayerId(Board, ILay[J]);
+                    Net := Nil;
+                    If INet[J] <> '' Then Net := FindNetByName(Board, INet[J]);
+                    Touched := True;
+                    Back := '';
+                    Ok := False;
+                    If IKind[J] = 'pad' Then
+                    Begin
+                        Pad := PCBServer.PCBObjectFactory(ePadObject, eNoDimension, eCreate_Default);
+                        If Pad <> Nil Then
+                        Begin
+                            Pad.X := X1;
+                            Pad.Y := Y1;
+                            Pad.TopXSize := X2;
+                            Pad.TopYSize := X2;
+                            Pad.HoleSize := Y2;
+                            Pad.Layer := Lyr;
+                            If IText[J] = 'rect' Then Pad.TopShape := 2 Else Pad.TopShape := 1;
+                            If Y2 > 0 Then Pad.Plated := (W = 1);
+                            If Net <> Nil Then Pad.Net := Net;
+                            Board.AddPCBObject(Pad);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+                            Back := IntToStr(Pad.X) + ',' + IntToStr(Pad.Y) + ',' + IntToStr(Pad.TopXSize) + ',' + IntToStr(Pad.HoleSize)
+                                + ',' + BoolToJsonStr(Pad.Plated);
+                            Ok := (Pad.X = X1) And (Pad.Y = Y1) And (Pad.TopXSize = X2) And (Pad.HoleSize = Y2)
+                                And ((Y2 = 0) Or (Pad.Plated = (W = 1)));
+                        End;
+                    End
+                    Else If IKind[J] = 'fill' Then
+                    Begin
+                        Fill := PCBServer.PCBObjectFactory(eFillObject, eNoDimension, eCreate_Default);
+                        If Fill <> Nil Then
+                        Begin
+                            Fill.X1Location := LoX;
+                            Fill.Y1Location := LoY;
+                            Fill.X2Location := HiX;
+                            Fill.Y2Location := HiY;
+                            Fill.Rotation := 0;
+                            Fill.Layer := Lyr;
+                            If Net <> Nil Then Fill.Net := Net;
+                            Board.AddPCBObject(Fill);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Fill.I_ObjectAddress);
+                            Back := IntToStr(Fill.X1Location) + ',' + IntToStr(Fill.Y1Location) + ',' + IntToStr(Fill.X2Location) + ',' + IntToStr(Fill.Y2Location);
+                            Ok := (Fill.X1Location = LoX) And (Fill.Y1Location = LoY) And (Fill.X2Location = HiX) And (Fill.Y2Location = HiY);
+                        End;
+                    End
+                    Else If IKind[J] = 'text' Then
+                    Begin
+                        TextObj := PCBServer.PCBObjectFactory(eTextObject, eNoDimension, eCreate_Default);
+                        If TextObj <> Nil Then
+                        Begin
+                            TextObj.XLocation := X1;
+                            TextObj.YLocation := Y1;
+                            TextObj.Layer := Lyr;
+                            TextObj.UseTTFonts := False;
+                            TextObj.Text := IText[J];
+                            TextObj.Size := X2;
+                            TextObj.Width := W;
+                            TextObj.Rotation := Y2;
+                            Board.AddPCBObject(TextObj);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, TextObj.I_ObjectAddress);
+                            Back := TextObj.Text + ',' + IntToStr(TextObj.XLocation) + ',' + IntToStr(TextObj.YLocation) + ',' + IntToStr(TextObj.Size);
+                            Ok := (TextObj.Text = IText[J]) And (TextObj.XLocation = X1) And (TextObj.YLocation = Y1) And (TextObj.Size = X2);
+                        End;
+                    End
+                    Else
+                    Begin
+                        Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                        If Track <> Nil Then
+                        Begin
+                            Track.x1 := X1;
+                            Track.y1 := Y1;
+                            Track.x2 := X2;
+                            Track.y2 := Y2;
+                            Track.Width := W;
+                            Track.Layer := Lyr;
+                            Board.AddPCBObject(Track);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                            Back := IntToStr(Track.x1) + ',' + IntToStr(Track.y1) + ',' + IntToStr(Track.x2) + ',' + IntToStr(Track.y2) + ',' + IntToStr(Track.Width);
+                            Ok := (Track.Width = W) And ((((Track.x1 = X1) And (Track.y1 = Y1) And (Track.x2 = X2) And (Track.y2 = Y2)))
+                                Or ((Track.x1 = X2) And (Track.y1 = Y2) And (Track.x2 = X1) And (Track.y2 = Y1)));
+                        End;
+                    End;
+                    IBack[J] := Back;
+                    If Back = '' Then
+                    Begin
+                        IStatus[J] := 'not_placed: could not create the object';
+                        Partial := True;
+                    End
+                    Else If Ok Then
+                    Begin
+                        IStatus[J] := 'placed';
+                        Inc(Placed);
+                    End
+                    Else
+                    Begin
+                        IStatus[J] := 'placed_readback_differs';
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                PCBServer.PostProcess;
+                If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            For J := 0 To IKind.Count - 1 Do
+                If IStatus[J] = 'would_place' Then IStatus[J] := 'not_placed';
+        End;
+
+        ItemsJson := '';
+        For J := 0 To IKind.Count - 1 Do
+        Begin
+            If J > 0 Then ItemsJson := ItemsJson + ',';
+            ItemsJson := ItemsJson + '{"kind":"' + IKind[J] + '","layer":"' + EscapeJsonString(ILay[J])
+                + '","status":"' + EscapeJsonString(IStatus[J]) + '","readback":"' + EscapeJsonString(IBack[J]) + '"}';
+        End;
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again (placed: ' + IntToStr(Placed) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash) + '","counts":"' + Counts
+                + '","item_count":' + IntToStr(IKind.Count) + ',"would_place":' + IntToStr(WouldPlace)
+                + ',"refused":' + IntToStr(Refused) + ',"placed":' + IntToStr(Placed)
+                + ',"partial":' + BoolToJsonStr(Partial) + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched) + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"items":[' + ItemsJson + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        IKind.Free; ILay.Free; IX1.Free; IY1.Free; IX2.Free; IY2.Free; IW.Free; INet.Free;
+        IText.Free; IStatus.Free; IBack.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -4065,7 +4440,8 @@ Begin
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.run_drc_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.repour_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) And
-       (Not (SELECTED_PARAM_EDITS And (Command = 'project.annotate_checked'))) Then
+       (Not (SELECTED_PARAM_EDITS And (Command = 'project.annotate_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_graphics_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -4119,6 +4495,11 @@ Begin
     If Command = 'project.annotate_checked' Then
     Begin
         Result := SelectedAnnotateChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.place_graphics_checked' Then
+    Begin
+        Result := SelectedPlaceGraphicsChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);

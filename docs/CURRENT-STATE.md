@@ -80,9 +80,11 @@ Parameter edits have their own tick ("Allow parameter edits").
   [PROPOSAL-2026-11-17](PROPOSAL-2026-11-17-native-actions-increment.md): batch DRC with
   no dialog (`pcb.run_drc_checked`), repour in pour order (`pcb.repour_checked`, board
   tick), one OutJob container of the selected project (`project.run_outjob_checked`).
-  Scripts `2026.11.17.1`; runtime `selected-edits-20261117` on the second workstation
-  only. Annotate of `?` designators is the next slice. Until qualified, the 2026-10-20
-  runtimes stay the ones in use.
+  Annotate of `?` designators followed (scripts `.2`); Q1-Q12 passed the same evening
+  (proposal section 7); `.3` carries the two fixes from that run. Graphic objects
+  ([PROPOSAL-2026-11-17-graphics](PROPOSAL-2026-11-17-graphics-write-increment.md), scripts
+  `.4`) are built, qualification pending. Current runtime on the second workstation:
+  `selected-edits-20261117d`.
 
 ### Roadmap and known limitations
 
