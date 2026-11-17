@@ -1,5 +1,28 @@
 # Parity roadmap: importing the upstream surface through the scoped model
 
+> **Superseded 2026-11-17.** The roadmap is now PLT-hw `tools/eda-agent/TOOLS.md`,
+> section "Bridge backlog (2026-10-16)", with its "Limitations met in use" log.
+> The body below is kept as the 2026-09-10 plan. Where its phases stand:
+>
+> - Phase 0: still partly open (shutdown and lifecycle items in [TODO.md](../TODO.md)).
+> - Phase 1: PCB reads and six layout audits done (35 read commands in all);
+>   library reads not done.
+> - Phase 2 (DRC, OutJob): not done. DRC, repour, OutJob and annotation are the
+>   "native actions" increment, built 2026-11-17 (qualification pending).
+> - Phase 3: done only in the form the writers use (per-batch tick in Altium,
+>   preview hash, compare-and-set, no save). No separate grant or receipt layer
+>   is in the PLT-hw clients (`bridge_write.py`, `shared_server.py`).
+> - Phase 4 (metadata writes): done. Parameter edits live since 2026-10-05.
+> - Phase 5: value changes go through parameter edits; footprint, annotation and
+>   variant writes not done.
+> - Phase 6 (PCB writes): partly done. Placement moves (2026-10-07), copper adds of
+>   vias and tracks (2026-10-09), board setup of stackup, classes, pairs, rooms and
+>   rules (2026-10-09). Track placement did come in, from checked plans only.
+>   Layer-stack edits were on the never-import list below. Stefan approved them
+>   on 2026-10-09 in the setup-write proposal, which does not refer back to this list.
+>
+> Current state: [CURRENT-STATE.md](CURRENT-STATE.md).
+
 Written 2026-09-10 (Stefan + continuation agent), after the nine-tool PCB-read
 import demonstrated the pipeline: pick a need, review each upstream function
 for purity, replace focused-board targeting with `ResolveSelectedBoard` /

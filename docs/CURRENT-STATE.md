@@ -1,5 +1,111 @@
 # Current integration state / agent handoff
 
+Updated 2026-11-17. This page says what is running today and where the roadmap lives.
+Everything under "History" further down is dated evidence from 2026-09 and 2026-10.
+It is kept, but it is not the current state.
+
+To use the bridge, read PLT-hw `tools/eda-agent/BRIDGE.md` first. It holds the rules,
+the commands, the blind spots and the write workflow. A test keeps its runtime line
+in step with `ACTIVE-RUNTIME.txt`.
+
+## What is running (2026-11-17)
+
+### Source
+
+- Fork: `4pplet/eda-agent`. Before 2026-11-17 the last commit was `ad6e045`, 2026-10-09
+  (setup-write qualification log); the native actions increment followed on 2026-11-17.
+- Scripts version `2026.11.17.1` since 2026-11-17 (`2026.10.09.10` before, which the
+  runtimes in the table below still run). The PLT-hw clients pin the same version
+  (`SCRIPT_VERSION` in PLT-hw `tools/eda-agent/project_server.py`).
+- Altium AD23 (23.3.1 as last recorded) on both workstations.
+- The Python clients, runtime generator and runbooks still live in PLT-hw
+  `tools/eda-agent`, not in this package. Both checkouts are needed.
+
+### Runtimes
+
+There are two kinds of runtime. Both are built from this fork by PLT-hw
+`create_shared_runtime.py`, never copied between machines.
+
+| Kind | What it allows | Main workstation (user `stefan-local`) | Second workstation (user `mail`, set up 2026-10-20) |
+|---|---|---|---|
+| Read-only | the reads below, nothing else | `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-readonly-tracks-20261002` (scripts `2026.10.02.1`), named in PLT-hw `ACTIVE-RUNTIME.txt` | `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-readonly-20261020` (scripts `2026.10.09.10`), selected by the user variable `EDA_AGENT_SHARED_ROOT` |
+| Edits | the same reads plus the four writers below, each behind its tick in Altium | `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-edits-20261009j` (scripts `2026.10.09.10`), in use for every write since 2026-10-09 | `%LOCALAPPDATA%\PLT\eda-agent\shared\selected-edits-20261020` (scripts `2026.10.09.10`), passed with `--shared-root` |
+
+- Both 2026-10-20 runtimes have `provenance.json` with `native_qualification: pending`.
+  The main workstation's edit runtime says the same (BRIDGE.md section 2).
+- The pointer file names a main-workstation path. On the second workstation it names a
+  runtime that does not exist, so `EDA_AGENT_SHARED_ROOT` overrides it there.
+- The main workstation's pointer still names a `2026.10.02.1` runtime while the clients
+  pin `2026.10.09.10`. Reads tolerate the version mismatch; writes do not. In practice
+  that machine reads through the edit runtime as well.
+- Committed docs write runtime paths with `%LOCALAPPDATA%`. An absolute user path is
+  refused by `tests/test_no_client_design_data.py`.
+
+### Read surface: 35 commands
+
+Counted from the PLT-hw clients on 2026-11-17 (`shared_server.py` `COMMANDS`).
+
+| Group | Count | Source |
+|---|---|---|
+| Session and project: ping, project list and selection, documents, compile freshness, BOM, nets, component info (single and batch), compiler / ERC messages | 10 | `shared_server.py` |
+| PCB reads: placements, outline, stackup, pads, vias, tracks, polygons, rules, diff pairs and their rules, net / object classes, rooms, trace lengths, unrouted nets, clearance violations, layer counts, board statistics, selected objects | 19 | `project_server.py` `PCB_READ_COMMANDS` |
+| Layout audits: parts outside the outline, mirrored text, mixed designator rotation, pads near the edge, signal vias without a return via, via antennas | 6 | `project_server.py` `PCB_AUDIT_COMMANDS` |
+
+PLT-hw `bridge.cmd` / `bridge_read.py` wraps these as named commands (`status`, `bom`,
+`nets`, `placements`, `tracks`, `rules`, `drcreport` and so on); the table is in BRIDGE.md
+section 3.
+
+### Writers: four, all in the edit runtime
+
+Every writer follows the same pattern: preview, a hash of the previewed state, the
+operator's tick in the Altium bridge window (one tick, one batch), apply with
+compare-and-set against the preview. Apply never saves; the operator reviews and saves.
+`OUTCOME_UNKNOWN` means preview again, never retry. The design files are committed
+before each write session, so git is the rollback.
+
+| Writer | Command | Proposal | Status on 2026-11-17 |
+|---|---|---|---|
+| Parameter edits | `project.set_component_params_checked` | [PROPOSAL-2026-09-28](PROPOSAL-2026-09-28-metadata-write-increment.md) | Live on working projects since 2026-10-05 (Stefan's decision, git as rollback). Any existing parameter by exact name; never creates one. Several qualification rows (T3, T5, T8 undo, T9, T12, T13, T16, T17) not exercised. |
+| Placement edits | `pcb.move_components_checked` | [PROPOSAL-2026-10-07](PROPOSAL-2026-10-07-placement-write-increment.md) | Built and first used 2026-10-07 (16 HDMI parts moved). T1 and T14 passed, the rest open. Top side only. |
+| Copper edits (free vias and track segments) | `pcb.place_copper_checked` | [PROPOSAL-2026-10-09-copper](PROPOSAL-2026-10-09-copper-write-increment.md) | Built and first used 2026-10-09 (U501 fanout). C1, C2, C4 and C6 passed, the rest open. Adds only; no delete or move. |
+| Board-setup edits (stackup, classes, diff pairs, rooms, rules) | `pcb.setup_board_checked` | [PROPOSAL-2026-10-09-setup](PROPOSAL-2026-10-09-setup-write-increment.md) | Built and used 2026-10-09 (HDMI rule set and stackup), again on HS A2 2026-10-16. Creates or updates by name; never deletes. Qualification S1-S8 still pending. |
+
+Placement, copper and setup edits share one gate and one tick. `StatusForm.pas` labels it
+"Allow board edits" at run time; the form file still says "Allow placement edits".
+Parameter edits have their own tick ("Allow parameter edits").
+
+### In progress
+
+- **Native actions increment: built 2026-11-17, native qualification Q1-Q9 pending.**
+  [PROPOSAL-2026-11-17](PROPOSAL-2026-11-17-native-actions-increment.md): batch DRC with
+  no dialog (`pcb.run_drc_checked`), repour in pour order (`pcb.repour_checked`, board
+  tick), one OutJob container of the selected project (`project.run_outjob_checked`).
+  Scripts `2026.11.17.1`; runtime `selected-edits-20261117` on the second workstation
+  only. Annotate of `?` designators is the next slice. Until qualified, the 2026-10-20
+  runtimes stay the ones in use.
+
+### Roadmap and known limitations
+
+- **The roadmap is PLT-hw `tools/eda-agent/TOOLS.md`, section "Bridge backlog
+  (2026-10-16)".** It ranks six increments (native actions, graphic objects,
+  extensions to the existing writers, track modify and delete, schematic part add,
+  reads). [PARITY-ROADMAP.md](PARITY-ROADMAP.md) and the numbered list under
+  History below are superseded by it.
+- **Known limitations:** the same TOOLS.md, "Limitations met in use". One dated
+  row per limitation, with the workaround and the backlog row that removes it.
+  Blind spots of the reads are in BRIDGE.md section 4.
+- [TODO.md](../TODO.md) holds the older fork backlog (shutdown, Ctrl+Z, lifecycle
+  matrix). Its P0 items are still open; the operating rule stands: stop the bridge
+  before quitting Altium.
+
+## History (kept as evidence, not current)
+
+Below is the page as it stood before the 2026-11-17 rewrite, unchanged except that
+its headings moved one level down. Versions, runtimes, tool counts and the
+"Remaining work" order in it are out of date; the section above is current.
+
+### Title block and "What is running" (header dated 2026-09-09, last edited 2026-10-03)
+
 Updated 2026-09-09. This is the current-state entry point; dated session logs are
 historical evidence, not pending-work truth. See [TODO](../TODO.md) and the
 [read/write delivery gates](PROJECT-SELECTION-AND-WRITES.md#delivery-plan-and-release-gates-2026-09-09).
@@ -10,7 +116,7 @@ Both were pushed to `origin/main`; their remote hashes and clean worktrees were
 verified before this documentation-only receipt. These are matching source/helper
 baselines; no installed package/runtime redeployment accompanied publication.
 
-## What is running
+### What is running
 
 - Fork: `4pplet/eda-agent`, based on `1b60105cbe0c4bd557007b87bc04dda2fd4ef9a1`.
   This publication checkpoint contains the local integration changes; use its
@@ -70,7 +176,7 @@ matching restricted clients. Running arbitrary source scripts/upstream tools is
 **not** equivalent to our read-only runtime. No shared persistent client config
 has been enabled; checks use a single short-lived STDIO diagnostic client.
 
-## Latest observed evidence
+### Latest observed evidence
 
 - Operator confirmed the short project close/reopen and Detach/quit/restart
   checks completed on 2026-09-09. This is operator-reported evidence; exact cycle
@@ -203,7 +309,7 @@ has been enabled; checks use a single short-lived STDIO diagnostic client.
   fix candidates are recorded in the TODO P0 item. No code change; no new
   native evidence yet.
 
-## Continuation ownership (2026-09-09)
+### Continuation ownership (2026-09-09)
 
 The agent that built this integration has stopped (out of credits) and will not
 continue. The plan and evidence here remain the handoff. Stefan's decision:
@@ -266,7 +372,7 @@ under the operating contract in the shared runbook meanwhile.
   changed files: identical 15 pre-existing failures on clean tree, +7 new
   passing regressions; full-suite baseline comparison recorded separately.
 
-## Remaining work, in order
+### Remaining work, in order
 
 The long-horizon sequencing - importing the remaining upstream surface
 through the scoped model, phase by phase up the risk ladder with a
@@ -293,7 +399,7 @@ failure recovery and separate-save safeguards must pass before enabling writes.
 6. Values and footprint assignments next; annotation/variants separately. PCB
    ECO application, library/geometry and connectivity edits are separate scopes.
 
-## Non-negotiable operating limits
+### Non-negotiable operating limits
 
 Default to scoped reads. Selection is not CAD-write authority. Keep one Altium
 instance/client, exact absolute project and fresh token; never follow focused tabs.

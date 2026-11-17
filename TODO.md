@@ -1,5 +1,11 @@
 # Fork integration TODO
 
+> **2026-11-17:** the status paragraph below (dated 2026-09-09) is out of date. Scripts are
+> now `2026.10.09.10` with 35 reads and four checked writers; see
+> [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md). New work is ranked in PLT-hw
+> `tools/eda-agent/TOOLS.md`, "Bridge backlog (2026-10-16)". The open items in this file
+> (shutdown, Ctrl+Z, lifecycle matrix) are not in that backlog and stay tracked here.
+
 Updated 2026-09-09. Base `1b60105cbe0c4bd557007b87bc04dda2fd4ef9a1`,
 package 0.5.0. Named profiles remain `2026.09.08.1`; shared source/runtime is
 `2026.09.08.2` plus recorded UI patches. The `.1` shutdown observations below
