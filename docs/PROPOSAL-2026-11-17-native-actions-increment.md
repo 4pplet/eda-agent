@@ -89,6 +89,38 @@ native and checked instead. `project.annotate_checked`, parameter-edit runtime f
 - STEP on its own: it is in the "Fab files" container.
 - Saving, Update PCB, and anything that deletes: unchanged, kept manual.
 
+## 7. Qualification run, 2026-11-17 evening (runtime `selected-edits-20261117b`, scripts `.2`)
+
+On the real 22p project (Stefan: git is the rollback; nothing saved except the test `R?` sheet,
+restored from git afterwards). **Q1-Q12 pass on the native side.**
+
+| # | Result |
+|---|---|
+| Q1 | ping `2026.11.17.2`, 22p selected, both ticks off, 0 dirty |
+| Q2 | no dialog, loop alive, 16 s; report **written as `selected-drc.txt`** although `.DRC` was asked (Altium uses `.txt` for the text format) and `RunBatchDesignRuleCheck` returned **False** although it ran. Fixed: client finds the fresh `.txt` (PLT-hw), native asks `.txt` (scripts `.3`) |
+| Q3 | second run replaced the report; report total 198 = board count; the report lists the **17 rules the run tested** with counts (replaces `drcreport` for this format); PcbDoc not marked modified |
+| Q4 | repour preview: 5 poured polygons in pour order; apply without the tick refused |
+| Q5 | with the tick: 5/5 rebuilt, 5.5 s, no prompt, unsaved, tick cleared |
+| Q6 | OutJob with the PcbDoc dirty: native `DIRTY_PROJECT`, nothing run |
+| Q7 | "Fab files": 20 files (Gerber, NC drill, pick-and-place, BOM, STEP, status) in 2 min 30 s (STEP dominates; the loop does not answer pings meanwhile); jlc_pack packs them (171 placed, 70 part numbers) |
+| Q8 | unknown and Printer containers on a dirty project: `DIRTY_PROJECT` first (checked before the container); the container refusals themselves are unit-tested only |
+| Q9 | loop alive, reads fine after all of the above |
+| Q10 | annotate preview: 194 components, 4 sheets; `R?` on sheet 2 -> `R232` (R231 highest) |
+| Q11 | apply refused without the parameter tick; with it R232 written and read back, sheet unsaved, tick cleared |
+| Q12 | stale item (old `R?`, part already R232) sent straight to the tool: native `PREFLIGHT_REFUSED ... designator changed since preview`, nothing written |
+
+Client bug found: `SharedReader.send` rebuilt native errors for triage and dropped `.code`
+for every command but the parameter and placement edits, so native refusals (Q6, Q12, and the
+copper / setup writers' too) read as OUTCOME_UNKNOWN. Fixed in PLT-hw (`CODE_CLASSIFIED_COMMANDS`,
+with a test using the bridge's one-argument error). Both fixes are in runtime
+`selected-edits-20261117c` (scripts `.3`), deployed with Altium closed; a short re-check of Q2 and
+Q6 on it is the first thing at the next session.
+
+Design finding (not a tool bug): the OutJob's BOM output reads the **PcbDoc**, whose parameters
+follow the schematic only after Update PCB; the 22p fab BOM still named L201 C7432409 (schematic:
+C42391813, N1). PLT-hw `bom_vs_schematic.py` now checks the packed BOM against the live
+schematic in `order_check.py`.
+
 ## 6. Qualification (on a disposable copy, before use on a working project)
 
 | # | Check | Pass |

@@ -3291,7 +3291,9 @@ Begin
         End;
         { The report goes to the runtime workspace, never the project folder; }
         { the old one is deleted first, so a report afterwards is this run's. }
-        ReportPath := WorkspaceDir + 'selected-drc.DRC';
+        { Altium writes the text format as <name>.txt whatever extension it is   }
+        { given (qualification 2026-11-17: .DRC asked, .txt written), so ask .txt. }
+        ReportPath := WorkspaceDir + 'selected-drc.txt';
         Try If FileExists(ReportPath) Then DeleteFile(ReportPath); Except End;
         BatchOk := False;
         Try
