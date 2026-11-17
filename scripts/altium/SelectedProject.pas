@@ -3244,6 +3244,439 @@ Begin
     End;
 End;
 
+{ ---- Native actions (PROPOSAL-2026-11-17-native-actions-increment) ------- }
+{ Batch DRC, repour and one OutJob container on the SELECTED project only.    }
+{ Reachable only in a runtime with SELECTED_PLACE_EDITS. None of them saves.  }
+{ Enum values are passed as literals read from AD23's SDK by reflection       }
+{ (TDRCReportFileFormat eDRC_Text = 1, TPolygonRepourMode eAlwaysRepour = 2): }
+{ an unknown identifier halts the script loop and cannot be caught.           }
+
+Function ActionsPolyChildren(Poly : IPCB_Polygon) : Integer;
+Var
+    GIter : IPCB_GroupIterator;
+    Child : IPCB_Primitive;
+Begin
+    Result := 0;
+    Try
+        GIter := Poly.GroupIterator_Create;
+        Child := GIter.FirstPCBObject;
+        While Child <> Nil Do
+        Begin
+            Inc(Result);
+            Child := GIter.NextPCBObject;
+        End;
+        Poly.GroupIterator_Destroy(GIter);
+    Except
+        Result := -1;
+    End;
+End;
+
+Function SelectedRunDrcChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Board : IPCB_Board;
+    PcbPath, ErrCode, ErrMsg, ReportPath, Items, Binding : String;
+    PcbModified, ModifiedAfter, BatchOk, Present : Boolean;
+    Iterator : IPCB_BoardIterator;
+    Violation : IPCB_Violation;
+    Count, Listed : Integer;
+Begin
+    Binding := SelectionJSON(0);
+    SelectedBusy := True;
+    Try
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        { The report goes to the runtime workspace, never the project folder; }
+        { the old one is deleted first, so a report afterwards is this run's. }
+        ReportPath := WorkspaceDir + 'selected-drc.DRC';
+        Try If FileExists(ReportPath) Then DeleteFile(ReportPath); Except End;
+        BatchOk := False;
+        Try
+            BatchOk := Board.RunBatchDesignRuleCheck(ReportPath, 1, False, False);
+        Except
+            BatchOk := False;
+        End;
+        Present := False;
+        Try Present := FileExists(ReportPath); Except Present := False; End;
+
+        Count := 0;
+        Items := '';
+        Iterator := Board.BoardIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eViolationObject));
+        Iterator.AddFilter_LayerSet(AllLayers);
+        Iterator.AddFilter_Method(eProcessAll);
+        Violation := Iterator.FirstPCBObject;
+        While Violation <> Nil Do
+        Begin
+            Inc(Count);
+            If Count <= 500 Then
+            Begin
+                If Items <> '' Then Items := Items + ',';
+                Items := Items + BuildViolationJson(Violation);
+            End;
+            Violation := Iterator.NextPCBObject;
+        End;
+        Board.BoardIterator_Destroy(Iterator);
+        Listed := Count;
+        If Listed > 500 Then Listed := 500;
+
+        Try ModifiedAfter := Client.GetDocumentByPath(PcbPath).Modified; Except ModifiedAfter := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Project changed during the DRC; discard result')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","report_path":"' + EscapeJsonString(ReportPath)
+                + '","report_present":' + BoolToJsonStr(Present)
+                + ',"batch_returned":' + BoolToJsonStr(BatchOk)
+                + ',"violation_count":' + IntToStr(Count)
+                + ',"violations_listed":' + IntToStr(Listed)
+                + ',"pcb_modified_before":' + BoolToJsonStr(PcbModified)
+                + ',"pcb_modified_after":' + BoolToJsonStr(ModifiedAfter)
+                + ',"saved":false,"violations":[' + Items + ']}}');
+    Finally
+        SelectedBusy := False;
+    End;
+End;
+
+Function SelectedRepourChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, BatchHash, PcbPath, ErrCode, ErrMsg, Items, NetName, Binding : String;
+    Apply, PcbModified, Ok, Touched : Boolean;
+    Board : IPCB_Board;
+    Iter : IPCB_BoardIterator;
+    Poly, Temp : IPCB_Polygon;
+    Polys : TInterfaceList;
+    I, J, Rebuilt, Shelved, Failed, Before, After, OldMode : Integer;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Board edits are not granted: the operator ticks "Allow board edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Touched := False;
+    SelectedBusy := True;
+    Try
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+
+        { Collected first: a rebuild adds and removes children under a live }
+        { iterator. Never freed (TInterfaceList.Free on design objects      }
+        { crashes Altium); the script host reclaims it.                     }
+        Polys := CreateObject(TInterfaceList);
+        Iter := Board.BoardIterator_Create;
+        Iter.AddFilter_ObjectSet(MkSet(ePolyObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Poly := Iter.FirstPCBObject;
+        While Poly <> Nil Do
+        Begin
+            Polys.Add(Poly);
+            Poly := Iter.NextPCBObject;
+        End;
+        Board.BoardIterator_Destroy(Iter);
+        For I := 0 To Polys.Count - 1 Do
+            For J := 0 To Polys.Count - 2 - I Do
+                If Polys[J].PourIndex > Polys[J + 1].PourIndex Then
+                Begin
+                    Temp := Polys[J];
+                    Polys[J] := Polys[J + 1];
+                    Polys[J + 1] := Temp;
+                End;
+
+        Rebuilt := 0; Shelved := 0; Failed := 0;
+        Items := '';
+        OldMode := PCBServer.SystemOptions.PolygonRepour;
+        If Apply Then PCBServer.SystemOptions.PolygonRepour := 2;
+        Try
+            For I := 0 To Polys.Count - 1 Do
+            Begin
+                Poly := Polys[I];
+                NetName := '';
+                Try If Poly.Net <> Nil Then NetName := Poly.Net.Name; Except End;
+                Before := ActionsPolyChildren(Poly);
+                If Items <> '' Then Items := Items + ',';
+                Items := Items + '{"name":"' + EscapeJsonString(Poly.Name)
+                    + '","net":"' + EscapeJsonString(NetName)
+                    + '","layer":"' + EscapeJsonString(GetLayerString(Poly.Layer))
+                    + '","pour_index":' + IntToStr(Poly.PourIndex)
+                    + ',"poured":' + BoolToJsonStr(Poly.Poured)
+                    + ',"children_before":' + IntToStr(Before);
+                If Not Poly.Poured Then
+                Begin
+                    Inc(Shelved);
+                    Items := Items + ',"status":"shelved"}';
+                End
+                Else If Not Apply Then
+                    Items := Items + ',"status":"would_rebuild"}'
+                Else
+                Begin
+                    Ok := True;
+                    Touched := True;
+                    PCBServer.PreProcess;
+                    Try
+                        Poly.BeginModify;
+                        Poly.SetState_CopperPourInvalid;
+                        Poly.Rebuild;
+                        Poly.EndModify;
+                        Poly.GraphicallyInvalidate;
+                    Except
+                        Ok := False;
+                    End;
+                    PCBServer.PostProcess;
+                    After := ActionsPolyChildren(Poly);
+                    If Ok Then Inc(Rebuilt) Else Inc(Failed);
+                    If Ok Then Items := Items + ',"status":"rebuilt"'
+                    Else Items := Items + ',"status":"failed"';
+                    Items := Items + ',"children_after":' + IntToStr(After) + '}';
+                End;
+            End;
+        Finally
+            PCBServer.SystemOptions.PolygonRepour := OldMode;
+            If Touched Then MarkDocDirtyByPath(PcbPath);
+        End;
+
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again before trusting the board'
+                + ' (rebuilt: ' + IntToStr(Rebuilt) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode
+                + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash)
+                + '","polygons":' + IntToStr(Polys.Count)
+                + ',"rebuilt":' + IntToStr(Rebuilt)
+                + ',"shelved":' + IntToStr(Shelved)
+                + ',"failed":' + IntToStr(Failed)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"items":[' + Items + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+    End;
+End;
+
+Function SelectedRunOutJobChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Wanted, Container, OutJobPath, Path, Freshness, Binding, Section, Name : String;
+    ContainerType, BasePath, Focused : String;
+    I, Found, G, J, MediumIndex : Integer;
+    D : IDocument;
+    IniFile : TIniFile;
+    OutJobDoc : IServerDocument;
+    Workspace : IWorkspace;
+    Active, RunRaised, Opened : Boolean;
+Begin
+    Wanted := ExtractJsonValue(Params, 'outjob');
+    Container := ExtractJsonValue(Params, 'container');
+    If (Container = '') Or (Length(Container) > 80) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'container is required (at most 80 characters)');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    SelectedBusy := True;
+    Try
+        Freshness := SelectedFreshnessJSON(P);
+        If Freshness = '' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'INCOMPLETE_DOCUMENTS',
+                'Cannot establish selected-project document identity ('
+                + SelectedIdentityProblems(P) + '); save or discard the named document');
+            Exit;
+        End;
+        If ExtractJsonValue(Freshness, 'dirty_doc_count') <> '0' Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'DIRTY_PROJECT',
+                'Save the project first: outputs must come from the saved files');
+            Exit;
+        End;
+
+        { The selected project's own OutJob member: exactly one, or the named one. }
+        OutJobPath := '';
+        Found := 0;
+        For I := 0 To P.DM_LogicalDocumentCount - 1 Do
+        Begin
+            D := P.DM_LogicalDocuments(I);
+            If D = Nil Then Continue;
+            If UpperCase(D.DM_DocumentKind) <> 'OUTPUTJOB' Then Continue;
+            Path := D.DM_FullPath;
+            If (Wanted <> '') And (UpperCase(ExtractFileName(Path)) <> UpperCase(Wanted)) Then Continue;
+            Inc(Found);
+            OutJobPath := Path;
+        End;
+        If Found = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'NO_OUTJOB', 'The selected project has no such OutJob member');
+            Exit;
+        End;
+        If Found > 1 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'AMBIGUOUS_OUTJOB', 'More than one OutJob; name one with outjob');
+            Exit;
+        End;
+
+        { Container, type and base folder from the OutJob file (INI). }
+        ContainerType := '';
+        BasePath := '';
+        MediumIndex := 0;
+        IniFile := TIniFile.Create(OutJobPath);
+        Try
+            G := 1;
+            While (MediumIndex = 0) And (G <= 20) Do
+            Begin
+                Section := 'OutputGroup' + IntToStr(G);
+                If IniFile.ReadString(Section, 'OutputMedium1', '') = '' Then Break;
+                J := 1;
+                While J <= 64 Do
+                Begin
+                    Name := IniFile.ReadString(Section, 'OutputMedium' + IntToStr(J), '');
+                    If Name = '' Then Break;
+                    If Name = Container Then
+                    Begin
+                        MediumIndex := J;
+                        ContainerType := IniFile.ReadString(Section, 'OutputMedium' + IntToStr(J) + '_Type', '');
+                        Break;
+                    End;
+                    Inc(J);
+                End;
+                Inc(G);
+            End;
+            If MediumIndex > 0 Then
+                BasePath := IniFile.ReadString('PublishSettings', 'OutputBasePath' + IntToStr(MediumIndex), '');
+        Finally
+            IniFile.Free;
+        End;
+        If MediumIndex = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'CONTAINER_NOT_FOUND', 'No container named ' + Container);
+            Exit;
+        End;
+        If (ContainerType <> 'GeneratedFiles') And (ContainerType <> 'Publish') Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'CONTAINER_REFUSED',
+                'Only GeneratedFiles and Publish containers run; ' + Container + ' is ' + ContainerType);
+            Exit;
+        End;
+        If (BasePath <> '') And (Not ((Length(BasePath) >= 2) And (Copy(BasePath, 2, 1) = ':'))) Then
+            BasePath := ExtractFilePath(OutJobPath) + BasePath;
+
+        { A container writes nothing unless the OutJob is the ACTIVE document  }
+        { (upstream, AD25 / AD26): open it as the Projects panel does, show it, }
+        { focus it, then check.                                                 }
+        Opened := False;
+        OutJobDoc := Nil;
+        Try OutJobDoc := Client.GetDocumentByPath(OutJobPath); Except OutJobDoc := Nil; End;
+        If OutJobDoc = Nil Then
+        Begin
+            ResetParameters;
+            AddStringParameter('ObjectKind', 'Document');
+            AddStringParameter('FileName', OutJobPath);
+            RunProcess('WorkspaceManager:OpenObject');
+            Try OutJobDoc := Client.GetDocumentByPath(OutJobPath); Except OutJobDoc := Nil; End;
+            Opened := (OutJobDoc <> Nil);
+        End;
+        If OutJobDoc <> Nil Then
+        Begin
+            Try Client.ShowDocument(OutJobDoc); Except End;
+            Try OutJobDoc.Focus; Except End;
+        End;
+        Active := False;
+        Focused := '';
+        Try
+            Workspace := GetWorkspace;
+            If Workspace <> Nil Then
+                If Workspace.DM_FocusedDocument <> Nil Then
+                    Focused := Workspace.DM_FocusedDocument.DM_FullPath;
+        Except
+        End;
+        Active := (UpperCase(Focused) = UpperCase(OutJobPath));
+        If Not Active Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'OUTJOB_NOT_ACTIVE',
+                'The OutJob did not become the active document (focused: ' + Focused + '); nothing was run');
+            Exit;
+        End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'SELECTION_CHANGED', 'Project changed while opening the OutJob; nothing was run');
+            Exit;
+        End;
+
+        RunRaised := False;
+        Try
+            ResetParameters;
+            If ContainerType = 'Publish' Then
+            Begin
+                AddStringParameter('Action', 'PublishToPDF');
+                AddStringParameter('OutputMedium', Container);
+                AddStringParameter('ObjectKind', 'OutputBatch');
+                AddStringParameter('DisableDialog', 'True');
+                RunProcess('WorkspaceManager:Print');
+            End
+            Else
+            Begin
+                AddStringParameter('Action', 'Run');
+                AddStringParameter('OutputMedium', Container);
+                AddStringParameter('ObjectKind', 'OutputBatch');
+                RunProcess('WorkspaceManager:GenerateReport');
+            End;
+        Except
+            RunRaised := True;
+        End;
+
+        { NOT a success claim: the client compares the output folder before }
+        { and after and decides what was written.                            }
+        Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+            + ',"result":{"process_issued":true'
+            + ',"outjob_path":"' + EscapeJsonString(OutJobPath)
+            + '","outjob_opened":' + BoolToJsonStr(Opened)
+            + ',"container":"' + EscapeJsonString(Container)
+            + '","container_type":"' + EscapeJsonString(ContainerType)
+            + '","base_path":"' + EscapeJsonString(BasePath)
+            + '","run_raised":' + BoolToJsonStr(RunRaised)
+            + ',"saved":false}}');
+    Finally
+        SelectedBusy := False;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -3294,7 +3727,10 @@ Begin
        (Not (SELECTED_PARAM_EDITS And (Command = 'project.set_component_params_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.move_components_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_copper_checked'))) And
-       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.setup_board_checked'))) Then
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.setup_board_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.run_drc_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.repour_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -3328,6 +3764,21 @@ Begin
     If Command = 'pcb.setup_board_checked' Then
     Begin
         Result := SelectedSetupBoardChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.run_drc_checked' Then
+    Begin
+        Result := SelectedRunDrcChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.repour_checked' Then
+    Begin
+        Result := SelectedRepourChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'project.run_outjob_checked' Then
+    Begin
+        Result := SelectedRunOutJobChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);
