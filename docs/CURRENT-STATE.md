@@ -92,7 +92,11 @@ Parameter edits have their own tick ("Allow parameter edits").
   U1-U5, U7 and G1-G8 passed 2026-11-18 on the real 22p; U6 not run). Scripts `2026.11.18.1`
   ([PROPOSAL-2026-11-18-free-object-edits](PROPOSAL-2026-11-18-free-object-edits.md), runtime
   `selected-edits-20261118a`, E1-E8 passed 2026-11-18): free non-copper line read, edits of free objects
-  (delete line, move / delete via, text edit, board shape from the outline).
+  (delete line, move / delete via, text edit, board shape from the outline). Scripts `2026.11.18.2`
+  ([PROPOSAL-2026-11-18-copper-delete-text-move](PROPOSAL-2026-11-18-copper-delete-text-move.md), runtime
+  `selected-edits-20261118b`, **R1-R8 pending**): copper track delete, text and designator moves, raw
+  coordinates in the pad / via / placement reads, connection lines re-analysed after moves and deletes.
+  Until it is qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bump is the fallback.
 
 ### Roadmap and known limitations
 

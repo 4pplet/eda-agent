@@ -1085,6 +1085,51 @@ End;
 { the old fields empty and reports what each move would do. Apply refuses the   }
 { whole batch unless every part still sits where the preview read it. An apply  }
 { that touched anything clears the grant: one tick, one batch.                   }
+{ After a scripted move or delete the connection lines still run to where the }
+{ objects were until the nets are analysed again; the editor does this itself  }
+{ after a hand move. Board.AnalyzeNet per net, as upstream eda-agent's          }
+{ PCB_BatchMoveComponents (it measured the same symptom). Seen 2026-11-18 on    }
+{ the HDMI board after U502-U504 were moved.                                    }
+Procedure CollectPadNets(Comp : IPCB_Component; Names : TStringList);
+Var
+    PadIter : IPCB_GroupIterator;
+    Pad : IPCB_Pad;
+Begin
+    If Comp = Nil Then Exit;
+    PadIter := Comp.GroupIterator_Create;
+    Try
+        PadIter.AddFilter_ObjectSet(MkSet(ePadObject));
+        Pad := PadIter.FirstPCBObject;
+        While Pad <> Nil Do
+        Begin
+            Try
+                If Pad.Net <> Nil Then
+                    If Names.IndexOf(Pad.Net.Name) < 0 Then Names.Add(Pad.Net.Name);
+            Except
+            End;
+            Pad := PadIter.NextPCBObject;
+        End;
+    Finally
+        Comp.GroupIterator_Destroy(PadIter);
+    End;
+End;
+
+Procedure AnalyzeNetsByName(Board : IPCB_Board; Names : TStringList);
+Var
+    I : Integer;
+    NetObj : IPCB_Net;
+Begin
+    For I := 0 To Names.Count - 1 Do
+    Begin
+        NetObj := Nil;
+        Try NetObj := FindNetByName(Board, Names[I]); Except NetObj := Nil; End;
+        If NetObj <> Nil Then
+        Begin
+            Try Board.AnalyzeNet(NetObj); Except End;
+        End;
+    End;
+End;
+
 Function SelectedMoveComponentsChecked(P : IProject; Params, RequestId : String) : String;
 Var
     Mode, MovesStr, BatchHash, Rest, OpStr, D, Status, Problems, MovesJson, Binding, Blank : String;
@@ -1094,6 +1139,7 @@ Var
     Apply, PcbModified, Partial, Touched, Ok : Boolean;
     Board : IPCB_Board;
     Comp : IPCB_Component;
+    MovedNets : TStringList;
     { Eight named locals, not Array[0..7] Of String: fixed-size string arrays as }
     { function locals corrupt the return slot in DelphiScript (see             }
     { PCB_BatchMoveComponents).                                                 }
@@ -1279,6 +1325,7 @@ Begin
         Partial := False;
         If Apply And (WouldMove > 0) Then
         Begin
+            MovedNets := TStringList.Create;
             Try
                 For J := 0 To OpDes.Count - 1 Do
                 Begin
@@ -1307,6 +1354,7 @@ Begin
                     Finally
                         PCBServer.PostProcess;
                     End;
+                    CollectPadNets(Comp, MovedNets);
                     OpBX[J] := IntToStr(Comp.x);
                     OpBY[J] := IntToStr(Comp.y);
                     OpBR[J] := IntToStr(PlaceEditRotation(Comp));
@@ -1323,6 +1371,8 @@ Begin
                 End;
             Finally
                 If Touched Then MarkDocDirtyByPath(PcbPath);
+                If Touched Then AnalyzeNetsByName(Board, MovedNets);
+                MovedNets.Free;
             End;
             For J := 0 To OpDes.Count - 1 Do
                 If OpStatus[J] = 'would_move' Then
@@ -4612,19 +4662,46 @@ Begin
     Result := VX.Count >= 3;
 End;
 
+{ Free tracks on copper layers: the seventh count of the edit compare-and-set  }
+{ (deltrack, scripts 2026.11.18.2).                                            }
+Function FreeCopperTrackTotal(Board : IPCB_Board) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+Begin
+    Result := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) Then
+                If PCB_IsCopperLayerName(GetLayerString(Prim.Layer)) Then Inc(Result);
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
 Function SelectedEditFreeChecked(P : IProject; Params, RequestId : String) : String;
 Var
     Mode, ItemsStr, BatchHash, OldCounts, Rest, OpStr, Problems, Binding, Blank, What, ItemsJson : String;
     PcbPath, ErrCode, ErrMsg, LayerStr, Counts, Back, Status, NetName : String;
     IOp, ILay, IX1, IY1, IX2, IY2, IW, IS1, IS2, IStatus, IBack, VX, VY : TStringList;
     J, K, Count, Would, Refused, Done, NPads, NFills, NTexts, NLines, NVias, NShape, Clearance, N : Integer;
-    X1, Y1, X2, Y2, W, Hole : Integer;
+    X1, Y1, X2, Y2, W, Hole, NTracks : Integer;
     Apply, PcbModified, Partial, Touched, Ok, IsCopper : Boolean;
     Board : IPCB_Board;
     Lyr : TLayer;
     Track : IPCB_Track;
     Via : IPCB_Via;
     Txt : IPCB_Text;
+    Comp : IPCB_Component;
+    EditNets : TStringList;
     Seg, Seg2 : TPolySegment;
     Gap : Double;
     F0, F1, F2, F3, F4, F5, F6, F7, F8 : String;
@@ -4659,6 +4736,7 @@ Begin
     IX2 := TStringList.Create; IY2 := TStringList.Create; IW := TStringList.Create; IS1 := TStringList.Create;
     IS2 := TStringList.Create; IStatus := TStringList.Create; IBack := TStringList.Create;
     VX := TStringList.Create; VY := TStringList.Create;
+    EditNets := TStringList.Create;
     SelectedBusy := True;
     Try
         Rest := ItemsStr;
@@ -4667,15 +4745,16 @@ Begin
         Begin
             OpStr := ParamEditTake(Rest, ';');
             Inc(Count);
-            If (Count > 100) Or (ParamEditCountChar(OpStr, '|') <> 8) Then
+            If (Count > 300) Or (ParamEditCountChar(OpStr, '|') <> 8) Then
             Begin
-                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': expected 9 fields, at most 100 items');
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': expected 9 fields, at most 300 items');
                 Exit;
             End;
             F0 := ParamEditTake(OpStr, '|'); F1 := ParamEditTake(OpStr, '|'); F2 := ParamEditTake(OpStr, '|');
             F3 := ParamEditTake(OpStr, '|'); F4 := ParamEditTake(OpStr, '|'); F5 := ParamEditTake(OpStr, '|');
             F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
-            Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape'))
+            Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape')
+                Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -4708,8 +4787,9 @@ Begin
         NVias := FreeViaTotal(Board);
         NShape := 0;
         Try NShape := Board.BoardOutline.PointCount; Except NShape := -1; End;
+        NTracks := FreeCopperTrackTotal(Board);
         Counts := IntToStr(NPads) + ',' + IntToStr(NFills) + ',' + IntToStr(NTexts) + ',' + IntToStr(NLines)
-            + ',' + IntToStr(NVias) + ',' + IntToStr(NShape);
+            + ',' + IntToStr(NVias) + ',' + IntToStr(NShape) + ',' + IntToStr(NTracks);
         If Apply And (Counts <> OldCounts) Then
         Begin
             Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED',
@@ -4787,6 +4867,55 @@ Begin
                     Else Status := 'would_edit';
                 End;
             End
+            Else If IOp[J] = 'deltrack' Then
+            Begin
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Or (Not IsCopper) Then
+                    Status := 'refused: deltrack needs a copper layer of this board'
+                Else
+                Begin
+                    N := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                    If N = 0 Then Status := 'refused: no free track with these exact ends on this layer'
+                    Else
+                    Begin
+                        NetName := '';
+                        Try
+                            If Track.Net <> Nil Then NetName := Track.Net.Name;
+                        Except
+                            NetName := '';
+                        End;
+                        If NetName <> IS1[J] Then Status := 'refused: the track is on another net than the one named'
+                        Else If Track.Width <> W Then Status := 'refused: the track width differs'
+                        Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
+                        Else Status := 'would_delete';
+                    End;
+                End;
+            End
+            Else If (IOp[J] = 'deltext') Or (IOp[J] = 'movetext') Then
+            Begin
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If (IOp[J] = 'movetext') And (W <> 0) And (W <> 90) And (W <> 180) And (W <> 270) And (W <> 360) Then
+                    Status := 'refused: rotation must be 0 (keep), 90, 180, 270 or 360'
+                Else
+                Begin
+                    N := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                    If N = 0 Then Status := 'refused: no free text with this text and location on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical texts here'
+                    Else If IOp[J] = 'deltext' Then Status := 'would_delete'
+                    Else If (X1 = X2) And (Y1 = Y2) And (W = 0) Then Status := 'unchanged'
+                    Else Status := 'would_move';
+                End;
+            End
+            Else If IOp[J] = 'movename' Then
+            Begin
+                Comp := Nil;
+                Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                If Comp = Nil Then Status := 'refused: no component with this designator'
+                Else If (W <> 0) And (W <> 90) And (W <> 180) And (W <> 270) And (W <> 360) Then
+                    Status := 'refused: rotation must be 0 (keep), 90, 180, 270 or 360'
+                Else If Comp.Name = Nil Then Status := 'refused: the component has no designator text'
+                Else If (Comp.Name.XLocation = X2) And (Comp.Name.YLocation = Y2) And (W = 0) Then Status := 'unchanged'
+                Else Status := 'would_move';
+            End
             Else
             Begin
                 VX.Clear;
@@ -4847,6 +4976,11 @@ Begin
                         N := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
                         If Via <> Nil Then
                         Begin
+                            Try
+                                If Via.Net <> Nil Then
+                                    If EditNets.IndexOf(Via.Net.Name) < 0 Then EditNets.Add(Via.Net.Name);
+                            Except
+                            End;
                             PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Via.I_ObjectAddress);
                             Board.RemovePCBObject(Via);
                             K := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
@@ -4878,6 +5012,64 @@ Begin
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
                             Back := Txt.Text + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
                             Ok := (Txt.Text = IS2[J]) And (Txt.XLocation = X1) And (Txt.YLocation = Y1);
+                        End;
+                    End
+                    Else If IOp[J] = 'deltrack' Then
+                    Begin
+                        N := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                        If Track <> Nil Then
+                        Begin
+                            If EditNets.IndexOf(IS1[J]) < 0 Then EditNets.Add(IS1[J]);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                            Board.RemovePCBObject(Track);
+                            K := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = N - 1);
+                        End;
+                    End
+                    Else If IOp[J] = 'deltext' Then
+                    Begin
+                        N := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                        If Txt <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Txt.I_ObjectAddress);
+                            Board.RemovePCBObject(Txt);
+                            K := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'movetext' Then
+                    Begin
+                        N := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                        If Txt <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Txt.XLocation := X2;
+                            Txt.YLocation := Y2;
+                            If W <> 0 Then Txt.Rotation := W Mod 360;
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := Txt.Text + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
+                            Ok := (Txt.XLocation = X2) And (Txt.YLocation = Y2);
+                        End;
+                    End
+                    Else If IOp[J] = 'movename' Then
+                    Begin
+                        Comp := Nil;
+                        Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                        Txt := Nil;
+                        If Comp <> Nil Then Txt := Comp.Name;
+                        If Txt <> Nil Then
+                        Begin
+                            { A manually placed designator, as upstream's placement text move. }
+                            Comp.ChangeNameAutoposition(eAutoPos_Manual);
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Txt.XLocation := X2;
+                            Txt.YLocation := Y2;
+                            If W <> 0 Then Txt.Rotation := W Mod 360;
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := IS1[J] + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
+                            Ok := (Txt.XLocation = X2) And (Txt.YLocation = Y2);
                         End;
                     End
                     Else
@@ -4926,6 +5118,7 @@ Begin
             Finally
                 PCBServer.PostProcess;
                 If Touched Then MarkDocDirtyByPath(PcbPath);
+                If Touched Then AnalyzeNetsByName(Board, EditNets);
             End;
             For J := 0 To IOp.Count - 1 Do
                 If Copy(IStatus[J], 1, 5) = 'would' Then IStatus[J] := 'not_done';
@@ -4959,7 +5152,7 @@ Begin
         End;
         SelectedBusy := False;
         IOp.Free; ILay.Free; IX1.Free; IY1.Free; IX2.Free; IY2.Free; IW.Free; IS1.Free;
-        IS2.Free; IStatus.Free; IBack.Free; VX.Free; VY.Free;
+        IS2.Free; IStatus.Free; IBack.Free; VX.Free; VY.Free; EditNets.Free;
     End;
 End;
 
