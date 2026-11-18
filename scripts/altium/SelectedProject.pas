@@ -5175,6 +5175,8 @@ End;
 {   move    s1 kind (label power text) x1,y1 -> x2,y2; s2 its text               }
 {   del     s1 kind, exact geometry; s2 its text (label power text note)         }
 {   docparam s1 name, s2 old value, s3 new value (sheet-level parameter)         }
+{   compparam s1 DESIGNATOR/Name, s2 old, s3 new; n 1 = add the parameter       }
+{           (hidden) instead. Every part of the designator on the sheet.        }
 { Corner needs a typed local (ISch_Rectangle / ISch_Line / ISch_TextFrame):      }
 { late-bound Obj.Corner does not compile (Generic.pas GetSchProperty).           }
 
@@ -5635,6 +5637,89 @@ Begin
     Result := Obj;
 End;
 
+{ compparam: one parameter on EVERY part of a designator on this sheet (so a   }
+{ multi-part symbol is covered sheet by sheet). Create = the parameter must be }
+{ absent on every part and is added hidden; otherwise it must be there once on }
+{ every part with Text = OldV. DoWrite False = preflight only. Returns the     }
+{ number of parts; Status says why not.                                        }
+Function SchEditCompParam(Doc : ISch_Document; Des, Name, OldV, NewV : String;
+    Create, DoWrite : Boolean; Var Status : String) : Integer;
+Var
+    Iter, PIter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    Param, Found, NewParam : ISch_Parameter;
+    Hits : Integer;
+Begin
+    Result := 0;
+    Status := '';
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Comp := Obj;
+            If Comp.Designator.Text = Des Then
+            Begin
+                Inc(Result);
+                Hits := 0;
+                Found := Nil;
+                PIter := Comp.SchIterator_Create;
+                Try
+                    PIter.AddFilter_ObjectSet(MkSet(eParameter));
+                    Param := PIter.FirstSchObject;
+                    While Param <> Nil Do
+                    Begin
+                        If Param.Name = Name Then
+                        Begin
+                            Inc(Hits);
+                            Found := Param;
+                        End;
+                        Param := PIter.NextSchObject;
+                    End;
+                Finally
+                    Comp.SchIterator_Destroy(PIter);
+                End;
+                If Create Then
+                Begin
+                    If Hits > 0 Then Status := 'the parameter already exists on ' + Des
+                    Else If DoWrite Then
+                    Begin
+                        NewParam := SchServer.SchObjectFactory(eParameter, eCreate_Default);
+                        If NewParam = Nil Then Status := 'could not create the parameter'
+                        Else
+                        Begin
+                            NewParam.Name := Name;
+                            NewParam.Text := NewV;
+                            Try NewParam.IsHidden := True; Except End;
+                            Try NewParam.Location := Comp.Location; Except End;
+                            Comp.AddSchObject(NewParam);
+                            SchRegisterObject(Comp, NewParam);
+                        End;
+                    End;
+                End
+                Else
+                Begin
+                    If Hits <> 1 Then Status := 'parameter found ' + IntToStr(Hits) + ' times on a part of ' + Des
+                    Else If Found.Text <> OldV Then Status := 'value changed since the read'
+                    Else If DoWrite Then
+                    Begin
+                        SchBeginModify(Found);
+                        Found.Text := NewV;
+                        SchEndModify(Found);
+                        If Found.Text <> NewV Then Status := 'text differs';
+                    End;
+                End;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+    If (Result = 0) And (Status = '') Then Status := Des + ' is not on this sheet';
+End;
+
 Function SchEditPowerStyleOk(S : String) : Boolean;
 Begin
     Result := (S = 'circle') Or (S = 'arrow') Or (S = 'bar') Or (S = 'wave')
@@ -5644,7 +5729,7 @@ End;
 Function SelectedEditSchematicChecked(P : IProject; Params, RequestId : String) : String;
 Var
     Mode, BatchHash, ItemsStr, Rest, OpStr, ErrCode, ErrMsg, Binding, Blank : String;
-    Op, Kind, S2, S3, Status, Problems, Rows, Back, Body : String;
+    Op, Kind, S2, S3, Status, Problems, Rows, Back, Body, CDes, CName : String;
     Apply, Ok, Ok2, Ok3, Touched, Partial, Corner : Boolean;
     Paths, IOp, ISheet, IX1, IY1, IX2, IY2, IN_, IS1, IS2, IS3, IStatus, IBack, TouchedPaths : TStringList;
     Docs : TInterfaceList;
@@ -5779,8 +5864,11 @@ Begin
                 Or (Not PlaceEditIntOk(IX1[J])) Or (Not PlaceEditIntOk(IY1[J]))
                 Or (Not PlaceEditIntOk(IX2[J])) Or (Not PlaceEditIntOk(IY2[J]))
                 Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
-                Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam'))
-                Or ((Op <> 'docparam') And (SchEditKindId(Kind) < 0))
+                Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam')
+                    And (Op <> 'compparam'))
+                Or ((Op <> 'docparam') And (Op <> 'compparam') And (SchEditKindId(Kind) < 0))
+                Or ((Op = 'compparam') And ((Pos('/', Kind) < 2) Or (Pos('/', Kind) = Length(Kind))
+                    Or (Not ParamEditFieldAllowed(Copy(Kind, Pos('/', Kind) + 1, Length(Kind))))))
                 Or ((Op = 'docparam') And (Kind = ''))
                 Or ((Op = 'settext') And (Not SchEditHasText(Kind)))
                 Or ((Op = 'settext') And (S3 = '') And (Kind <> 'note'))
@@ -5816,6 +5904,12 @@ Begin
                 If Obj = Nil Then Status := 'sheet parameter not found once (' + IntToStr(Hits) + ')'
                 Else If SchEditObjText(Obj) <> S2 Then Status := 'value changed since the read'
                 Else If SchEditParamReadOnly(Obj) Then Status := 'Altium keeps this parameter read-only';
+            End
+            Else If Op = 'compparam' Then
+            Begin
+                CDes := Copy(Kind, 1, Pos('/', Kind) - 1);
+                CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
+                SchEditCompParam(Doc, CDes, CName, S2, IS3[J], StrToInt(IN_[J]) = 1, False, Status);
             End
             Else If Op = 'add' Then
             Begin
@@ -5878,6 +5972,25 @@ Begin
                             If Obj = Nil Then Back := 'missing'
                             Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S3) Then Back := 'text differs'
                             Else Back := 'ok';
+                        End
+                        Else If Op = 'compparam' Then
+                        Begin
+                            CDes := Copy(Kind, 1, Pos('/', Kind) - 1);
+                            CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
+                            SchEditCompParam(Doc, CDes, CName, S2, S3, N = 1, False, Status);
+                            If Status <> '' Then Back := 'changed during apply'
+                            Else
+                            Begin
+                                Touched := True;
+                                SchEditCompParam(Doc, CDes, CName, S2, S3, N = 1, True, Status);
+                                If Status <> '' Then Back := 'text differs'
+                                Else
+                                Begin
+                                    { read back: there once, with the new value, on every part }
+                                    SchEditCompParam(Doc, CDes, CName, S3, S3, False, False, Status);
+                                    If Status = '' Then Back := 'ok' Else Back := 'text differs';
+                                End;
+                            End;
                         End
                         Else If Op = 'docparam' Then
                         Begin

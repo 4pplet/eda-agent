@@ -1,6 +1,8 @@
 # Checked schematic edits: labels, power ports, wires, text, notes, boxes, sheet parameters
 
-2026-11-18, PLT fork. Scripts `2026.11.18.3`, runtime `selected-edits-20261118c`. Stefan asked for it
+2026-11-18, PLT fork. Scripts `2026.11.18.4`, runtime `selected-edits-20261118e` (`.3` / runtimes `c`, `d` were the
+first build: the script loaded on AD 23.3.1, ping `.3`, but the client refused its own command, fixed in `d`; `.4`
+adds `compparam`). Stefan asked for it
 the same day ("let's also do the schematic work ... useful functionality, not just this specific
 thing"), after the 22p ESD pin table had to change and the bridge could not rename 24 net labels.
 PLT-hw backlog 5a (labels on pins) and most of 5b (schematic tidy).
@@ -20,7 +22,11 @@ calls "Allow schematic edits".
   - `settext` on a label, power port, text or note (old text must match);
   - `move` a label, power port or text;
   - `del` any of the seven kinds by exact geometry (and text);
-  - `docparam`: the value of one sheet-level parameter (old value must match).
+  - `docparam`: the value of one sheet-level parameter (old value must match);
+  - `compparam` (`.4`): one parameter on every part of a designator on the sheet, so a multi-part symbol is
+    covered sheet by sheet; changes it (old value must match on every part) or, with n = 1, adds it hidden
+    (`SetCompParamText`'s creation path: factory, Name, Text, `Comp.AddSchObject`, `SchRegisterObject`). The
+    older parameter writer is untouched.
 
 It never creates, moves or deletes parts, pins, ports or sheet symbols.
 
@@ -55,7 +61,7 @@ Unproven on this Altium version, so kept out of the default path:
 
 | # | Check | Pass |
 |---|---|---|
-| Q1 | runtime loads, ping `2026.11.18.3` | no script error |
+| Q1 | runtime loads, ping `2026.11.18.4` | no script error |
 | Q2 | `sch read` on the 22p (six sheets) | counts per sheet plausible; U405's ten pin ends lie on its wires / labels |
 | Q3 | `sch preview` of the 24-pin relabel plan | each pin shows `old -> new`; a pin whose wire reaches another part is refused, not renamed |
 | Q4 | apply without the tick, then with it | stopped; then 24 written, read back |
@@ -64,7 +70,9 @@ Unproven on this Altium version, so kept out of the default path:
 | Q7 | `pinnet` + `pinpower` on a bare scratch part's pins (or after deleting one stub) | stub + label / port; `verify` passes after the save |
 | Q8 | refusals: unsaved sheet, wrong old text, duplicate add, a second apply with the same hash | nothing written each time |
 | Q9 | `docparam` on one title-block field; `sch read --templates` | value changes and reads back; the template read returns names without stopping the script |
+| Q10 | `compparam`: change one field of U301 (multi-part) and add a new field to one resistor; save; `parameters` read | every part carries the value; the new field exists, hidden |
 
 ## 4. Qualification record
 
-Pending.
+- 2026-11-18: the `.3` script loaded on AD 23.3.1 without an error (ping `2026.11.18.3`, runtime `c`).
+- Q1-Q10 pending on runtime `e`.
