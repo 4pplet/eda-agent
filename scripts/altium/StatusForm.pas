@@ -629,7 +629,7 @@ Begin
         Else
         Begin
             chk_AllowParams.Caption := '  ' + HollowDot(0)
-                + '  Allow parameter edits (existing parameters)';
+                + '  Allow schematic edits (parameters, designators; labels, wires, notes)';
             chk_AllowParams.Color := $00202126;
         End;
         chk_AllowParams.Hint := 'Grant for ONE proj_set_component_params_checked batch: one sheet, '

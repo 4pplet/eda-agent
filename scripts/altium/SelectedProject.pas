@@ -5156,6 +5156,835 @@ Begin
     End;
 End;
 
+{ ---- Checked schematic edits (TOOLS.md backlog 5a / 5b,                        }
+{      PROPOSAL-2026-11-18-schematic-edits)                                     }
+{ Sheet-level objects of the SELECTED project's schematics, read and edited      }
+{ from a checked plan: net labels, power ports, wires, free text, text frames    }
+{ (notes), rectangles (boxes), lines, and sheet parameters (title block).        }
+{ Never parts, pins, ports or sheet symbols. Raw coordinates (10000 per mil).    }
+{ preview: params sheet (index, -1 = sheet list only) -> the sheet's objects,    }
+{   the electrical end of every pin, the sheet parameters.                       }
+{ apply: parameter-edits tick, every sheet open, the touched sheets saved,       }
+{   every item preflighted before the first write (the exact old state must be   }
+{   there once; an add must not duplicate), read back, never saves, the tick     }
+{   clears. Items, at most 200:                                                  }
+{     op|sheet|x1|y1|x2|y2|n|s1|s2|s3      (s* percent-encoded, %0A = new line)  }
+{   add     s1 kind (label power wire text box line note), s2 power style,       }
+{           s3 text; n orientation 0-3 (label, power, text) or line width 0-2    }
+{   settext s1 kind (label power text note) at x1,y1; s2 old, s3 new             }
+{   move    s1 kind (label power text) x1,y1 -> x2,y2; s2 its text               }
+{   del     s1 kind, exact geometry; s2 its text (label power text note)         }
+{   docparam s1 name, s2 old value, s3 new value (sheet-level parameter)         }
+{ Corner needs a typed local (ISch_Rectangle / ISch_Line / ISch_TextFrame):      }
+{ late-bound Obj.Corner does not compile (Generic.pas GetSchProperty).           }
+
+Function SchEditKindId(Kind : String) : Integer;
+Begin
+    Result := -1;
+    If Kind = 'label' Then Result := eNetLabel
+    Else If Kind = 'power' Then Result := ePowerObject
+    Else If Kind = 'wire' Then Result := eWire
+    Else If Kind = 'text' Then Result := eLabel
+    Else If Kind = 'box' Then Result := eRectangle
+    Else If Kind = 'line' Then Result := eLine
+    Else If Kind = 'note' Then Result := eTextFrame;
+End;
+
+Function SchEditHasText(Kind : String) : Boolean;
+Begin
+    Result := (Kind = 'label') Or (Kind = 'power') Or (Kind = 'text') Or (Kind = 'note');
+End;
+
+Function SchEditHasCorner(Kind : String) : Boolean;
+Begin
+    Result := (Kind = 'box') Or (Kind = 'line') Or (Kind = 'note');
+End;
+
+{ %0A separates lines; every other byte goes through the parameter decoder. }
+Function SchEditDecode(S : String; Var Ok : Boolean) : String;
+Var
+    P : Integer;
+    Part : String;
+    PartOk : Boolean;
+Begin
+    Result := '';
+    Ok := True;
+    While True Do
+    Begin
+        P := Pos('%0A', S);
+        If P = 0 Then Part := S Else Part := Copy(S, 1, P - 1);
+        Result := Result + ParamEditDecode(Part, PartOk);
+        If Not PartOk Then Ok := False;
+        If P = 0 Then Break;
+        Result := Result + #13#10;
+        S := Copy(S, P + 3, Length(S));
+    End;
+End;
+
+Function SchEditCorner(Obj : ISch_GraphicalObject; Kind : String; Var CX, CY : Integer) : Boolean;
+Var
+    R : ISch_Rectangle;
+    L : ISch_Line;
+    T : ISch_TextFrame;
+    Crn : TLocation;
+Begin
+    Result := False;
+    CX := 0; CY := 0;
+    Try
+        If Kind = 'box' Then Begin R := Obj; Crn := R.Corner; Result := True; End
+        Else If Kind = 'line' Then Begin L := Obj; Crn := L.Corner; Result := True; End
+        Else If Kind = 'note' Then Begin T := Obj; Crn := T.Corner; Result := True; End;
+        If Result Then Begin CX := Crn.X; CY := Crn.Y; End;
+    Except
+        Result := False;
+    End;
+End;
+
+Function SchEditWireEnds(Obj : ISch_GraphicalObject; Var AX, AY, BX, BY, N : Integer) : Boolean;
+Var
+    V : TLocation;
+Begin
+    Result := False;
+    N := 0;
+    Try N := Obj.GetState_VerticesCount; Except N := 0; End;
+    If N < 2 Then Exit;
+    Try
+        V := Obj.GetState_Vertex(1);
+        AX := V.X; AY := V.Y;
+        V := Obj.GetState_Vertex(N);
+        BX := V.X; BY := V.Y;
+        Result := True;
+    Except
+        Result := False;
+    End;
+End;
+
+{ The object of Kind at exactly this geometry. Corner / far end are compared     }
+{ when UseCorner (always for a wire's two ends, either order). Nil unless one.   }
+Function SchEditFind(Doc : ISch_Document; Kind : String; X1, Y1, X2, Y2 : Integer;
+    UseCorner : Boolean; Var Hits : Integer) : ISch_GraphicalObject;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Loc : TLocation;
+    KindId, CX, CY, AX, AY, BX, BY, N : Integer;
+    Match : Boolean;
+Begin
+    Result := Nil;
+    Hits := 0;
+    KindId := SchEditKindId(Kind);
+    If KindId < 0 Then Exit;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.SetState_IterationDepth(eIterateFirstLevel);
+        Iter.AddFilter_ObjectSet(MkSet(KindId));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Match := False;
+            Try
+                If Kind = 'wire' Then
+                Begin
+                    If SchEditWireEnds(Obj, AX, AY, BX, BY, N) Then
+                        Match := ((AX = X1) And (AY = Y1) And (BX = X2) And (BY = Y2))
+                            Or ((AX = X2) And (AY = Y2) And (BX = X1) And (BY = Y1));
+                End
+                Else
+                Begin
+                    Loc := Obj.GetState_Location;
+                    Match := (Loc.X = X1) And (Loc.Y = Y1);
+                    If Match And UseCorner And SchEditHasCorner(Kind) Then
+                    Begin
+                        If SchEditCorner(Obj, Kind, CX, CY) Then
+                            Match := (CX = X2) And (CY = Y2)
+                        Else
+                            Match := False;
+                    End;
+                End;
+            Except
+                Match := False;
+            End;
+            If Match Then
+            Begin
+                Inc(Hits);
+                Result := Obj;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+    If Hits <> 1 Then Result := Nil;
+End;
+
+Function SchEditFindParam(Doc : ISch_Document; Name : String; Var Hits : Integer) : ISch_GraphicalObject;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    N : String;
+Begin
+    Result := Nil;
+    Hits := 0;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.SetState_IterationDepth(eIterateFirstLevel);
+        Iter.AddFilter_ObjectSet(MkSet(eParameter));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            N := '';
+            Try N := Obj.Name; Except N := ''; End;
+            If UpperCase(N) = UpperCase(Name) Then
+            Begin
+                Inc(Hits);
+                Result := Obj;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+    If Hits <> 1 Then Result := Nil;
+End;
+
+{ Upstream d23c50d: a Text write lands on a read-only parameter anyway. }
+Function SchEditParamReadOnly(Obj : ISch_GraphicalObject) : Boolean;
+Var
+    Par : ISch_Parameter;
+Begin
+    Result := False;
+    Try
+        Par := Obj;
+        Result := Par.ValueIsReadOnly;
+    Except
+        Result := False;
+    End;
+End;
+
+Function SchEditObjText(Obj : ISch_GraphicalObject) : String;
+Begin
+    Result := '';
+    Try Result := Obj.Text; Except Result := ''; End;
+End;
+
+{ One kind of sheet-level object as JSON rows (leading comma on each row). }
+Function SchEditKindJSON(Doc : ISch_Document; Kind : String; Var Count : Integer) : String;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Loc, V : TLocation;
+    KindId, CX, CY, N, I, Ori, Sty : Integer;
+    Row, Txt : String;
+Begin
+    Result := '';
+    KindId := SchEditKindId(Kind);
+    If Kind = 'port' Then KindId := ePort;
+    If KindId < 0 Then Exit;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.SetState_IterationDepth(eIterateFirstLevel);
+        Iter.AddFilter_ObjectSet(MkSet(KindId));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Row := '';
+            Try
+                If Kind = 'wire' Then
+                Begin
+                    N := 0;
+                    Try N := Obj.GetState_VerticesCount; Except N := 0; End;
+                    Row := '{"k":"wire","v":[';
+                    For I := 1 To N Do
+                    Begin
+                        V := Obj.GetState_Vertex(I);
+                        If I > 1 Then Row := Row + ',';
+                        Row := Row + IntToStr(V.X) + ',' + IntToStr(V.Y);
+                    End;
+                    Row := Row + ']}';
+                End
+                Else
+                Begin
+                    Loc := Obj.GetState_Location;
+                    Row := '{"k":"' + Kind + '","x":' + IntToStr(Loc.X) + ',"y":' + IntToStr(Loc.Y);
+                    If SchEditHasCorner(Kind) Then
+                    Begin
+                        If SchEditCorner(Obj, Kind, CX, CY) Then
+                            Row := Row + ',"x2":' + IntToStr(CX) + ',"y2":' + IntToStr(CY);
+                    End;
+                    If Kind = 'port' Then
+                    Begin
+                        Txt := '';
+                        Try Txt := Obj.Name; Except Txt := ''; End;
+                        Row := Row + ',"t":"' + EscapeJsonString(Txt) + '"';
+                    End
+                    Else If SchEditHasText(Kind) Then
+                        Row := Row + ',"t":"' + EscapeJsonString(SchEditObjText(Obj)) + '"';
+                    If (Kind = 'label') Or (Kind = 'power') Or (Kind = 'text') Then
+                    Begin
+                        Ori := 0;
+                        Try Ori := Obj.Orientation; Except Ori := 0; End;
+                        Row := Row + ',"o":' + IntToStr(Ori);
+                    End;
+                    If Kind = 'power' Then
+                    Begin
+                        Sty := 0;
+                        Try Sty := Obj.Style; Except Sty := 0; End;
+                        Row := Row + ',"s":' + IntToStr(Sty);
+                    End;
+                    Row := Row + '}';
+                End;
+            Except
+                Row := '';
+            End;
+            If Row <> '' Then
+            Begin
+                Result := Result + ',' + Row;
+                Inc(Count);
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+End;
+
+{ Electrical end of every pin of every part on the sheet (leading comma rows). }
+Function SchEditPinsJSON(Doc : ISch_Document; Var Count : Integer) : String;
+Var
+    CompIter, PinIter : ISch_Iterator;
+    CompObj, PinObj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    Pin : ISch_Pin;
+    Loc : TLocation;
+    Des, Num, Nam : String;
+    X, Y, Len, Ori, PartId, OwnerId : Integer;
+Begin
+    Result := '';
+    CompIter := Doc.SchIterator_Create;
+    Try
+        CompIter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        CompObj := CompIter.FirstSchObject;
+        While CompObj <> Nil Do
+        Begin
+            Comp := CompObj;
+            Des := '';
+            Try Des := Comp.Designator.Text; Except Des := ''; End;
+            PartId := -1;
+            Try PartId := Comp.CurrentPartID; Except PartId := -1; End;
+            PinIter := Comp.SchIterator_Create;
+            If PinIter <> Nil Then
+            Begin
+                Try
+                    PinIter.AddFilter_ObjectSet(MkSet(ePin));
+                    PinObj := PinIter.FirstSchObject;
+                    While PinObj <> Nil Do
+                    Begin
+                        Try
+                            Pin := PinObj;
+                            OwnerId := PartId;
+                            Try OwnerId := Pin.OwnerPartId; Except OwnerId := PartId; End;
+                            If (PartId < 0) Or (OwnerId = PartId) Or (OwnerId <= 0) Then
+                            Begin
+                                Num := ''; Nam := ''; Len := 0; Ori := 0;
+                                Try Num := Pin.Designator; Except End;
+                                Try Nam := Pin.Name; Except End;
+                                Loc := Pin.GetState_Location;
+                                X := Loc.X; Y := Loc.Y;
+                                Try Len := Pin.PinLength; Except End;
+                                Try Ori := Pin.Orientation; Except End;
+                                If Ori = 0 Then X := X + Len
+                                Else If Ori = 1 Then Y := Y + Len
+                                Else If Ori = 2 Then X := X - Len
+                                Else If Ori = 3 Then Y := Y - Len;
+                                Result := Result + ',{"d":"' + EscapeJsonString(Des)
+                                    + '","p":"' + EscapeJsonString(Num)
+                                    + '","n":"' + EscapeJsonString(Nam)
+                                    + '","x":' + IntToStr(X) + ',"y":' + IntToStr(Y)
+                                    + ',"o":' + IntToStr(Ori) + '}';
+                                Inc(Count);
+                            End;
+                        Except End;
+                        PinObj := PinIter.NextSchObject;
+                    End;
+                Finally
+                    Comp.SchIterator_Destroy(PinIter);
+                End;
+            End;
+            CompObj := CompIter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(CompIter);
+    End;
+End;
+
+Function SchEditParamsJSON(Doc : ISch_Document) : String;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    N, V : String;
+Begin
+    Result := '';
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.SetState_IterationDepth(eIterateFirstLevel);
+        Iter.AddFilter_ObjectSet(MkSet(eParameter));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            N := ''; V := '';
+            Try N := Obj.Name; Except N := ''; End;
+            Try V := Obj.Text; Except V := ''; End;
+            If N <> '' Then
+                Result := Result + ',{"name":"' + EscapeJsonString(N)
+                    + '","value":"' + EscapeJsonString(V) + '"}';
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+End;
+
+Function SchEditLineWidth(N : Integer) : Integer;
+Begin
+    If N <= 0 Then Result := eSmall
+    Else If N = 1 Then Result := eMedium
+    Else Result := eLarge;
+End;
+
+{ Creates and registers one object. Caller holds PreProcess. Nil on failure. }
+Function SchEditCreate(Doc : ISch_Document; Kind : String; X1, Y1, X2, Y2, N : Integer;
+    Style, Txt : String) : ISch_GraphicalObject;
+Var
+    Obj : ISch_GraphicalObject;
+    R : ISch_Rectangle;
+    L : ISch_Line;
+    T : ISch_TextFrame;
+    W : ISch_Wire;
+    Loc : TLocation;
+    FontId, Color : Integer;
+Begin
+    Result := Nil;
+    Obj := SchServer.SchObjectFactory(SchEditKindId(Kind), eCreate_Default);
+    If Obj = Nil Then Exit;
+    If Kind = 'wire' Then
+    Begin
+        W := Obj;
+        W.Location := Point(X1, Y1);
+        W.InsertVertex := 1;
+        W.SetState_Vertex(1, Point(X1, Y1));
+        W.InsertVertex := 2;
+        W.SetState_Vertex(2, Point(X2, Y2));
+        W.LineWidth := eSmall;
+    End
+    Else If Kind = 'box' Then
+    Begin
+        R := Obj;
+        R.Location := Point(X1, Y1);
+        R.Corner := Point(X2, Y2);
+        R.IsSolid := False;
+        Try R.LineWidth := SchEditLineWidth(N); Except End;
+    End
+    Else If Kind = 'line' Then
+    Begin
+        L := Obj;
+        L.Location := Point(X1, Y1);
+        L.Corner := Point(X2, Y2);
+        Try L.LineWidth := SchEditLineWidth(N); Except End;
+    End
+    Else If Kind = 'note' Then
+    Begin
+        T := Obj;
+        T.Location := Point(X1, Y1);
+        T.Corner := Point(X2, Y2);
+        T.Text := Txt;
+        Try T.WordWrap := True; Except End;
+        Try T.ClipToRect := True; Except End;
+        Try T.ShowBorder := False; Except End;
+    End
+    Else
+    Begin
+        { label, power, text }
+        Loc := Obj.Location;
+        Loc.X := X1;
+        Loc.Y := Y1;
+        Obj.Location := Loc;
+        Obj.Text := Txt;
+        Try Obj.Orientation := N; Except End;
+        If Kind = 'label' Then
+        Begin
+            If InferNetLabelStyle(Doc, FontId, Color) Then
+            Begin
+                Try Obj.FontId := FontId; Except End;
+                Obj.Color := Color;
+            End;
+        End
+        Else If Kind = 'power' Then
+        Begin
+            Obj.ShowNetName := True;
+            If Style = 'arrow' Then Obj.Style := ePowerArrow
+            Else If Style = 'bar' Then Obj.Style := ePowerBar
+            Else If Style = 'wave' Then Obj.Style := ePowerWave
+            Else If Style = 'gnd_power' Then Obj.Style := ePowerGndPower
+            Else If Style = 'gnd_signal' Then Obj.Style := ePowerGndSignal
+            Else If Style = 'gnd_earth' Then Obj.Style := ePowerGndEarth
+            Else Obj.Style := ePowerCircle;
+        End;
+    End;
+    Doc.RegisterSchObjectInContainer(Obj);
+    SchRegisterObject(Doc, Obj);
+    Result := Obj;
+End;
+
+Function SchEditPowerStyleOk(S : String) : Boolean;
+Begin
+    Result := (S = 'circle') Or (S = 'arrow') Or (S = 'bar') Or (S = 'wave')
+        Or (S = 'gnd_power') Or (S = 'gnd_signal') Or (S = 'gnd_earth');
+End;
+
+Function SelectedEditSchematicChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, BatchHash, ItemsStr, Rest, OpStr, ErrCode, ErrMsg, Binding, Blank : String;
+    Op, Kind, S2, S3, Status, Problems, Rows, Back, Body : String;
+    Apply, Ok, Ok2, Ok3, Touched, Partial, Corner : Boolean;
+    Paths, IOp, ISheet, IX1, IY1, IX2, IY2, IN_, IS1, IS2, IS3, IStatus, IBack, TouchedPaths : TStringList;
+    Docs : TInterfaceList;
+    I, J, K, Hits, Hits2, Refused, Written, Pending, SheetIdx, Count, PinCount : Integer;
+    X1, Y1, X2, Y2, N : Integer;
+    Doc : ISch_Document;
+    Obj : ISch_GraphicalObject;
+    Loc : TLocation;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    ItemsStr := ExtractJsonValue(Params, 'items');
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not ParamEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Schematic edits are not granted: the operator ticks "Allow schematic edits" in the bridge window');
+        Exit;
+    End;
+    If Not ParamEditHashValid(BatchHash) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    Partial := False;
+    Paths := TStringList.Create;
+    IOp := TStringList.Create;
+    ISheet := TStringList.Create;
+    IX1 := TStringList.Create;
+    IY1 := TStringList.Create;
+    IX2 := TStringList.Create;
+    IY2 := TStringList.Create;
+    IN_ := TStringList.Create;
+    IS1 := TStringList.Create;
+    IS2 := TStringList.Create;
+    IS3 := TStringList.Create;
+    IStatus := TStringList.Create;
+    IBack := TStringList.Create;
+    TouchedPaths := TStringList.Create;
+    Docs := CreateObject(TInterfaceList);
+    SelectedBusy := True;
+    Try
+        If Not AnnotateSheets(P, Paths, Docs, ErrCode, ErrMsg) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+
+        If Not Apply Then
+        Begin
+            Rows := '';
+            For I := 0 To Paths.Count - 1 Do
+            Begin
+                If I > 0 Then Rows := Rows + ',';
+                Doc := Docs[I];
+                Back := '';
+                { Opt-in: not proven on this Altium version (upstream a98d70e, AD 25.8.1). }
+                If ExtractJsonValue(Params, 'templates') = '1' Then
+                Begin
+                    Try Back := Doc.GetState_TemplateFileName; Except Back := ''; End;
+                End;
+                Rows := Rows + '{"index":' + IntToStr(I) + ',"path":"' + EscapeJsonString(Paths[I])
+                    + '","template":"' + EscapeJsonString(Back)
+                    + '","modified":' + BoolToJsonStr(Client.GetDocumentByPath(Paths[I]).Modified) + '}';
+            End;
+            Body := '';
+            Count := 0;
+            PinCount := 0;
+            SheetIdx := StrToIntDef(ExtractJsonValue(Params, 'sheet'), -1);
+            If (SheetIdx >= 0) And (SheetIdx < Docs.Count) Then
+            Begin
+                Doc := Docs[SheetIdx];
+                Body := SchEditKindJSON(Doc, 'label', Count) + SchEditKindJSON(Doc, 'power', Count)
+                    + SchEditKindJSON(Doc, 'port', Count) + SchEditKindJSON(Doc, 'wire', Count)
+                    + SchEditKindJSON(Doc, 'text', Count) + SchEditKindJSON(Doc, 'note', Count)
+                    + SchEditKindJSON(Doc, 'box', Count) + SchEditKindJSON(Doc, 'line', Count);
+                If Body <> '' Then Body := Copy(Body, 2, Length(Body));
+                Status := SchEditPinsJSON(Doc, PinCount);
+                If Status <> '' Then Status := Copy(Status, 2, Length(Status));
+                Problems := SchEditParamsJSON(Doc);
+                If Problems <> '' Then Problems := Copy(Problems, 2, Length(Problems));
+                Body := ',"sheet":' + IntToStr(SheetIdx) + ',"object_count":' + IntToStr(Count)
+                    + ',"pin_count":' + IntToStr(PinCount)
+                    + ',"objects":[' + Body + '],"pins":[' + Status + '],"parameters":[' + Problems + ']';
+            End
+            Else If SheetIdx >= Docs.Count Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_SHEET', 'sheet index out of range');
+                Exit;
+            End;
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"preview","batch_hash":"' + LowerCase(BatchHash)
+                + '","sheets":[' + Rows + '],"saved":false,"touched":false' + Body + '}}');
+            Exit;
+        End;
+
+        { Apply: parse the items. }
+        Rest := ItemsStr;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            If (IOp.Count >= 200) Or (ParamEditCountChar(OpStr, '|') <> 9) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH',
+                    'Expected op|sheet|x1|y1|x2|y2|n|s1|s2|s3, at most 200 items');
+                Exit;
+            End;
+            IOp.Add(ParamEditTake(OpStr, '|'));
+            ISheet.Add(ParamEditTake(OpStr, '|'));
+            IX1.Add(ParamEditTake(OpStr, '|'));
+            IY1.Add(ParamEditTake(OpStr, '|'));
+            IX2.Add(ParamEditTake(OpStr, '|'));
+            IY2.Add(ParamEditTake(OpStr, '|'));
+            IN_.Add(ParamEditTake(OpStr, '|'));
+            Kind := SchEditDecode(ParamEditTake(OpStr, '|'), Ok);
+            S2 := SchEditDecode(ParamEditTake(OpStr, '|'), Ok2);
+            S3 := SchEditDecode(OpStr, Ok3);
+            IS1.Add(Kind); IS2.Add(S2); IS3.Add(S3);
+            IStatus.Add(Blank); IBack.Add(Blank);
+            J := IOp.Count - 1;
+            Op := IOp[J];
+            K := StrToIntDef(ISheet[J], -1);
+            If (Not Ok) Or (Not Ok2) Or (Not Ok3) Or (K < 0) Or (K >= Docs.Count)
+                Or (Not PlaceEditIntOk(IX1[J])) Or (Not PlaceEditIntOk(IY1[J]))
+                Or (Not PlaceEditIntOk(IX2[J])) Or (Not PlaceEditIntOk(IY2[J]))
+                Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
+                Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam'))
+                Or ((Op <> 'docparam') And (SchEditKindId(Kind) < 0))
+                Or ((Op = 'docparam') And (Kind = ''))
+                Or ((Op = 'settext') And (Not SchEditHasText(Kind)))
+                Or ((Op = 'settext') And (S3 = '') And (Kind <> 'note'))
+                Or ((Op = 'move') And (Kind <> 'label') And (Kind <> 'power') And (Kind <> 'text'))
+                Or ((Op = 'add') And SchEditHasText(Kind) And (S3 = ''))
+                Or ((Op = 'add') And (Kind = 'power') And (Not SchEditPowerStyleOk(S2))) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Bad item ' + IntToStr(J + 1) + ': ' + Op + ' ' + Kind);
+                Exit;
+            End;
+        End;
+        If IOp.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No items');
+            Exit;
+        End;
+
+        { Preflight every item; refuse the whole batch on the first problem. }
+        Refused := 0;
+        Problems := '';
+        For J := 0 To IOp.Count - 1 Do
+        Begin
+            Status := '';
+            Op := IOp[J]; Kind := IS1[J]; S2 := IS2[J];
+            K := StrToInt(ISheet[J]);
+            X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]);
+            X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+            Doc := Docs[K];
+            If Client.GetDocumentByPath(Paths[K]).Modified Then Status := 'sheet has unsaved edits'
+            Else If Op = 'docparam' Then
+            Begin
+                Obj := SchEditFindParam(Doc, Kind, Hits);
+                If Obj = Nil Then Status := 'sheet parameter not found once (' + IntToStr(Hits) + ')'
+                Else If SchEditObjText(Obj) <> S2 Then Status := 'value changed since the read'
+                Else If SchEditParamReadOnly(Obj) Then Status := 'Altium keeps this parameter read-only';
+            End
+            Else If Op = 'add' Then
+            Begin
+                Corner := (Kind = 'wire') Or SchEditHasCorner(Kind);
+                Obj := SchEditFind(Doc, Kind, X1, Y1, X2, Y2, Corner, Hits);
+                If Hits > 0 Then Status := 'the same ' + Kind + ' is already there'
+                Else If Corner And (X1 = X2) And (Y1 = Y2) Then Status := 'zero size';
+            End
+            Else
+            Begin
+                Corner := (Op = 'del') And ((Kind = 'wire') Or SchEditHasCorner(Kind));
+                Obj := SchEditFind(Doc, Kind, X1, Y1, X2, Y2, Corner, Hits);
+                If Obj = Nil Then Status := Kind + ' not found once at its place (' + IntToStr(Hits) + ')'
+                Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S2) Then Status := 'text changed since the read'
+                Else If Op = 'move' Then
+                Begin
+                    Obj := SchEditFind(Doc, Kind, X2, Y2, 0, 0, False, Hits2);
+                    If Hits2 > 0 Then Status := 'a ' + Kind + ' is already at the target';
+                End;
+            End;
+            If Status <> '' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 700 Then
+                    Problems := Problems + 'item ' + IntToStr(J + 1) + ' (' + Op + ' ' + Kind + '): ' + Status + '; ';
+            End;
+        End;
+        If Refused > 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing written. ' + Problems);
+            Exit;
+        End;
+
+        { Write per sheet, one PreProcess / PostProcess pair per touched sheet. }
+        Written := 0;
+        For K := 0 To Docs.Count - 1 Do
+        Begin
+            Pending := 0;
+            For J := 0 To IOp.Count - 1 Do
+                If StrToInt(ISheet[J]) = K Then Inc(Pending);
+            If (Pending = 0) Or Partial Then Continue;
+            Doc := Docs[K];
+            SchServer.ProcessControl.PreProcess(Doc, '');
+            Try
+                For J := 0 To IOp.Count - 1 Do
+                Begin
+                    If (StrToInt(ISheet[J]) <> K) Or Partial Then Continue;
+                    Op := IOp[J]; Kind := IS1[J]; S2 := IS2[J]; S3 := IS3[J];
+                    X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]);
+                    X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+                    N := StrToInt(IN_[J]);
+                    Back := '';
+                    Try
+                        If Op = 'add' Then
+                        Begin
+                            Touched := True;
+                            Obj := SchEditCreate(Doc, Kind, X1, Y1, X2, Y2, N, S2, S3);
+                            Corner := (Kind = 'wire') Or SchEditHasCorner(Kind);
+                            Obj := SchEditFind(Doc, Kind, X1, Y1, X2, Y2, Corner, Hits);
+                            If Obj = Nil Then Back := 'missing'
+                            Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S3) Then Back := 'text differs'
+                            Else Back := 'ok';
+                        End
+                        Else If Op = 'docparam' Then
+                        Begin
+                            Obj := SchEditFindParam(Doc, Kind, Hits);
+                            If (Obj = Nil) Or (SchEditObjText(Obj) <> S2) Then Back := 'changed during apply'
+                            Else
+                            Begin
+                                Touched := True;
+                                SchBeginModify(Obj);
+                                Obj.Text := S3;
+                                SchEndModify(Obj);
+                                If SchEditObjText(Obj) = S3 Then Back := 'ok' Else Back := 'text differs';
+                            End;
+                        End
+                        Else
+                        Begin
+                            Corner := (Op = 'del') And ((Kind = 'wire') Or SchEditHasCorner(Kind));
+                            Obj := SchEditFind(Doc, Kind, X1, Y1, X2, Y2, Corner, Hits);
+                            If (Obj = Nil) Or (SchEditHasText(Kind) And (SchEditObjText(Obj) <> S2)) Then
+                                Back := 'changed during apply'
+                            Else If Op = 'settext' Then
+                            Begin
+                                Touched := True;
+                                SchBeginModify(Obj);
+                                Obj.Text := S3;
+                                SchEndModify(Obj);
+                                If SchEditObjText(Obj) = S3 Then Back := 'ok' Else Back := 'text differs';
+                            End
+                            Else If Op = 'move' Then
+                            Begin
+                                Touched := True;
+                                SchBeginModify(Obj);
+                                Loc := Obj.Location;
+                                Loc.X := X2;
+                                Loc.Y := Y2;
+                                Obj.Location := Loc;
+                                SchEndModify(Obj);
+                                Obj := SchEditFind(Doc, Kind, X2, Y2, 0, 0, False, Hits);
+                                If (Obj <> Nil) And (SchEditObjText(Obj) = S2) Then Back := 'ok' Else Back := 'not at target';
+                            End
+                            Else
+                            Begin
+                                Touched := True;
+                                Doc.RemoveSchObject(Obj);
+                                { Announced, as upstream 160650b: without it the compiled }
+                                { model kept a deleted object until the sheet reopened.   }
+                                SchRegisterObject(Doc, Obj);
+                                Obj := SchEditFind(Doc, Kind, X1, Y1, X2, Y2, Corner, Hits);
+                                If Hits = 0 Then Back := 'ok' Else Back := 'still there';
+                            End;
+                        End;
+                    Except
+                        Back := 'exception';
+                    End;
+                    IBack[J] := Back;
+                    If Touched And (TouchedPaths.IndexOf(Paths[K]) < 0) Then TouchedPaths.Add(Paths[K]);
+                    If Back = 'ok' Then
+                    Begin
+                        IStatus[J] := 'written';
+                        Inc(Written);
+                    End
+                    Else
+                    Begin
+                        IStatus[J] := 'not_ok: ' + Back;
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                Try SchServer.ProcessControl.PostProcess(Doc, 'Edit'); Except End;
+                Try Doc.GraphicallyInvalidate; Except End;
+            End;
+        End;
+        For I := 0 To TouchedPaths.Count - 1 Do MarkDocDirtyByPath(TouchedPaths[I]);
+        For J := 0 To IOp.Count - 1 Do
+            If IStatus[J] = '' Then IStatus[J] := 'not_written';
+
+        Rows := '';
+        For J := 0 To IOp.Count - 1 Do
+        Begin
+            If J > 0 Then Rows := Rows + ',';
+            Rows := Rows + '{"op":"' + EscapeJsonString(IOp[J]) + '","sheet":' + ISheet[J]
+                + ',"kind":"' + EscapeJsonString(IS1[J]) + '","status":"' + EscapeJsonString(IStatus[J]) + '"}';
+        End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; read again (written: ' + IntToStr(Written) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"apply","batch_hash":"' + LowerCase(BatchHash)
+                + '","item_count":' + IntToStr(IOp.Count)
+                + ',"written":' + IntToStr(Written)
+                + ',"partial":' + BoolToJsonStr(Partial)
+                + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched)
+                + ',"saved":false,"items":[' + Rows + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            ParamEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        Paths.Free; IOp.Free; ISheet.Free; IX1.Free; IY1.Free; IX2.Free; IY2.Free; IN_.Free;
+        IS1.Free; IS2.Free; IS3.Free; IStatus.Free; IBack.Free; TouchedPaths.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -5211,6 +6040,7 @@ Begin
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.repour_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) And
        (Not (SELECTED_PARAM_EDITS And (Command = 'project.annotate_checked'))) And
+       (Not (SELECTED_PARAM_EDITS And (Command = 'project.edit_schematic_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_graphics_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.edit_free_checked'))) Then
     Begin
@@ -5266,6 +6096,11 @@ Begin
     If Command = 'project.annotate_checked' Then
     Begin
         Result := SelectedAnnotateChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'project.edit_schematic_checked' Then
+    Begin
+        Result := SelectedEditSchematicChecked(P, Params, RequestId);
         Exit;
     End;
     If Command = 'pcb.place_graphics_checked' Then

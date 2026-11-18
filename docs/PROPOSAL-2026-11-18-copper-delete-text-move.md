@@ -52,4 +52,7 @@ wheel but not exposed: Stefan's go needed); one plan carrying deletes, copper an
 
 ## 4. Qualification record
 
-Pending.
+- **R1 passed 2026-11-18** (runtime `20261118b`, real 22p): the script loaded without an error, ping
+  `2026.11.18.2`; CON402 pads read `x_exact_mm` 145.580 / rows 84.106 ... 94.106 at 0.500 pitch, equal to the
+  DSI track ends (the mil-rounded fields read 145.567 and rows off by up to 0.012).
+- R2-R8 pending; they run on runtime `20261118c` (scripts `.3`, same PCB code).
