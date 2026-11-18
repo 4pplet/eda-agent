@@ -114,6 +114,12 @@ Begin
     End;
 End;
 
+{ A coordinate as millimetres with 3 decimals, for messages (PLT 2026-11-18). }
+Function CoordToMMStr(C : Double) : String;
+Begin
+    Result := FloatToJsonStr(Round(C * 25.4 / 10000) / 1000);
+End;
+
 { HexNibble / CodeUnitHex4 / EscapeJsonString MUST be defined before the JSON}
 { prop builders below, which call EscapeJsonString. DelphiScript resolves     }
 { identifiers top-down within a unit and has no Forward declarations, so a    }

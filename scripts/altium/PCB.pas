@@ -6655,6 +6655,75 @@ Begin
         Or (Copy(LayerStr, 1, 8) = 'MidLayer');
 End;
 
+{..............................................................................}
+{ PCB_GetFreeGraphicsForBoard - free lines and arcs on non-copper layers       }
+{ (PLT 2026-11-18). The Mechanical 1 outline and V-cut lines, silk lines;      }
+{ not in a component, polygon or dimension. Raw TCoord units. At most 2000     }
+{ rows; "truncated" says when. Same property names as get_tracks.            }
+{..............................................................................}
+Function PCB_GetFreeGraphicsForBoard(Board : IPCB_Board; RequestId : String) : String;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Track : IPCB_Track;
+    Arc : IPCB_Arc;
+    JsonItems, LayerStr, Row : String;
+    Count, Total : Integer;
+Begin
+    JsonItems := '';
+    Count := 0;
+    Total := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            LayerStr := GetLayerString(Prim.Layer);
+            If (Not PCB_IsCopperLayerName(LayerStr)) And (Prim.Layer <> eMultiLayer)
+                And (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) Then
+            Begin
+                Inc(Total);
+                If Count < 2000 Then
+                Begin
+                    Row := '';
+                    If Prim.ObjectId = eTrackObject Then
+                    Begin
+                        Track := Prim;
+                        Row := '{"kind":"line","layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"x1":' + IntToStr(Track.X1) + ',"y1":' + IntToStr(Track.Y1) + ','
+                            + '"x2":' + IntToStr(Track.X2) + ',"y2":' + IntToStr(Track.Y2) + ','
+                            + '"width":' + IntToStr(Track.Width) + '}';
+                    End
+                    Else
+                    Begin
+                        Arc := Prim;
+                        Row := '{"kind":"arc","layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"xc":' + IntToStr(Arc.XCenter) + ',"yc":' + IntToStr(Arc.YCenter) + ','
+                            + '"radius":' + IntToStr(Arc.Radius) + ','
+                            + '"start_angle":' + FloatToJsonStr(Arc.StartAngle) + ','
+                            + '"end_angle":' + FloatToJsonStr(Arc.EndAngle) + ','
+                            + '"width":' + IntToStr(Arc.LineWidth) + '}';
+                    End;
+                    If Count > 0 Then JsonItems := JsonItems + ',';
+                    JsonItems := JsonItems + Row;
+                    Inc(Count);
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+    Result := BuildSuccessResponse(RequestId,
+        '{"graphics":[' + JsonItems + '],"count":' + IntToStr(Count)
+        + ',"total":' + IntToStr(Total) + ',"truncated":' + BoolToJsonStr(Total > Count)
+        + ',"units":"coord","coord_per_mil":10000}');
+End;
+
+
 Function PCB_GetTracksForBoard(Board : IPCB_Board; Params : String; RequestId : String) : String;
 Var
     Iterator : IPCB_BoardIterator;

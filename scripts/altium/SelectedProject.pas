@@ -347,6 +347,7 @@ Begin
         Or (Command = 'pcb.get_diff_pair_rules')
         Or (Command = 'pcb.get_vias')
         Or (Command = 'pcb.get_texts')
+        Or (Command = 'pcb.get_free_graphics')
         Or (Command = 'pcb.get_tracks')
         Or (Command = 'pcb.get_polygons')
         Or (Command = 'pcb.get_unrouted_nets')
@@ -2009,7 +2010,7 @@ Begin
             Begin
                 Gap := CopperNearest(Board, VNet[J], eNoLayer, X, Y, X, Y, S / 2, C, What);
                 If Gap < C Then
-                    VStatus[J] := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(C) + ')'
+                    VStatus[J] := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(C) + ' mm)'
                 Else
                     VStatus[J] := 'would_place';
             End;
@@ -2047,7 +2048,7 @@ Begin
                 Begin
                     Gap := CopperNearest(Board, TNet[J], Lyr, X1, Y1, X2, Y2, W / 2, C, What);
                     If Gap < C Then
-                        TStatus[J] := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(C) + ')'
+                        TStatus[J] := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(C) + ' mm)'
                     Else
                         TStatus[J] := 'would_place';
                 End;
@@ -4230,7 +4231,7 @@ Begin
                     Gap := CopperNearest(Board, INet[J], Lyr, (LoX + HiX) Div 2, LoY + (HiX - LoX) Div 2,
                         (LoX + HiX) Div 2, HiY - (HiX - LoX) Div 2, (HiX - LoX) / 2, Clearance, What);
                 If Gap < Clearance Then
-                    Status := 'refused: ' + What + ' within clearance (' + IntToStr(Round(Gap)) + ' of ' + IntToStr(Clearance) + ')';
+                    Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)';
             End;
             If Status = '' Then Status := 'would_place';
             IStatus[J] := Status;
@@ -4409,6 +4410,559 @@ Begin
     End;
 End;
 
+{ ---- Checked edits of free objects (TOOLS.md backlog 2 / 4, 2026-11-18) -------- }
+{ Delete a free line on a non-copper layer, delete or move a free via, edit a     }
+{ free text in place, redefine the board shape from free lines. Every op names    }
+{ its target by exact geometry (and text), so it is its own compare-and-set; the  }
+{ batch also binds the counts of free objects and the board-shape point count.   }
+{ Board-edits tick, saved PcbDoc, one batch per save, read back, never saves.     }
+{ Items op|layer|x1|y1|x2|y2|w|s1|s2 (raw coordinates):                           }
+{   delline: layer (non-copper), x1..y2 the exact ends (either order)            }
+{   delvia : x1,y1 centre, x2 size, y2 hole                                      }
+{   movevia: x1,y1 old centre, x2,y2 new centre, w size, s1 hole; the new place   }
+{            is checked against other-net copper with `clearance`                 }
+{   text   : layer, x1,y1 location, s1 the old text, s2 the new (1-40 chars)      }
+{   shape  : layer, s1 'x,y x,y ...' (3-64 vertices, in order); every vertex must  }
+{            be an end of a free line on that layer (the client checks coverage)  }
+
+Function FreeLineCount(Board : IPCB_Board; Lyr : TLayer; X1, Y1, X2, Y2 : Integer; Var First : IPCB_Track) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Track : IPCB_Track;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) And (Prim.Layer = Lyr) Then
+            Begin
+                Track := Prim;
+                If ((Track.X1 = X1) And (Track.Y1 = Y1) And (Track.X2 = X2) And (Track.Y2 = Y2))
+                    Or ((Track.X1 = X2) And (Track.Y1 = Y2) And (Track.X2 = X1) And (Track.Y2 = Y1)) Then
+                Begin
+                    Inc(Result);
+                    If First = Nil Then First := Track;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function FreeLineEndAt(Board : IPCB_Board; Lyr : TLayer; X, Y : Integer) : Boolean;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Track : IPCB_Track;
+Begin
+    Result := False;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While (Prim <> Nil) And (Not Result) Do
+        Begin
+            If (Not Prim.InComponent) And (Prim.Layer = Lyr) Then
+            Begin
+                Track := Prim;
+                If ((Track.X1 = X) And (Track.Y1 = Y)) Or ((Track.X2 = X) And (Track.Y2 = Y)) Then Result := True;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function FreeViaCount(Board : IPCB_Board; X, Y, Size, Hole : Integer; Var First : IPCB_Via) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Via : IPCB_Via;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eViaObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Via := Iter.FirstPCBObject;
+        While Via <> Nil Do
+        Begin
+            { Within 5000 raw (0.5 mil): the vias read reports whole mils, so a plan    }
+            { built from it cannot carry the exact raw values. Two vias closer than   }
+            { that cannot coexist; the identical-via count still guards.              }
+            If (Not Via.InComponent) And CoordWithinTol(Via.x, X, 5000) And CoordWithinTol(Via.y, Y, 5000)
+                And CoordWithinTol(Via.Size, Size, 5000) And CoordWithinTol(Via.HoleSize, Hole, 5000) Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Via;
+            End;
+            Via := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function FreeTextCount(Board : IPCB_Board; Lyr : TLayer; X, Y : Integer; TextStr : String; Var First : IPCB_Text) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Txt : IPCB_Text;
+    T : String;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTextObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Txt := Iter.FirstPCBObject;
+        While Txt <> Nil Do
+        Begin
+            If (Not Txt.InComponent) And (Not Txt.InDimension) And (Txt.Layer = Lyr)
+                And (Txt.XLocation = X) And (Txt.YLocation = Y) Then
+            Begin
+                T := '';
+                Try T := Txt.Text; Except End;
+                If T = TextStr Then
+                Begin
+                    Inc(Result);
+                    If First = Nil Then First := Txt;
+                End;
+            End;
+            Txt := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function FreeViaTotal(Board : IPCB_Board) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Via : IPCB_Via;
+Begin
+    Result := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eViaObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Via := Iter.FirstPCBObject;
+        While Via <> Nil Do
+        Begin
+            If Not Via.InComponent Then Inc(Result);
+            Via := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+Function EditFreeTextOk(S : String) : Boolean;
+Var
+    I, C : Integer;
+    Ch : String;
+Begin
+    Result := (Length(S) >= 1) And (Length(S) <= 40);
+    If Not Result Then Exit;
+    For I := 1 To Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        C := Ord(Ch[1]);
+        If (C < 32) Or (C > 126) Or (C = 124) Or (C = 59) Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+End;
+
+{ 'x,y x,y ...' -> VX / VY; False on a malformed list or outside 3..64 vertices. }
+Function ShapeVertices(S : String; VX, VY : TStringList) : Boolean;
+Var
+    Rest, Pair, A : String;
+Begin
+    Result := False;
+    Rest := S;
+    While Rest <> '' Do
+    Begin
+        Pair := ParamEditTake(Rest, ' ');
+        If Pair = '' Then Continue;
+        If ParamEditCountChar(Pair, ',') <> 1 Then Exit;
+        A := ParamEditTake(Pair, ',');
+        If (Not PlaceEditIntOk(A)) Or (Not PlaceEditIntOk(Pair)) Then Exit;
+        VX.Add(A);
+        VY.Add(Pair);
+        If VX.Count > 64 Then Exit;
+    End;
+    Result := VX.Count >= 3;
+End;
+
+Function SelectedEditFreeChecked(P : IProject; Params, RequestId : String) : String;
+Var
+    Mode, ItemsStr, BatchHash, OldCounts, Rest, OpStr, Problems, Binding, Blank, What, ItemsJson : String;
+    PcbPath, ErrCode, ErrMsg, LayerStr, Counts, Back, Status, NetName : String;
+    IOp, ILay, IX1, IY1, IX2, IY2, IW, IS1, IS2, IStatus, IBack, VX, VY : TStringList;
+    J, K, Count, Would, Refused, Done, NPads, NFills, NTexts, NLines, NVias, NShape, Clearance, N : Integer;
+    X1, Y1, X2, Y2, W, Hole : Integer;
+    Apply, PcbModified, Partial, Touched, Ok, IsCopper : Boolean;
+    Board : IPCB_Board;
+    Lyr : TLayer;
+    Track : IPCB_Track;
+    Via : IPCB_Via;
+    Txt : IPCB_Text;
+    Seg, Seg2 : TPolySegment;
+    Gap : Double;
+    F0, F1, F2, F3, F4, F5, F6, F7, F8 : String;
+Begin
+    Mode := ExtractJsonValue(Params, 'mode');
+    ItemsStr := ExtractJsonValue(Params, 'items');
+    BatchHash := ExtractJsonValue(Params, 'batch_hash');
+    OldCounts := ExtractJsonValue(Params, 'old_counts');
+    Clearance := StrToIntDef(ExtractJsonValue(Params, 'clearance'), -1);
+    If (Mode <> 'preview') And (Mode <> 'apply') Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'INVALID_MODE', 'mode must be preview or apply');
+        Exit;
+    End;
+    Apply := (Mode = 'apply');
+    If Apply And (Not PlaceEditGrantActive(0)) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'NO_GRANT',
+            'Board edits are not granted: the operator ticks "Allow board edits" in the bridge window');
+        Exit;
+    End;
+    If (Not ParamEditHashValid(BatchHash)) Or (Clearance < 0) Then
+    Begin
+        Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'batch_hash must be 64 hex characters and clearance a raw coordinate');
+        Exit;
+    End;
+    Binding := SelectionJSON(0);
+    Blank := '';
+    Touched := False;
+    Partial := False;
+    IOp := TStringList.Create; ILay := TStringList.Create; IX1 := TStringList.Create; IY1 := TStringList.Create;
+    IX2 := TStringList.Create; IY2 := TStringList.Create; IW := TStringList.Create; IS1 := TStringList.Create;
+    IS2 := TStringList.Create; IStatus := TStringList.Create; IBack := TStringList.Create;
+    VX := TStringList.Create; VY := TStringList.Create;
+    SelectedBusy := True;
+    Try
+        Rest := ItemsStr;
+        Count := 0;
+        While Rest <> '' Do
+        Begin
+            OpStr := ParamEditTake(Rest, ';');
+            Inc(Count);
+            If (Count > 100) Or (ParamEditCountChar(OpStr, '|') <> 8) Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': expected 9 fields, at most 100 items');
+                Exit;
+            End;
+            F0 := ParamEditTake(OpStr, '|'); F1 := ParamEditTake(OpStr, '|'); F2 := ParamEditTake(OpStr, '|');
+            F3 := ParamEditTake(OpStr, '|'); F4 := ParamEditTake(OpStr, '|'); F5 := ParamEditTake(OpStr, '|');
+            F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
+            Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape'))
+                And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
+                And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
+            If Not Ok Then
+            Begin
+                Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': bad op, layer or number');
+                Exit;
+            End;
+            IOp.Add(F0); ILay.Add(F1); IX1.Add(F2); IY1.Add(F3); IX2.Add(F4); IY2.Add(F5);
+            IW.Add(F6); IS1.Add(F7); IS2.Add(F8); IStatus.Add(Blank); IBack.Add(Blank);
+        End;
+        If IOp.Count = 0 Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'No items');
+            Exit;
+        End;
+
+        Board := ResolveSelectedBoard(P, PcbPath, PcbModified, ErrCode, ErrMsg);
+        If Board = Nil Then
+        Begin
+            Result := BuildErrorResponse(RequestId, ErrCode, ErrMsg);
+            Exit;
+        End;
+        If Apply And PcbModified Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PCB_DIRTY',
+                'The PcbDoc has unsaved edits; save or discard them first (one batch per save)');
+            Exit;
+        End;
+        GraphicsCount(Board, NPads, NFills, NTexts, NLines);
+        NVias := FreeViaTotal(Board);
+        NShape := 0;
+        Try NShape := Board.BoardOutline.PointCount; Except NShape := -1; End;
+        Counts := IntToStr(NPads) + ',' + IntToStr(NFills) + ',' + IntToStr(NTexts) + ',' + IntToStr(NLines)
+            + ',' + IntToStr(NVias) + ',' + IntToStr(NShape);
+        If Apply And (Counts <> OldCounts) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED',
+                'Nothing changed. The board''s free objects changed since the preview (' + Counts + '); preview again');
+            Exit;
+        End;
+
+        { Classify. }
+        Problems := '';
+        Refused := 0;
+        Would := 0;
+        For J := 0 To IOp.Count - 1 Do
+        Begin
+            X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]); X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+            W := StrToInt(IW[J]);
+            Status := '';
+            Lyr := ResolveLayerId(Board, ILay[J]);
+            LayerStr := '';
+            If Lyr <> eNoLayer Then LayerStr := GetLayerString(Lyr);
+            IsCopper := (Lyr = eMultiLayer) Or ((LayerStr <> '') And PCB_IsCopperLayerName(LayerStr));
+            If IOp[J] = 'delline' Then
+            Begin
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: copper tracks are not deleted here'
+                Else
+                Begin
+                    N := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                    If N = 0 Then Status := 'refused: no free line with these exact ends on this layer'
+                    Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
+                    Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'delvia' Then
+            Begin
+                N := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
+                If N = 0 Then Status := 'refused: no free via with this centre, size and hole'
+                Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical vias here'
+                Else Status := 'would_delete';
+            End
+            Else If IOp[J] = 'movevia' Then
+            Begin
+                If Not PlaceEditIntOk(IS1[J]) Then Status := 'refused: hole must be an integer'
+                Else
+                Begin
+                    Hole := StrToInt(IS1[J]);
+                    N := FreeViaCount(Board, X1, Y1, W, Hole, Via);
+                    If N = 0 Then Status := 'refused: no free via with this centre, size and hole'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical vias here'
+                    Else If (X1 = X2) And (Y1 = Y2) Then Status := 'refused: new centre equals the old'
+                    Else
+                    Begin
+                        NetName := '';
+                        Try
+                            If Via.Net <> Nil Then NetName := Via.Net.Name;
+                        Except
+                            NetName := '';
+                        End;
+                        Gap := CopperNearest(Board, NetName, eNoLayer, X2, Y2, X2, Y2, W / 2, Clearance, What);
+                        If Gap < Clearance Then
+                            Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                        Else Status := 'would_move';
+                    End;
+                End;
+            End
+            Else If IOp[J] = 'text' Then
+            Begin
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If Not EditFreeTextOk(IS2[J]) Then Status := 'refused: new text needs 1-40 plain characters'
+                Else
+                Begin
+                    N := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                    If N = 0 Then Status := 'refused: no free text with this text and location on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical texts here'
+                    Else If IS1[J] = IS2[J] Then Status := 'unchanged'
+                    Else Status := 'would_edit';
+                End;
+            End
+            Else
+            Begin
+                VX.Clear;
+                VY.Clear;
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: the shape comes from a non-copper layer'
+                Else If Not ShapeVertices(IS1[J], VX, VY) Then Status := 'refused: vertices must be 3-64 x,y pairs'
+                Else
+                Begin
+                    For K := 0 To VX.Count - 1 Do
+                        If (Status = '') And (Not FreeLineEndAt(Board, Lyr, StrToInt(VX[K]), StrToInt(VY[K]))) Then
+                            Status := 'refused: vertex ' + IntToStr(K + 1) + ' is not an end of a free line on this layer';
+                    If Status = '' Then Status := 'would_reshape (' + IntToStr(VX.Count) + ' vertices)';
+                End;
+            End;
+            IStatus[J] := Status;
+            If Copy(Status, 1, 7) = 'refused' Then
+            Begin
+                Inc(Refused);
+                If Length(Problems) < 800 Then Problems := Problems + IOp[J] + ' ' + IntToStr(J + 1) + ': ' + Copy(Status, 10, 200) + '; ';
+            End
+            Else If Status <> 'unchanged' Then Inc(Would);
+        End;
+        If Apply And (Refused > 0) Then
+        Begin
+            Result := BuildErrorResponse(RequestId, 'PREFLIGHT_REFUSED', 'Nothing changed. ' + Problems);
+            Exit;
+        End;
+
+        Done := 0;
+        If Apply And (Would > 0) Then
+        Begin
+            PCBServer.PreProcess;
+            Try
+                For J := 0 To IOp.Count - 1 Do
+                Begin
+                    If Partial Or (Copy(IStatus[J], 1, 5) <> 'would') Then Continue;
+                    X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]); X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+                    W := StrToInt(IW[J]);
+                    Lyr := ResolveLayerId(Board, ILay[J]);
+                    Touched := True;
+                    Back := '';
+                    Ok := False;
+                    If IOp[J] = 'delline' Then
+                    Begin
+                        N := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                        If Track <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                            Board.RemovePCBObject(Track);
+                            K := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = N - 1);
+                        End;
+                    End
+                    Else If IOp[J] = 'delvia' Then
+                    Begin
+                        N := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
+                        If Via <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Via.I_ObjectAddress);
+                            Board.RemovePCBObject(Via);
+                            K := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'movevia' Then
+                    Begin
+                        Hole := StrToInt(IS1[J]);
+                        N := FreeViaCount(Board, X1, Y1, W, Hole, Via);
+                        If Via <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Via.x := X2;
+                            Via.y := Y2;
+                            PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := IntToStr(Via.x) + ',' + IntToStr(Via.y) + ',' + IntToStr(Via.Size) + ',' + IntToStr(Via.HoleSize);
+                            Ok := (Via.x = X2) And (Via.y = Y2) And CoordWithinTol(Via.Size, W, 5000) And CoordWithinTol(Via.HoleSize, Hole, 5000);
+                        End;
+                    End
+                    Else If IOp[J] = 'text' Then
+                    Begin
+                        N := FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt);
+                        If Txt <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Txt.Text := IS2[J];
+                            PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := Txt.Text + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
+                            Ok := (Txt.Text = IS2[J]) And (Txt.XLocation = X1) And (Txt.YLocation = Y1);
+                        End;
+                    End
+                    Else
+                    Begin
+                        VX.Clear;
+                        VY.Clear;
+                        ShapeVertices(IS1[J], VX, VY);
+                        Board.BoardOutline.PointCount := VX.Count;
+                        Seg := TPolySegment;
+                        Seg.Kind := ePolySegmentLine;
+                        For K := 0 To VX.Count - 1 Do
+                        Begin
+                            Seg.vx := StrToInt(VX[K]);
+                            Seg.vy := StrToInt(VY[K]);
+                            Board.BoardOutline.Segments[K] := Seg;
+                        End;
+                        Board.BoardOutline.Invalidate;
+                        Board.BoardOutline.Rebuild;
+                        Board.BoardOutline.Validate;
+                        Ok := (Board.BoardOutline.PointCount = VX.Count);
+                        Back := 'points ' + IntToStr(Board.BoardOutline.PointCount);
+                        If Ok Then
+                            For K := 0 To VX.Count - 1 Do
+                            Begin
+                                Seg2 := Board.BoardOutline.Segments[K];
+                                If (Seg2.vx <> StrToInt(VX[K])) Or (Seg2.vy <> StrToInt(VY[K])) Then Ok := False;
+                            End;
+                    End;
+                    IBack[J] := Back;
+                    If Back = '' Then
+                    Begin
+                        IStatus[J] := 'not_done: target not found at apply';
+                        Partial := True;
+                    End
+                    Else If Ok Then
+                    Begin
+                        IStatus[J] := 'done';
+                        Inc(Done);
+                    End
+                    Else
+                    Begin
+                        IStatus[J] := 'done_readback_differs';
+                        Partial := True;
+                    End;
+                End;
+            Finally
+                PCBServer.PostProcess;
+                If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            For J := 0 To IOp.Count - 1 Do
+                If Copy(IStatus[J], 1, 5) = 'would' Then IStatus[J] := 'not_done';
+        End;
+
+        ItemsJson := '';
+        For J := 0 To IOp.Count - 1 Do
+        Begin
+            If J > 0 Then ItemsJson := ItemsJson + ',';
+            ItemsJson := ItemsJson + '{"op":"' + IOp[J] + '","layer":"' + EscapeJsonString(ILay[J])
+                + '","status":"' + EscapeJsonString(IStatus[J]) + '","readback":"' + EscapeJsonString(IBack[J]) + '"}';
+        End;
+        Try PcbModified := Client.GetDocumentByPath(PcbPath).Modified; Except PcbModified := True; End;
+        If (CurrentSelectedProject(0) <> P) Or (SelectionJSON(0) <> Binding) Then
+            Result := BuildErrorResponse(RequestId, 'CHANGED_DURING_WRITE',
+                'Selection or grant changed during the call; preview again (done: ' + IntToStr(Done) + ')')
+        Else
+            Result := BuildSuccessResponse(RequestId, '{"selection":' + Binding
+                + ',"result":{"mode":"' + Mode + '","pcb_path":"' + EscapeJsonString(PcbPath)
+                + '","batch_hash":"' + LowerCase(BatchHash) + '","counts":"' + Counts
+                + '","item_count":' + IntToStr(IOp.Count) + ',"would_change":' + IntToStr(Would)
+                + ',"refused":' + IntToStr(Refused) + ',"done":' + IntToStr(Done)
+                + ',"partial":' + BoolToJsonStr(Partial) + ',"touched":' + BoolToJsonStr(Touched)
+                + ',"grant_cleared":' + BoolToJsonStr(Touched) + ',"pcb_modified":' + BoolToJsonStr(PcbModified)
+                + ',"saved":false,"items":[' + ItemsJson + ']}}');
+    Finally
+        If Touched Then
+        Begin
+            PlaceEditGrant := False;
+            Inc(SelectedGeneration);
+        End;
+        SelectedBusy := False;
+        IOp.Free; ILay.Free; IX1.Free; IY1.Free; IX2.Free; IY2.Free; IW.Free; IS1.Free;
+        IS2.Free; IStatus.Free; IBack.Free; VX.Free; VY.Free;
+    End;
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -4464,7 +5018,8 @@ Begin
        (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.repour_checked'))) And
        (Not (SELECTED_PLACE_EDITS And (Command = 'project.run_outjob_checked'))) And
        (Not (SELECTED_PARAM_EDITS And (Command = 'project.annotate_checked'))) And
-       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_graphics_checked'))) Then
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.place_graphics_checked'))) And
+       (Not (SELECTED_PLACE_EDITS And (Command = 'pcb.edit_free_checked'))) Then
     Begin
         Result := BuildErrorResponse(RequestId, 'READ_ONLY', 'Command unavailable in selected-project read-only mode');
         Exit;
@@ -4523,6 +5078,11 @@ Begin
     If Command = 'pcb.place_graphics_checked' Then
     Begin
         Result := SelectedPlaceGraphicsChecked(P, Params, RequestId);
+        Exit;
+    End;
+    If Command = 'pcb.edit_free_checked' Then
+    Begin
+        Result := SelectedEditFreeChecked(P, Params, RequestId);
         Exit;
     End;
     Binding := SelectionJSON(0);
@@ -4602,6 +5162,8 @@ Begin
                 Reply := PCB_GetViasForBoard(Board, RequestId)
             Else If Command = 'pcb.get_texts' Then
                 Reply := PCB_GetTextsForBoard(Board, RequestId)
+            Else If Command = 'pcb.get_free_graphics' Then
+                Reply := PCB_GetFreeGraphicsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_tracks' Then
                 { Rebuilt params: only the whitelisted filter and page fields
                   cross into the handler, never the caller's object. }
