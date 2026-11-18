@@ -96,9 +96,9 @@ Parameter edits have their own tick ("Allow parameter edits").
   ([PROPOSAL-2026-11-18-copper-delete-text-move](PROPOSAL-2026-11-18-copper-delete-text-move.md), runtime
   `selected-edits-20261118b`, **R1-R8 pending**): copper track delete, text and designator moves, raw
   coordinates in the pad / via / placement reads, connection lines re-analysed after moves and deletes.
-  R1 passed 2026-11-18 (loaded, ping, exact pad reads on the 22p). Scripts `2026.11.18.4`
+  R1 passed 2026-11-18 (loaded, ping, exact pad reads on the 22p). Scripts `2026.11.18.5`
   ([PROPOSAL-2026-11-18-schematic-edits](PROPOSAL-2026-11-18-schematic-edits.md), runtime
-  `selected-edits-20261118e`, **Q1-Q10 pending**, carries `.2` so R2-R8 run on it too): checked edits of
+  `selected-edits-20261118f`, **Q1-Q5 and R3 / R4 / R8 passed 2026-11-18, R2 failed, the rest pending**, carries `.2` so R2-R8 run on it too): checked edits of
   sheet-level schematic objects (net labels, power ports, wires, text, notes, boxes, lines, sheet
   parameters) and their read; the parameter tick is now "Allow schematic edits".
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.

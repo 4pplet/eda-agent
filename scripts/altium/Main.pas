@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.11.18.4';
+    SCRIPT_VERSION = '2026.11.18.5';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
     { Checked parameter edits (PROPOSAL-2026-09-28-metadata-write-increment):
@@ -1051,6 +1051,11 @@ Begin
     If Not FileExists(FilePath) Then Exit;
     Content := '';
     Attempt := 0;
+    { A freshly renamed request file is often still held (Defender, or the     }
+    { client's replace). On AD 23.3.1 the script debugger stops on the caught  }
+    { EFOpenError with a modal (22p, 2026-11-18), so give the file a moment    }
+    { before the first open instead of relying on the retry.                   }
+    Sleep(40);
     While Attempt < 12 Do
     Begin
         Inc(Attempt);

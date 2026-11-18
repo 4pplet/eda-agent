@@ -75,4 +75,9 @@ Unproven on this Altium version, so kept out of the default path:
 ## 4. Qualification record
 
 - 2026-11-18: the `.3` script loaded on AD 23.3.1 without an error (ping `2026.11.18.3`, runtime `c`).
-- Q1-Q10 pending on runtime `e`.
+- **Q1-Q5 passed 2026-11-18 on runtime `e`, real 22p**: ping `.4`; `sch read` of the four sheets (621 pins); the
+  relabel preview refused all 24 pins first (each label's wire also reaches the NC twin pin), then with `shared`
+  resolved to 12 label edits; apply without a tick was stopped, with it 12 of 12 written and read back; after
+  Stefan's save `sch verify` read 24 of 24 pins on the planned nets and Update PCB carried them to the board.
+  The sheet labels PB7 / PB6 as SDA / SCL: the plan took an `expect` for the compiled name.
+- Q6-Q10 pending. Scripts `.5` / runtime `f` (same schematic code): see the copper-delete proposal, section 4.

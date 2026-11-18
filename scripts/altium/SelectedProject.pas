@@ -1121,12 +1121,21 @@ Var
 Begin
     For I := 0 To Names.Count - 1 Do
     Begin
+        { A ground net is skipped: with the pours shelved its analysis took seven }
+        { minutes on the 22p (2026-11-18, a delete of 13 GND vias).               }
+        If Pos('GND', UpperCase(Names[I])) > 0 Then Continue;
         NetObj := Nil;
         Try NetObj := FindNetByName(Board, Names[I]); Except NetObj := Nil; End;
         If NetObj <> Nil Then
         Begin
             Try Board.AnalyzeNet(NetObj); Except End;
         End;
+    End;
+    { The connection lines still ran from the old places after a move (22p,    }
+    { 2026-11-18): the nets were analysed but the view was not rebuilt.        }
+    If Names.Count > 0 Then
+    Begin
+        Try Board.ViewManager_FullUpdate; Except End;
     End;
 End;
 
@@ -5062,7 +5071,7 @@ Begin
                         If Txt <> Nil Then
                         Begin
                             { A manually placed designator, as upstream's placement text move. }
-                            Comp.ChangeNameAutoposition(eAutoPos_Manual);
+                            Try Comp.ChangeNameAutoposition(eAutoPos_Manual); Except End;
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
                             Txt.XLocation := X2;
                             Txt.YLocation := Y2;

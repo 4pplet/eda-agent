@@ -654,14 +654,14 @@ Begin
         If Granted Then
         Begin
             chk_AllowPlace.Caption := '  ' + FilledDot(0)
-                + '  Placement edits GRANTED for ONE batch - click to revoke';
+                + '  Board edits GRANTED for ONE batch - click to revoke';
             chk_AllowPlace.Color := $00303848;
             If SelectedPath <> '' Then
             Begin
                 StatusForm.Caption := ExtractFileName(SelectedPath)
-                    + ' - EDA (PLACEMENT EDITS GRANTED)' + KeyboardWarningSuffix(0);
+                    + ' - EDA (BOARD EDITS GRANTED)' + KeyboardWarningSuffix(0);
                 lbl_SelectedProject.Caption := 'Selected: ' + ExtractFileName(SelectedPath)
-                    + #13#10 + 'PLACEMENT EDITS GRANTED for one batch (never saves)';
+                    + #13#10 + 'BOARD EDITS GRANTED for one batch (never saves)';
             End;
         End
         Else

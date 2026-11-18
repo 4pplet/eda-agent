@@ -55,4 +55,16 @@ wheel but not exposed: Stefan's go needed); one plan carrying deletes, copper an
 - **R1 passed 2026-11-18** (runtime `20261118b`, real 22p): the script loaded without an error, ping
   `2026.11.18.2`; CON402 pads read `x_exact_mm` 145.580 / rows 84.106 ... 94.106 at 0.500 pitch, equal to the
   DSI track ends (the mil-rounded fields read 145.567 and rows off by up to 0.012).
-- R2-R8 pending; they run on runtime `20261118c` (scripts `.3`, same PCB code).
+- 2026-11-18 evening, runtime `e` (scripts `.4`, same PCB code), the 22p ESD job:
+  - **R2 FAILED**: U405-U407 moved and read back exactly on their rows, but the connection lines still ran from
+    the old positions. `.5` adds `Board.ViewManager_FullUpdate` after the analysis; to be checked.
+  - **R3, R4 passed**: `deltracks` (box) + `deltrack` + `delvia`, 58 tracks and 13 vias, each read back gone.
+    The call took 422 s: the re-analysis of GND with the pours shelved. `.5` skips ground nets. Altium merged
+    collinear segments of the touched nets (three fewer tracks than deleted).
+  - **R8 passed**: copper batch from `pair_route.py` (approach right, first use; the clock pair needed the new
+    fan-out case): 76 tracks, 3 vias, no refusal; DRC after Stefan's repour: clearance 0, pair gap 0, width 0.
+    Lengths by `tracelengths`: skew 0.002-0.077 mm (planned 0.003 by track sums).
+  - R7: the DRC raised no dialog this time (pours fresh). R5, R6 not run: the first `edit` with text moves was
+    stopped by an unrelated Error modal (EFOpenError reading the request file).
+- Scripts `.5`, runtime `f`: 40 ms before the first request-file open, ground nets skipped in the re-analysis,
+  a view update after it, the designator autoposition call in Try, the board tick's wording made consistent.
