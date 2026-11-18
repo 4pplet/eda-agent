@@ -91,7 +91,7 @@ Parameter edits have their own tick ("Allow parameter edits").
   workstation: `selected-edits-20261117f` (scripts `.6` adds the read-only `pcb.get_texts`;
   U1-U5, U7 and G1-G8 passed 2026-11-18 on the real 22p; U6 not run). Scripts `2026.11.18.1`
   ([PROPOSAL-2026-11-18-free-object-edits](PROPOSAL-2026-11-18-free-object-edits.md), runtime
-  `selected-edits-20261118a`, E1-E8 pending): free non-copper line read, edits of free objects
+  `selected-edits-20261118a`, E1-E8 passed 2026-11-18): free non-copper line read, edits of free objects
   (delete line, move / delete via, text edit, board shape from the outline).
 
 ### Roadmap and known limitations
