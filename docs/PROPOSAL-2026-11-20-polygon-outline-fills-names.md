@@ -6,7 +6,8 @@ polygon and of two no-net pours could not be read (PLT-hw `TOOLS.md` limitation 
 same day. Scripts `2026.11.20.1`, runtime `selected-edits-20261120a` (mail workstation); carries
 everything in `2026.11.18.5`. **P1-P3 passed 2026-11-20, P4-P9 pending** (sections 4, 5).
 **Scripts `2026.11.20.2`, runtime `selected-edits-20261120b`, the same day** (section 6): `movepoly`, a polygon
-moved by an offset, after a hand move of the mask opening went to the wrong place three times; P10-P13 pending.
+moved by an offset, after a hand move of the mask opening went to the wrong place three times; **P10-P12 passed
+2026-11-20**, P13 pending.
 
 ## 1. What it adds
 
@@ -95,3 +96,12 @@ one vertex of the polygon; resolved against a `polygons` read; an offset above 5
 | P11 | `edit preview` of a `movepoly` of the TopSolder polygon to its target; a plan naming a point that is no vertex | would_move; the bad one refused by the client |
 | P12 | apply with the board tick | done; `polygons` shows every vertex moved by the offset, arcs included; Altium shows the opening moved and filled; unsaved |
 | P13 | after Stefan saves and reopens: `polygons` again | same vertices, `bbox` agrees with them, `copper_pieces` 1 |
+
+Record (2026-11-20, real 22p, runtime `selected-edits-20261120b`):
+
+| # | Result |
+|---|---|
+| P10 | **pass**: started with no script error; `polygons` as P2 |
+| P11 | **pass**: preview of the TopSolder polygon (8 vertices, four arcs) `would_move`; the client's tests cover a point that is no vertex |
+| P12 | **pass, twice**: X +1.5 / Y +0.21 mm, then X -1.5 / Y -0.083 mm back onto Stefan's template. Each time every vertex and arc centre moved by the offset, the area stayed 131.48 mm2, `copper_pieces` went to 1 (0 after the hand moves) and `bbox` was right at once, with no reopen. Stefan's screenshot after the first move shows the fill at the new place and no remnant at the old one |
+| P13 | pending |
