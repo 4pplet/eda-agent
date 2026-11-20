@@ -101,6 +101,10 @@ Parameter edits have their own tick ("Allow parameter edits").
   `selected-edits-20261118f`, **Q1-Q5 and R3 / R4 / R8 passed 2026-11-18, R2 failed, the rest pending**, carries `.2` so R2-R8 run on it too): checked edits of
   sheet-level schematic objects (net labels, power ports, wires, text, notes, boxes, lines, sheet
   parameters) and their read; the parameter tick is now "Allow schematic edits".
+  Scripts `2026.11.20.1`
+  ([PROPOSAL-2026-11-20-polygon-outline-fills-names](PROPOSAL-2026-11-20-polygon-outline-fills-names.md), runtime
+  `selected-edits-20261120a`, **P1-P9 pending**, carries `.5`): polygon outline vertices, free fills and
+  regions in the free-graphics read, designator show / hide, fill delete, text moves through `MoveByXY`.
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.
 
 ### Roadmap and known limitations

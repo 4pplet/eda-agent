@@ -6670,6 +6670,11 @@ End;
 { (PLT 2026-11-18). The Mechanical 1 outline and V-cut lines, silk lines;      }
 { not in a component, polygon or dimension. Raw TCoord units. At most 2000     }
 { rows; "truncated" says when. Same property names as get_tracks.            }
+{ Scripts 2026.11.20.1: also the free FILLS and REGIONS on every layer, copper }
+{ included (a mask opening, a keep-out, a copper fill), in their own lists so  }
+{ the line / arc rows keep their meaning. At most 500 of each; a region's      }
+{ outline at most 200 points ("point_count" is the real number). A pour's own  }
+{ regions are InPolygon and stay out; the pour outline is in get_polygons.     }
 {..............................................................................}
 Function PCB_GetFreeGraphicsForBoard(Board : IPCB_Board; RequestId : String) : String;
 Var
@@ -6677,12 +6682,21 @@ Var
     Prim : IPCB_Primitive;
     Track : IPCB_Track;
     Arc : IPCB_Arc;
-    JsonItems, LayerStr, Row : String;
-    Count, Total : Integer;
+    Fill : IPCB_Fill;
+    Region : IPCB_Region;
+    Contour : IPCB_Contour;
+    JsonItems, LayerStr, Row, FillsJson, RegionsJson, NetName : String;
+    Count, Total, FillCount, FillTotal, RegionCount, RegionTotal, PtCount, HoleCount, K : Integer;
 Begin
     JsonItems := '';
     Count := 0;
     Total := 0;
+    FillsJson := '';
+    RegionsJson := '';
+    FillCount := 0;
+    FillTotal := 0;
+    RegionCount := 0;
+    RegionTotal := 0;
     Iter := Board.BoardIterator_Create;
     Try
         Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
@@ -6727,9 +6741,78 @@ Begin
     Finally
         Board.BoardIterator_Destroy(Iter);
     End;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eFillObject, eRegionObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) Then
+            Begin
+                LayerStr := GetLayerString(Prim.Layer);
+                NetName := '';
+                Try If Prim.Net <> Nil Then NetName := Prim.Net.Name; Except NetName := ''; End;
+                If Prim.ObjectId = eFillObject Then
+                Begin
+                    Inc(FillTotal);
+                    If FillCount < 500 Then
+                    Begin
+                        Fill := Prim;
+                        If FillCount > 0 Then FillsJson := FillsJson + ',';
+                        FillsJson := FillsJson + '{"layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"net":"' + EscapeJsonString(NetName) + '",'
+                            + '"x1":' + IntToStr(Fill.X1Location) + ',"y1":' + IntToStr(Fill.Y1Location) + ','
+                            + '"x2":' + IntToStr(Fill.X2Location) + ',"y2":' + IntToStr(Fill.Y2Location) + ','
+                            + '"rotation":' + FloatToJsonStr(Fill.Rotation) + '}';
+                        Inc(FillCount);
+                    End;
+                End
+                Else
+                Begin
+                    Inc(RegionTotal);
+                    If RegionCount < 500 Then
+                    Begin
+                        Region := Prim;
+                        Contour := Nil;
+                        PtCount := 0;
+                        Try
+                            Contour := Region.MainContour;
+                            If Contour <> Nil Then PtCount := Contour.Count;
+                        Except
+                            PtCount := 0;
+                        End;
+                        HoleCount := -1;
+                        Try HoleCount := Region.HoleCount; Except HoleCount := -1; End;
+                        Row := '';
+                        { MainContour is 1-based (X[K] / Y[K]), as the board render reads it. }
+                        For K := 1 To PtCount Do
+                            If K <= 200 Then
+                            Begin
+                                If K > 1 Then Row := Row + ',';
+                                Row := Row + '[' + IntToStr(Contour.X[K]) + ',' + IntToStr(Contour.Y[K]) + ']';
+                            End;
+                        If RegionCount > 0 Then RegionsJson := RegionsJson + ',';
+                        RegionsJson := RegionsJson + '{"layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"net":"' + EscapeJsonString(NetName) + '",'
+                            + '"point_count":' + IntToStr(PtCount) + ','
+                            + '"hole_count":' + IntToStr(HoleCount) + ','
+                            + '"pts":[' + Row + ']}';
+                        Inc(RegionCount);
+                    End;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
     Result := BuildSuccessResponse(RequestId,
         '{"graphics":[' + JsonItems + '],"count":' + IntToStr(Count)
         + ',"total":' + IntToStr(Total) + ',"truncated":' + BoolToJsonStr(Total > Count)
+        + ',"fills":[' + FillsJson + '],"fill_total":' + IntToStr(FillTotal)
+        + ',"regions":[' + RegionsJson + '],"region_total":' + IntToStr(RegionTotal)
         + ',"units":"coord","coord_per_mil":10000}');
 End;
 
@@ -7442,12 +7525,14 @@ Function PCB_GetPolygonsForBoard(Board : IPCB_Board; RequestId : String) : Strin
 Var
     Iterator : IPCB_BoardIterator;
     Polygon : IPCB_Polygon;
-    JsonItems, NetName, LayerStr, HatchStr : String;
-    First : Boolean;
-    Count, VCount : Integer;
+    JsonItems, NetName, LayerStr, HatchStr, VertJson : String;
+    First, IsPoured : Boolean;
+    Count, VCount, I, Pieces : Integer;
     AreaInternal : Int64;
     AreaSqMils, AreaMm2, BBoxMm2 : Double;
     BR : TCoordRect;
+    GIter : IPCB_GroupIterator;
+    GObj : IPCB_Primitive;
 Begin
     JsonItems := '';
     First := True;
@@ -7496,6 +7581,45 @@ Begin
         VCount := 0;
         Try VCount := Polygon.PointCount; Except End;
 
+        { Scripts 2026.11.20.1: the outline itself, raw TCoord units, so a pour or }
+        { a mask polygon can be located (PLT TOOLS.md limitation 2026-11-19). The  }
+        { segment fields are the ones the board-outline read uses. At most 300     }
+        { vertices; "vertex_count" is the real number. "poured" and the number of  }
+        { poured pieces (child regions) as upstream reads them; -1 = not readable. }
+        VertJson := '';
+        For I := 0 To VCount - 1 Do
+            If I < 300 Then
+            Begin
+                If I > 0 Then VertJson := VertJson + ',';
+                If Polygon.Segments[I].Kind = ePolySegmentLine Then
+                    VertJson := VertJson + '{"kind":"line","x":' + IntToStr(Polygon.Segments[I].vx)
+                        + ',"y":' + IntToStr(Polygon.Segments[I].vy) + '}'
+                Else
+                    VertJson := VertJson + '{"kind":"arc","x":' + IntToStr(Polygon.Segments[I].vx)
+                        + ',"y":' + IntToStr(Polygon.Segments[I].vy)
+                        + ',"cx":' + IntToStr(Polygon.Segments[I].cx)
+                        + ',"cy":' + IntToStr(Polygon.Segments[I].cy)
+                        + ',"angle1":' + FloatToJsonStr(Polygon.Segments[I].Angle1)
+                        + ',"angle2":' + FloatToJsonStr(Polygon.Segments[I].Angle2) + '}';
+            End;
+        IsPoured := False;
+        Try IsPoured := Polygon.Poured; Except IsPoured := False; End;
+        Pieces := -1;
+        Try
+            GIter := Polygon.GroupIterator_Create;
+            GIter.AddFilter_ObjectSet(MkSet(eRegionObject));
+            Pieces := 0;
+            GObj := GIter.FirstPCBObject;
+            While GObj <> Nil Do
+            Begin
+                Inc(Pieces);
+                GObj := GIter.NextPCBObject;
+            End;
+            Polygon.GroupIterator_Destroy(GIter);
+        Except
+            Pieces := -1;
+        End;
+
         JsonItems := JsonItems + '{"index":' + IntToStr(Count) + ','
             + '"name":"' + EscapeJsonString(Polygon.Name) + '",'
             + '"net":"' + EscapeJsonString(NetName) + '",'
@@ -7505,6 +7629,11 @@ Begin
             + '"area_sqmils":' + IntToStr(Trunc(AreaSqMils)) + ','
             + '"area_mm2":' + FloatToJsonStr(AreaMm2) + ','
             + '"bbox_mm2":' + FloatToJsonStr(BBoxMm2) + ','
+            + '"bbox":[' + IntToStr(BR.Left) + ',' + IntToStr(BR.Bottom) + ','
+            + IntToStr(BR.Right) + ',' + IntToStr(BR.Top) + '],'
+            + '"poured":' + BoolToJsonStr(IsPoured) + ','
+            + '"copper_pieces":' + IntToStr(Pieces) + ','
+            + '"vertices":[' + VertJson + '],'
             + '"vertex_count":' + IntToStr(VCount) + '}';
         Inc(Count);
         Polygon := Iterator.NextPCBObject;
@@ -7512,7 +7641,8 @@ Begin
     Board.BoardIterator_Destroy(Iterator);
 
     Result := BuildSuccessResponse(RequestId,
-        '{"polygons":[' + JsonItems + '],"count":' + IntToStr(Count) + '}');
+        '{"polygons":[' + JsonItems + '],"count":' + IntToStr(Count)
+        + ',"units":"coord","coord_per_mil":10000}');
 End;
 
 Function PCB_GetPolygons(Params : String; RequestId : String) : String;

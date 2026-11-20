@@ -4517,6 +4517,47 @@ Begin
     End;
 End;
 
+{ Free fills on a layer (copper or not) with exactly these corners, either    }
+{ way round. Scripts 2026.11.20.1 (delfill: the undo of a placed fill).       }
+Function FreeFillCount(Board : IPCB_Board; Lyr : TLayer; X1, Y1, X2, Y2 : Integer; Var First : IPCB_Fill) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Fill : IPCB_Fill;
+    LoX, LoY, HiX, HiY, FLoX, FLoY, FHiX, FHiY : Integer;
+Begin
+    Result := 0;
+    First := Nil;
+    If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+    If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eFillObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) And (Prim.Layer = Lyr) Then
+            Begin
+                Fill := Prim;
+                If Fill.X1Location < Fill.X2Location Then Begin FLoX := Fill.X1Location; FHiX := Fill.X2Location; End
+                Else Begin FLoX := Fill.X2Location; FHiX := Fill.X1Location; End;
+                If Fill.Y1Location < Fill.Y2Location Then Begin FLoY := Fill.Y1Location; FHiY := Fill.Y2Location; End
+                Else Begin FLoY := Fill.Y2Location; FHiY := Fill.Y1Location; End;
+                If (FLoX = LoX) And (FLoY = LoY) And (FHiX = HiX) And (FHiY = HiY) Then
+                Begin
+                    Inc(Result);
+                    If First = Nil Then First := Fill;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
 Function FreeLineEndAt(Board : IPCB_Board; Lyr : TLayer; X, Y : Integer) : Boolean;
 Var
     Iter : IPCB_BoardIterator;
@@ -4696,6 +4737,24 @@ Begin
     End;
 End;
 
+{ Move a text to X, Y (raw). MoveByXY is how upstream moves a board text: it   }
+{ carries the text's bounding rectangle along, where a write to XLocation /   }
+{ YLocation left the selection box at the old place until the document was    }
+{ reopened (22p, 2026-11-19). The direct write stays as the fallback when the }
+{ text is not where it was sent. Call inside BeginModify / EndModify.          }
+Procedure EditMoveText(Txt : IPCB_Text; X, Y : Integer);
+Begin
+    Try
+        Txt.MoveByXY(X - Txt.XLocation, Y - Txt.YLocation);
+    Except
+    End;
+    If (Txt.XLocation <> X) Or (Txt.YLocation <> Y) Then
+    Begin
+        Txt.XLocation := X;
+        Txt.YLocation := Y;
+    End;
+End;
+
 Function SelectedEditFreeChecked(P : IProject; Params, RequestId : String) : String;
 Var
     Mode, ItemsStr, BatchHash, OldCounts, Rest, OpStr, Problems, Binding, Blank, What, ItemsJson : String;
@@ -4710,6 +4769,7 @@ Var
     Via : IPCB_Via;
     Txt : IPCB_Text;
     Comp : IPCB_Component;
+    Fill : IPCB_Fill;
     EditNets : TStringList;
     Seg, Seg2 : TPolySegment;
     Gap : Double;
@@ -4763,7 +4823,8 @@ Begin
             F3 := ParamEditTake(OpStr, '|'); F4 := ParamEditTake(OpStr, '|'); F5 := ParamEditTake(OpStr, '|');
             F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
             Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape')
-                Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename'))
+                Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename')
+                Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -4827,6 +4888,17 @@ Begin
                 Begin
                     N := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
                     If N = 0 Then Status := 'refused: no free line with these exact ends on this layer'
+                    Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
+                    Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'delfill' Then
+            Begin
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
+                Else
+                Begin
+                    N := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
+                    If N = 0 Then Status := 'refused: no free fill with these exact corners on this layer'
                     Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
                     Else Status := 'would_delete';
                 End;
@@ -4925,6 +4997,17 @@ Begin
                 Else If (Comp.Name.XLocation = X2) And (Comp.Name.YLocation = Y2) And (W = 0) Then Status := 'unchanged'
                 Else Status := 'would_move';
             End
+            Else If (IOp[J] = 'showname') Or (IOp[J] = 'hidename') Then
+            Begin
+                { A part's designator text shown or hidden (Comp.NameOn, as upstream's  }
+                { PCB_SetTextVisibility). Scripts 2026.11.20.1.                         }
+                Comp := Nil;
+                Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                If Comp = Nil Then Status := 'refused: no component with this designator'
+                Else If Comp.NameOn = (IOp[J] = 'showname') Then Status := 'unchanged'
+                Else If IOp[J] = 'showname' Then Status := 'would_show'
+                Else Status := 'would_hide';
+            End
             Else
             Begin
                 VX.Clear;
@@ -4976,6 +5059,23 @@ Begin
                             PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
                             Board.RemovePCBObject(Track);
                             K := FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = N - 1);
+                        End;
+                    End
+                    Else If IOp[J] = 'delfill' Then
+                    Begin
+                        N := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
+                        If Fill <> Nil Then
+                        Begin
+                            Try
+                                If Fill.Net <> Nil Then
+                                    If EditNets.IndexOf(Fill.Net.Name) < 0 Then EditNets.Add(Fill.Net.Name);
+                            Except
+                            End;
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Fill.I_ObjectAddress);
+                            Board.RemovePCBObject(Fill);
+                            K := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
                             Back := 'remaining ' + IntToStr(K);
                             Ok := (K = N - 1);
                         End;
@@ -5054,10 +5154,10 @@ Begin
                         If Txt <> Nil Then
                         Begin
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
-                            Txt.XLocation := X2;
-                            Txt.YLocation := Y2;
+                            EditMoveText(Txt, X2, Y2);
                             If W <> 0 Then Txt.Rotation := W Mod 360;
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Try Txt.GraphicallyInvalidate; Except End;
                             Back := Txt.Text + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
                             Ok := (Txt.XLocation = X2) And (Txt.YLocation = Y2);
                         End;
@@ -5073,12 +5173,26 @@ Begin
                             { A manually placed designator, as upstream's placement text move. }
                             Try Comp.ChangeNameAutoposition(eAutoPos_Manual); Except End;
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
-                            Txt.XLocation := X2;
-                            Txt.YLocation := Y2;
+                            EditMoveText(Txt, X2, Y2);
                             If W <> 0 Then Txt.Rotation := W Mod 360;
                             PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Try Txt.GraphicallyInvalidate; Except End;
                             Back := IS1[J] + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation);
                             Ok := (Txt.XLocation = X2) And (Txt.YLocation = Y2);
+                        End;
+                    End
+                    Else If (IOp[J] = 'showname') Or (IOp[J] = 'hidename') Then
+                    Begin
+                        Comp := Nil;
+                        Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                        If Comp <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Comp.NameOn := (IOp[J] = 'showname');
+                            PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Try Comp.GraphicallyInvalidate; Except End;
+                            If Comp.NameOn Then Back := IS1[J] + ',shown' Else Back := IS1[J] + ',hidden';
+                            Ok := (Comp.NameOn = (IOp[J] = 'showname'));
                         End;
                     End
                     Else
