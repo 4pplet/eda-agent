@@ -4,7 +4,9 @@ Status: **asked for by Stefan 2026-11-20** ("we can do the MCP changes so you ca
 "let's do all five"), from the 22p holder copper work (N34): the corners of a hand-drawn solder-mask
 polygon and of two no-net pours could not be read (PLT-hw `TOOLS.md` limitation row 2026-11-19). Built the
 same day. Scripts `2026.11.20.1`, runtime `selected-edits-20261120a` (mail workstation); carries
-everything in `2026.11.18.5`. **P1-P9 pending** (section 4).
+everything in `2026.11.18.5`. **P1-P3 passed 2026-11-20, P4-P9 pending** (sections 4, 5).
+**Scripts `2026.11.20.2`, runtime `selected-edits-20261120b`, the same day** (section 6): `movepoly`, a polygon
+moved by an offset, after a hand move of the mask opening went to the wrong place three times; P10-P13 pending.
 
 ## 1. What it adds
 
@@ -55,6 +57,41 @@ tracks, pour shelving.
 | P8 | `edit`: `delfill` of the two P7 fills; a `delfill` with corners that match nothing | deleted, `remaining 0`; the bad one refused |
 | P9 | apply without the tick; apply after the board changed | stopped; refused |
 
-## 5. Qualification record
+## 5. Qualification record (2026-11-20, real 22p, runtime `selected-edits-20261120a`)
 
-Pending.
+| # | Result |
+|---|---|
+| P1 | **pass**: Altium started from the runtime with no script error; reads answered on `2026.11.20.1` |
+| P2 | **pass**: 8 polygons, every one with all its vertices; the area from the vertices (shoelace, chords for the arcs) equals `area_mm2` on all eight; the three GND pours = x 138.43-208.43, y 57.856-117.856; the two no-net holder pours x 210.312-243.43, full height, poured, 1 piece; the TopSolder polygon 12.192 x 11.049 mm with four arc corners. `copper_pieces` read 0 on the mask polygon after Stefan moved it (not yet repoured) |
+| P3 | **pass**: `graphics` 645 rows as on 2026-11-19 plus 13 new on Mechanical 15; `fills` 0; `regions` 26 (one MultiLayer board region, 25 on TopOverlay with up to 5028 points and up to 7 holes: TrueType text), no pour region among them |
+| P4-P9 | pending |
+
+## 6. Scripts `2026.11.20.2`: a polygon moved by an offset
+
+Asked by Stefan 2026-11-20 ("let's go through the backlog so you can move it"): the mask opening had to go
+X +1.5 mm; by hand it went -15 / +135 mil, then back within 5 mil, then 5 mil the wrong way (PLT-hw
+`TOOLS.md` limitation row 2026-11-20, backlog 9).
+
+`pcb.edit_free_checked` op `movepoly`: `layer`, `x1,y1` the polygon's **first outline vertex**, `w` its vertex
+count, `x2,y2` the offset, `s1,s2` the last vertex minus the first (raw). The polygon is named by its first
+vertex and count, not by its bounding rectangle (a rectangle read after segment writes can be stale until
+the document is reopened, as the board shape's was on 2026-11-18). Apply: inside `BeginModify`, every
+segment record is read, its vertex (and an arc's centre) moved, and written back whole
+(`Seg := Poly.Segments[K]` ... `Poly.Segments[K] := Seg`, as upstream's bevel); then the closing vertex one
+past `PointCount` (upstream `ClosePolySegments`: "a replaced outline saved the OLD first vertex there, a
+spike"); then `SetState_CopperPourInvalid` / `Rebuild` / `EndModify` / `GraphicallyInvalidate` with the
+repour option forced to Always for the call, as our `repour` does. Read back: first vertex = old + offset,
+the vertex count, and last-minus-first unchanged. Works on a pour as on a mask polygon; a pour is repoured
+by the move, so DRC follows.
+
+Also: the `shape` op (board shape from the outline) now writes the closing vertex too, in `Try`.
+
+Client: `edit_plan.py` `{"op": "movepoly", "layer", "x_mm", "y_mm", "dx_mm", "dy_mm"}` where x / y is any
+one vertex of the polygon; resolved against a `polygons` read; an offset above 50 mm is refused.
+
+| # | Check | Pass |
+|---|---|---|
+| P10 | Altium starts from runtime `20261120b`; `polygons` as P2 | no script error; same rows |
+| P11 | `edit preview` of a `movepoly` of the TopSolder polygon to its target; a plan naming a point that is no vertex | would_move; the bad one refused by the client |
+| P12 | apply with the board tick | done; `polygons` shows every vertex moved by the offset, arcs included; Altium shows the opening moved and filled; unsaved |
+| P13 | after Stefan saves and reopens: `polygons` again | same vertices, `bbox` agrees with them, `copper_pieces` 1 |

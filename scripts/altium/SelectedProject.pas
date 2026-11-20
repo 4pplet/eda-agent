@@ -4517,6 +4517,44 @@ Begin
     End;
 End;
 
+{ Polygons on a layer whose FIRST outline vertex is exactly X, Y and that have }
+{ NPts vertices (scripts 2026.11.20.2, movepoly). The first vertex and not the }
+{ bounding rectangle names the polygon: a rectangle read after segment writes  }
+{ can be stale until the document is reopened (the board shape, 2026-11-18).   }
+Function PolyAtFirstVertex(Board : IPCB_Board; Lyr : TLayer; X, Y, NPts : Integer; Var First : IPCB_Polygon) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Poly : IPCB_Polygon;
+    N : Integer;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePolyObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Poly := Iter.FirstPCBObject;
+        While Poly <> Nil Do
+        Begin
+            If Poly.Layer = Lyr Then
+            Begin
+                N := 0;
+                Try N := Poly.PointCount; Except N := 0; End;
+                If (N = NPts) And (N >= 3) Then
+                    If (Poly.Segments[0].vx = X) And (Poly.Segments[0].vy = Y) Then
+                    Begin
+                        Inc(Result);
+                        If First = Nil Then First := Poly;
+                    End;
+            End;
+            Poly := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
 { Free fills on a layer (copper or not) with exactly these corners, either    }
 { way round. Scripts 2026.11.20.1 (delfill: the undo of a placed fill).       }
 Function FreeFillCount(Board : IPCB_Board; Lyr : TLayer; X1, Y1, X2, Y2 : Integer; Var First : IPCB_Fill) : Integer;
@@ -4770,6 +4808,8 @@ Var
     Txt : IPCB_Text;
     Comp : IPCB_Component;
     Fill : IPCB_Fill;
+    Poly : IPCB_Polygon;
+    OldMode, PX0, PY0 : Integer;
     EditNets : TStringList;
     Seg, Seg2 : TPolySegment;
     Gap : Double;
@@ -4824,7 +4864,7 @@ Begin
             F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
             Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape')
                 Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename')
-                Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill'))
+                Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -4890,6 +4930,20 @@ Begin
                     If N = 0 Then Status := 'refused: no free line with these exact ends on this layer'
                     Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
                     Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'movepoly' Then
+            Begin
+                { A polygon (a pour, or a polygon on a mask or other layer) moved by   }
+                { x2, y2: x1, y1 its first vertex, w its vertex count.                 }
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
+                Else
+                Begin
+                    N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                    If N = 0 Then Status := 'refused: no polygon with this first vertex and vertex count on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical polygons here'
+                    Else If (X2 = 0) And (Y2 = 0) Then Status := 'unchanged'
+                    Else Status := 'would_move';
                 End;
             End
             Else If IOp[J] = 'delfill' Then
@@ -5063,6 +5117,55 @@ Begin
                             Ok := (K = N - 1);
                         End;
                     End
+                    Else If IOp[J] = 'movepoly' Then
+                    Begin
+                        N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                        If Poly <> Nil Then
+                        Begin
+                            Try
+                                If Poly.Net <> Nil Then
+                                    If EditNets.IndexOf(Poly.Net.Name) < 0 Then EditNets.Add(Poly.Net.Name);
+                            Except
+                            End;
+                            { Every vertex and arc centre by the offset; then the closing    }
+                            { vertex one past PointCount (upstream measured a spike when it   }
+                            { kept the old first vertex); then the repour as `repour` does it }
+                            { (the option forced to Always for the call).                     }
+                            OldMode := PCBServer.SystemOptions.PolygonRepour;
+                            PCBServer.SystemOptions.PolygonRepour := 2;
+                            Try
+                                Poly.BeginModify;
+                                For K := 0 To W - 1 Do
+                                Begin
+                                    Seg := Poly.Segments[K];
+                                    Seg.vx := Seg.vx + X2;
+                                    Seg.vy := Seg.vy + Y2;
+                                    If Seg.Kind <> ePolySegmentLine Then
+                                    Begin
+                                        Seg.cx := Seg.cx + X2;
+                                        Seg.cy := Seg.cy + Y2;
+                                    End;
+                                    Poly.Segments[K] := Seg;
+                                End;
+                                Seg := Poly.Segments[0];
+                                Seg.Kind := ePolySegmentLine;
+                                Poly.Segments[W] := Seg;
+                                Poly.SetState_CopperPourInvalid;
+                                Poly.Rebuild;
+                                Poly.EndModify;
+                                Poly.GraphicallyInvalidate;
+                            Finally
+                                PCBServer.SystemOptions.PolygonRepour := OldMode;
+                            End;
+                            PX0 := Poly.Segments[0].vx;
+                            PY0 := Poly.Segments[0].vy;
+                            Back := 'first vertex ' + IntToStr(PX0) + ',' + IntToStr(PY0)
+                                + ' points ' + IntToStr(Poly.PointCount);
+                            Ok := (PX0 = X1 + X2) And (PY0 = Y1 + Y2) And (Poly.PointCount = W)
+                                And (Poly.Segments[W - 1].vx - Poly.Segments[0].vx = StrToInt(IS1[J]))
+                                And (Poly.Segments[W - 1].vy - Poly.Segments[0].vy = StrToInt(IS2[J]));
+                        End;
+                    End
                     Else If IOp[J] = 'delfill' Then
                     Begin
                         N := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
@@ -5208,6 +5311,14 @@ Begin
                             Seg.vx := StrToInt(VX[K]);
                             Seg.vy := StrToInt(VY[K]);
                             Board.BoardOutline.Segments[K] := Seg;
+                        End;
+                        { The closing vertex one past PointCount (upstream ClosePolySegments: }
+                        { a replaced outline kept the OLD first vertex there, a spike).       }
+                        Try
+                            Seg := Board.BoardOutline.Segments[0];
+                            Seg.Kind := ePolySegmentLine;
+                            Board.BoardOutline.Segments[VX.Count] := Seg;
+                        Except
                         End;
                         Board.BoardOutline.Invalidate;
                         Board.BoardOutline.Rebuild;

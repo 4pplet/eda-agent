@@ -103,8 +103,10 @@ Parameter edits have their own tick ("Allow parameter edits").
   parameters) and their read; the parameter tick is now "Allow schematic edits".
   Scripts `2026.11.20.1`
   ([PROPOSAL-2026-11-20-polygon-outline-fills-names](PROPOSAL-2026-11-20-polygon-outline-fills-names.md), runtime
-  `selected-edits-20261120a`, **P1-P9 pending**, carries `.5`): polygon outline vertices, free fills and
-  regions in the free-graphics read, designator show / hide, fill delete, text moves through `MoveByXY`.
+  `selected-edits-20261120a`, **P1-P3 passed 2026-11-20, P4-P9 pending**, carries `.5`): polygon outline
+  vertices, free fills and regions in the free-graphics read, designator show / hide, fill delete, text moves
+  through `MoveByXY`. Scripts `2026.11.20.2` (the same proposal, section 6; runtime `selected-edits-20261120b`,
+  **P10-P13 pending**, carries `.1`): `movepoly`, a polygon moved by an offset.
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.
 
 ### Roadmap and known limitations
