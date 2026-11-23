@@ -6512,6 +6512,34 @@ Begin
     If (Result = 0) And (Status = '') Then Status := Des + ' is not on this sheet';
 End;
 
+{ Parts on a sheet whose location is X, Y; DesHits counts the parts that carry  }
+{ the designator Des (scripts 2026.11.23.3, op `part`).                         }
+Function SchEditPartAt(Doc : ISch_Document; X, Y : Integer; Des : String; Var DesHits : Integer) : Integer;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+    Loc : TLocation;
+Begin
+    Result := 0;
+    DesHits := 0;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Comp := Obj;
+            Loc := Obj.GetState_Location;
+            If (Loc.X = X) And (Loc.Y = Y) Then Inc(Result);
+            If Comp.Designator.Text = Des Then Inc(DesHits);
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+End;
+
 Function SchEditPowerStyleOk(S : String) : Boolean;
 Begin
     Result := (S = 'circle') Or (S = 'arrow') Or (S = 'bar') Or (S = 'wave')
@@ -6530,6 +6558,8 @@ Var
     Doc : ISch_Document;
     Obj : ISch_GraphicalObject;
     Loc : TLocation;
+    Comp : ISch_Component;
+    Avail : String;
 Begin
     Mode := ExtractJsonValue(Params, 'mode');
     BatchHash := ExtractJsonValue(Params, 'batch_hash');
@@ -6657,8 +6687,10 @@ Begin
                 Or (Not PlaceEditIntOk(IX2[J])) Or (Not PlaceEditIntOk(IY2[J]))
                 Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
                 Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam')
-                    And (Op <> 'compparam'))
-                Or ((Op <> 'docparam') And (Op <> 'compparam') And (SchEditKindId(Kind) < 0))
+                    And (Op <> 'compparam') And (Op <> 'part'))
+                Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And (SchEditKindId(Kind) < 0))
+                Or ((Op = 'part') And ((Kind = '') Or (S2 = '') Or (S3 = '')
+                    Or (StrToIntDef(IN_[J], -1) < 0) Or (StrToIntDef(IN_[J], 9) > 3)))
                 Or ((Op = 'compparam') And ((Pos('/', Kind) < 2) Or (Pos('/', Kind) = Length(Kind))
                     Or (Not ParamEditFieldAllowed(Copy(Kind, Pos('/', Kind) + 1, Length(Kind))))))
                 Or ((Op = 'docparam') And (Kind = ''))
@@ -6702,6 +6734,20 @@ Begin
                 CDes := Copy(Kind, 1, Pos('/', Kind) - 1);
                 CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
                 SchEditCompParam(Doc, CDes, CName, S2, IS3[J], StrToInt(IN_[J]) = 1, False, Status);
+            End
+            Else If Op = 'part' Then
+            Begin
+                { A library part placed at x1,y1 (scripts 2026.11.23.3): s1 the library }
+                { reference, s2 the .SchLib path, s3 the designator, n the orientation  }
+                { 0-3. The reference is looked up off disk first: a load that fails     }
+                { inside Altium raises a modal dialog that stops the loop (upstream).   }
+                Avail := '';
+                Hits := SchEditPartAt(Doc, X1, Y1, IS3[J], Hits2);
+                If Not ResolveLibRef(S2, Kind, Avail) Then
+                    Status := 'no part "' + Kind + '" in that library (it holds: ' + Avail + ')'
+                Else If Hits > 0 Then Status := 'a part is already at this place'
+                Else If (Hits2 > 0) And (Pos('?', IS3[J]) = 0) Then
+                    Status := 'designator ' + IS3[J] + ' is already on this sheet';
             End
             Else If Op = 'add' Then
             Begin
@@ -6764,6 +6810,26 @@ Begin
                             If Obj = Nil Then Back := 'missing'
                             Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S3) Then Back := 'text differs'
                             Else Back := 'ok';
+                        End
+                        Else If Op = 'part' Then
+                        Begin
+                            { Upstream's placement (Gen_PlaceSchComponentFromLibrary): load }
+                            { (reference, path), add to the sheet, MoveToXY, orientation,   }
+                            { designator, register.                                         }
+                            Touched := True;
+                            Comp := Nil;
+                            Try Comp := SchServer.LoadComponentFromLibrary(Kind, S2); Except Comp := Nil; End;
+                            If Comp = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Doc.AddSchObject(Comp);
+                                Comp.MoveToXY(X1, Y1);
+                                Comp.SetState_Orientation(N);
+                                Comp.Designator.Text := S3;
+                                SchRegisterObject(Doc, Comp);
+                                Hits := SchEditPartAt(Doc, X1, Y1, S3, Hits2);
+                                If (Hits = 1) And (Hits2 >= 1) Then Back := 'ok' Else Back := 'missing';
+                            End;
                         End
                         Else If Op = 'compparam' Then
                         Begin
