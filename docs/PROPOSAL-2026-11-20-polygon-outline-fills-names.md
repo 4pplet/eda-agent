@@ -65,7 +65,9 @@ tracks, pour shelving.
 | P1 | **pass**: Altium started from the runtime with no script error; reads answered on `2026.11.20.1` |
 | P2 | **pass**: 8 polygons, every one with all its vertices; the area from the vertices (shoelace, chords for the arcs) equals `area_mm2` on all eight; the three GND pours = x 138.43-208.43, y 57.856-117.856; the two no-net holder pours x 210.312-243.43, full height, poured, 1 piece; the TopSolder polygon 12.192 x 11.049 mm with four arc corners. `copper_pieces` read 0 on the mask polygon after Stefan moved it (not yet repoured) |
 | P3 | **pass**: `graphics` 645 rows as on 2026-11-19 plus 13 new on Mechanical 15; `fills` 0; `regions` 26 (one MultiLayer board region, 25 on TopOverlay with up to 5028 points and up to 7 holes: TrueType text), no pour region among them |
-| P4-P9 | pending |
+| P4-P6, P8, P13 | **pass 2026-11-23** on runtime `selected-edits-20261123a`: see the record in PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read.md section 5 |
+| P7 | partly (mask fill placed and read; the no-net copper fill over a via not run) |
+| P9 | not run live |
 
 ## 6. Scripts `2026.11.20.2`: a polygon moved by an offset
 

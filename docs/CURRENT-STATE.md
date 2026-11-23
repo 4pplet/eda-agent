@@ -109,7 +109,8 @@ Parameter edits have their own tick ("Allow parameter edits").
   **P10-P12 passed 2026-11-20, P13 pending**, carries `.1`): `movepoly`, a polygon moved by an offset.
   Scripts `2026.11.23.1`
   ([PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read](PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read.md),
-  runtime `selected-edits-20261123a`, **V1-V10 pending**, carries `.2`): polygons created and reshaped from an
+  runtime `selected-edits-20261123a`, **V1-V4, V6-V8 passed 2026-11-23 on the real 22p, with P4-P6, P8, P13 of
+  `2026.11.20.x`; V5 / V9 / P9 not run live**, carries `.2`): polygons created and reshaped from an
   outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
   polygons read, bottom-layer text mirrored.
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.

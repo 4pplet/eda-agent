@@ -2,8 +2,9 @@
 
 Status: **asked for by Stefan 2026-11-23** ("can we work our way through the backlog?" / "let's do it"), PLT-hw
 `tools/eda-agent/TOOLS.md` backlog rows 8, 9, 10 and 12. Built the same day. Scripts `2026.11.23.1`, runtime
-`selected-edits-20261123a` (mail workstation); carries everything in `2026.11.20.2`. **V1-V10 pending** (section 4);
-of `2026.11.20.x`, P4-P9 and P13 are still pending and run on this runtime too.
+`selected-edits-20261123a` (mail workstation); carries everything in `2026.11.20.2`. **Qualified 2026-11-23 on the
+real 22p: V1-V4, V6-V8 pass; V5 and V9 not run live; V10 (the real use) open** (section 5). Of `2026.11.20.x`,
+P4-P6, P8 and P13 passed on this runtime the same day; P7's copper fill and P9 were not run.
 
 ## 1. What it adds
 
@@ -68,6 +69,30 @@ bodies, deleting texts with `clearlayer`.
 | V9 | apply without the tick; apply after the board changed | stopped; refused |
 | V10 | the real use: the top mask opening reshaped to the agreed outline, the Sapien drawing and the template cleared before the pack | `polygons` and `freegraphics` agree; `order_check` reference-layer step passes |
 
-## 5. Qualification record
+## 5. Qualification record (2026-11-23, real 22p, runtime `selected-edits-20261123a`)
 
-Pending.
+All three identifiers that were new to this fork work on AD 23.3.1: `ePolySegmentArc` and `Seg.Radius` (V4),
+`Region.Holes[H]` (V2). No script error dialog in the session.
+
+| # | Result |
+|---|---|
+| V1 | **pass**: started with no script error; `polygons` (8) and `freegraphics` (658 rows, 0 fills, 26 regions) as on 2026-11-20 |
+| V2 | **pass**: holder pours (index 0 and 3): one piece, 4 points, **two holes** of 40 points, 5.316 mm across at the two 5.0 mm plated holder holes (0.158 mm clearance), none at the four 0.6 mm no-net vias; the pour reaches x 243.298 / y 57.988-117.724, 0.13 mm inside the board edge. Top GND pour (index 4): 35 pieces = `copper_pieces`, holes at cleared pads, `copper_truncated` true |
+| V3 | **pass**: `addpoly` on `BottomSolder`, a rectangle of four line vertices: would_add, then done; `polygons` shows it at x 210.43-242.43, y 58.86-116.86, 1856.0 mm2, poured, one piece |
+| V4 | **pass**: `setpoly` of that polygon to the same rectangle with 1.5 mm corners: 8 vertices, four arcs read back with their centres and angles (180-270, 270-360, 0-90, 90-180); filled in Altium (Stefan). `area_mm2` reads 1851.5 (chords; true about 1854.1): PLT-hw backlog 15 |
+| V5 | not run live (the client's tests cover a point that is no vertex; the native net refusal was not exercised) |
+| V6 | **pass**: `delarc` of the zero-radius arc on Mechanical 15 at (208.43, 117.856), remaining 0; `delpad` of the 0.6 / 0.3 mm plated pad placed by `graphics`, remaining 0 |
+| V7 | **pass**: `clearlayer` on Mechanical 12 with two test lines: would_clear (2 objects), removed 2, remaining 0. The wrong-count refusal is covered by the client's tests only |
+| V8 | **pass**: a `graphics` text on `BottomOverlay` read back `mirrored: true` |
+| V9 | not run live |
+| V10 | open: the top opening and the Sapien drawing are untouched so far |
+
+`2026.11.20.x` checks run in the same session:
+
+| # | Result |
+|---|---|
+| P4 / P5 | **pass**: `hidename` of U405-U407, R232, R233 read `unchanged` (hidden already); `showname` U405 would_show, done, read back shown, visible in Altium (Stefan); `hidename` U405 would_hide, done, read back hidden |
+| P6 | **pass**: `movetext` of a text 3 mm to the right; Stefan clicked it without reopening: the selection box sits on the text. The 2026-11-19 bug is fixed by the `MoveByXY` move |
+| P7 | partly: a fill on `TopSolder` placed and listed in `freegraphics` `fills`; the no-net copper fill over a no-net via was not run |
+| P8 | **pass**: `delfill` of that fill, remaining 0 (a non-matching `delfill` is covered by the client's tests only) |
+| P13 | **pass**: after a save and a reopen the top opening's vertices and `bbox` agree, `copper_pieces` 1 |
