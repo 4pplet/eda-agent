@@ -6953,6 +6953,51 @@ Begin
     End;
 End;
 
+{ Primitives of one kind on a library symbol (scripts 2026.11.23.9): the count }
+{ before and after a write is the read-back of libpin and librect.             }
+Function SchEditLibCount(Component : ISch_Component; KindId : Integer) : Integer;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+Begin
+    Result := 0;
+    Iter := Component.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(KindId));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Inc(Result);
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Component.SchIterator_Destroy(Iter);
+    End;
+End;
+
+{ Primitives of one kind on a library footprint. Upstream's pad read skips    }
+{ repeated objects in this iterator, so the count is only compared for        }
+{ "more than before", not for "one more".                                     }
+Function SchEditLibFpCount(Footprint : IPCB_LibComponent; KindId : Integer) : Integer;
+Var
+    Iter : IPCB_GroupIterator;
+    Prim : IPCB_Primitive;
+Begin
+    Result := 0;
+    Iter := Footprint.GroupIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(KindId));
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            Inc(Result);
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Footprint.GroupIterator_Destroy(Iter);
+    End;
+End;
+
 Function SchEditFocusedSchLib(LibPath : String) : ISch_Lib;
 Begin
     Result := Nil;
@@ -7710,12 +7755,22 @@ Begin
                     Else If (LibComp = Nil) Or (LibCompName <> Kind) Then Back := 'the symbol was not created in this batch'
                     Else If Op = 'libpin' Then
                     Begin
+                        Hits := SchEditLibCount(LibComp, ePin);
                         If SchEditLibPin(SchLib, LibComp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), SchEditSplit(S3, 2),
-                            X1, Y1, X2, N) Then Back := 'ok';
+                            X1, Y1, X2, N) Then
+                        Begin
+                            If SchEditLibCount(LibComp, ePin) = Hits + 1 Then Back := 'ok'
+                            Else Back := 'the pin is not counted on the symbol';
+                        End;
                     End
                     Else If Op = 'librect' Then
                     Begin
-                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2) Then Back := 'ok';
+                        Hits := SchEditLibCount(LibComp, eRectangle);
+                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2) Then
+                        Begin
+                            If SchEditLibCount(LibComp, eRectangle) = Hits + 1 Then Back := 'ok'
+                            Else Back := 'the rectangle is not counted on the symbol';
+                        End;
                     End
                     Else
                     Begin
@@ -7741,13 +7796,20 @@ Begin
                     Else If (LibFp = Nil) Or (LibFpName <> Kind) Then Back := 'the footprint was not created in this batch'
                     Else If Op = 'libpad' Then
                     Begin
+                        Hits := SchEditLibFpCount(LibFp, ePadObject);
                         If SchEditLibPad(PcbLib, LibFp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), X1, Y1, X2, Y2, N) Then
-                            Back := 'ok';
+                        Begin
+                            If SchEditLibFpCount(LibFp, ePadObject) > Hits Then Back := 'ok'
+                            Else Back := 'the pad is not counted on the footprint';
+                        End;
                     End
                     Else
                     Begin
-                        If SchEditLibTrack(PcbLib, LibFp, SchEditSplit(S3, 0), X1, Y1, X2, Y2, N) Then Back := 'ok'
-                        Else Back := 'layer not in the library';
+                        Hits := SchEditLibFpCount(LibFp, eTrackObject);
+                        If Not SchEditLibTrack(PcbLib, LibFp, SchEditSplit(S3, 0), X1, Y1, X2, Y2, N) Then
+                            Back := 'layer not in the library'
+                        Else If SchEditLibFpCount(LibFp, eTrackObject) > Hits Then Back := 'ok'
+                        Else Back := 'the track is not counted on the footprint';
                     End;
                 End;
             Except

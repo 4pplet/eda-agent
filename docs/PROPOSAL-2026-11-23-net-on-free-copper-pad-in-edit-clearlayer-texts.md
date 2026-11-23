@@ -251,3 +251,18 @@ lines and arcs, parameters on a library symbol, modifying or deleting anything.
 | W29 | place the new symbol with `part` in a scratch project that uses the copied libraries; compile; Update PCB | the footprint is found and lands on the board with the right pads |
 | W30 | refusals: a name already in the library; the library not the active document; the library with unsaved edits; a `libpin` whose symbol the batch does not create (hand-made item list) | each refused with its reason, nothing written |
 | W31 | apply without the schematic tick | stopped by the client |
+
+## 12. Scripts 2026.11.23.9: library items counted after each write
+
+Runtime `selected-edits-20261123i`, carries `.8`. **Runtimes `b` to `h` were never started; `i` is the one to
+start. W1-W31 pending.** `lint.py`: 0 errors.
+
+Stefan on the limits of section 11: "we should fix these?". The first one is fixed: `libpin` and `librect`
+read `written` only when the symbol holds exactly one more pin / rectangle than before the write
+(`SchEditLibCount`, the symbol's own iterator); `libpad` and `libtrack` only when the footprint's group
+iterator holds more pads / tracks than before (`SchEditLibFpCount`; "more", not "one more": upstream's pad
+read skips repeated objects in that iterator). Otherwise the item reads `not_ok` and the batch stops there.
+This is a count in memory: W27 / W28 (save, close, reopen) stay the proof that the library file keeps them.
+
+Still open from that list (PLT-hw backlog 23, group 4): arcs, texts and 3D bodies on a footprint, lines, arcs
+and texts on a symbol, multi-part symbols, parameters on a library symbol.
