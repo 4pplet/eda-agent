@@ -266,3 +266,45 @@ This is a count in memory: W27 / W28 (save, close, reopen) stay the proof that t
 
 Still open from that list (PLT-hw backlog 23, group 4): arcs, texts and 3D bodies on a footprint, lines, arcs
 and texts on a symbol, multi-part symbols, parameters on a library symbol.
+
+## 13. Scripts 2026.11.23.10: bracketed net names, placing inside an edit batch, bottom-side moves
+
+First live run of `.9` (runtime `i`), 2026-11-23 evening on the 22p: **W1 and W2 passed** (no script error at
+start; `freegraphics` lists the six mounting pads, GND, 5.0 / 3.5, plated; the bottom mask opening reads
+`area_with_arcs_mm2` 1854.0686). The same session ran `order_check.py 22p` end to end and placed a three-track
+`copper` batch (D1_P, VDD_IO, REXT into their via centres), read back from the board.
+
+Found there and built the same evening with Altium closed (Stefan: "let's fix all backlog items"). Runtime
+`selected-edits-20261123j`, carries `.9`; `lint.py` 0 errors; client tests 808 pass.
+
+- **Net names with brackets** (PLT-hw backlog 24): the copper writer refused `IM[1]` on both sides (client
+  `_NET`, Pascal `PlaceEditNameOk`). A new `PlaceEditNetOk` (designator characters plus `+ . [ ]`; none is a
+  separator of the batch line) now checks the copper writer's via and track nets and the graphics writer's
+  net; the client patterns of the copper, graphics and edit writers take the same characters. Designators
+  keep `PlaceEditNameOk`.
+- **Placing inside an `edit` batch** (backlog 16 / 19), so a remove and a place go under one tick:
+  `addtrack` (a copper track: the copper writer's `CopperTrackExists` / `CopperNearest` tests and its
+  object calls), `addline` (non-copper line), `addfill` (a fill, clearance-tested on copper), `addtext`
+  (the graphics writer's text, mirrored on bottom layers). Plan op `cuttrack` expands to `deltrack` plus
+  the one or two outer pieces as `addtrack`, leaving a gap between two points on the track (a series part).
+- **`setplated`** (backlog 4): the Plated flag of a free drilled pad, inside `PCBM_BeginModify` /
+  `EndModify`. New route: the flag was only ever set on a pad before `AddPCBObject`. Refused to unplate a
+  pad that carries a net.
+- **`setnet` on a free fill** (backlog 11), by its corners, clearance-tested like the graphics writer's fill.
+- **Bottom-side moves** (backlog 3 / 19): `moves` accepts a part on BottomLayer (it stays on its side; a side
+  change is `flip`). Only the side check changed; rotation and position are written as for a top part.
+- Client, offline: `pad_via_contact.py --polygons` counts a via as joined on an outer layer where it sits in
+  a poured polygon of its own net, or reaches over the outline edge by `--min-overlap`; `order_check.py`
+  passes the `polygons` read. On today's 22p reads 22 of the 24 NetC217_1 flags went; two remain and are
+  real (a 0.086 mm top joint at (169.037, 71.831); a via 0.26 mm outside its pour at (161.544, 73.99)). The
+  fix batch is PLT-hw `22p-adapter/reviews/contact-joints-2026-11-23/02-joints.json` (needs `.10` for IM[1]).
+
+| # | Check | Pass |
+|---|---|---|
+| W32 | `copper` with a track on `IM[1]` (the 22p batch 02) | previewed, placed, read back; `nets --net IM[1]` holds the track |
+| W33 | `cuttrack` on a scratch track (disposable board): one gap of 1 mm in the middle | the track gone, two pieces of the same net and width, the gap where asked; DRC unrouted shows the cut |
+| W34 | `addline`, `addfill` (non-copper and copper with a net), `addtext` in one batch with a `delline` | all `done`; reads show them; one tick |
+| W35 | `setplated` 0 on a no-net free pad, then 1 again (disposable board); refused on a GND pad | the drill file / `freegraphics` `plated` follows |
+| W36 | `setnet` kind `fill` on a scratch no-net copper fill | net set; refused when other-net copper is within the clearance |
+| W37 | `moves` on a bottom part (disposable board, after `flip` W14) | moved and rotated on the bottom, read back |
+| W38 | `order_check.py 22p` contact step with the pour nets | only real joints listed |

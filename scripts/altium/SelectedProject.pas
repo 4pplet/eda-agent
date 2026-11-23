@@ -992,6 +992,27 @@ Begin
     End;
 End;
 
+{ A net name in the copper and graphics writers (scripts 2026.11.23.10): the    }
+{ designator characters plus + . [ ] (bus-style nets: IM[1], 22p 2026-11-23).   }
+{ None of them is a separator of the batch line (| and ;).                      }
+Function PlaceEditNetOk(S : String) : Boolean;
+Var
+    I : Integer;
+    Ch : String;
+Begin
+    Result := (Length(S) >= 1) And (Length(S) <= 40);
+    If Not Result Then Exit;
+    For I := 1 To Length(S) Do
+    Begin
+        Ch := Copy(S, I, 1);
+        If Pos(Ch, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-+.[]') = 0 Then
+        Begin
+            Result := False;
+            Exit;
+        End;
+    End;
+End;
+
 Function PlaceEditRotation(Comp : IPCB_Component) : Integer;
 Begin
     Result := Round(Comp.Rotation) Mod 360;
@@ -1300,7 +1321,10 @@ Begin
                 Try LayerStr := GetLayerString(Comp.Layer); Except LayerStr := 'Unknown'; End;
                 OpCL[J] := LayerStr;
                 If Not Comp.Moveable Then Status := 'refused: the part is locked'
-                Else If LayerStr <> 'TopLayer' Then Status := 'refused: the part is not on the top layer (no side changes)'
+                { A part on either outer layer moves on its side (bottom parts from scripts }
+                { 2026.11.23.10); a side change is the edit op flip.                        }
+                Else If (LayerStr <> 'TopLayer') And (LayerStr <> 'BottomLayer') Then
+                    Status := 'refused: the part is on neither outer layer'
                 Else If PlaceEditRouted(Board, Comp) Then Status := 'refused: copper routing overlaps the part (placement comes before routing)'
                 Else If Apply And ((OpCX[J] <> OpOX[J]) Or (OpCY[J] <> OpOY[J]) Or (OpCR[J] <> OpOR[J]) Or (OpCL[J] <> OpOL[J])) Then
                     Status := 'refused: moved since preview'
@@ -2123,7 +2147,7 @@ Begin
             F3 := ParamEditTake(OpStr, '|');
             F4 := ParamEditTake(OpStr, '|');
             F5 := OpStr;
-            Ok := PlaceEditNameOk(F0) And PlaceEditIntOk(F1) And PlaceEditIntOk(F2)
+            Ok := PlaceEditNetOk(F0) And PlaceEditIntOk(F1) And PlaceEditIntOk(F2)
                 And PlaceEditIntOk(F3) And PlaceEditIntOk(F4) And PlaceEditIntOk(F5);
             If Ok Then
                 Ok := (StrToInt(F3) > 0) And (StrToInt(F4) > 0) And (StrToInt(F4) < StrToInt(F3)) And (StrToInt(F5) >= 0);
@@ -2165,7 +2189,7 @@ Begin
             F5 := ParamEditTake(OpStr, '|');
             F6 := ParamEditTake(OpStr, '|');
             F7 := OpStr;
-            Ok := PlaceEditNameOk(F0) And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3)
+            Ok := PlaceEditNetOk(F0) And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3)
                 And PlaceEditIntOk(F4) And PlaceEditIntOk(F5) And PlaceEditIntOk(F6) And PlaceEditIntOk(F7);
             If Ok Then
                 Ok := (StrToInt(F6) > 0) And (StrToInt(F7) >= 0)
@@ -4361,7 +4385,7 @@ Begin
             F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
             Ok := ((F0 = 'pad') Or (F0 = 'fill') Or (F0 = 'text') Or (F0 = 'line')) And CopperLayerNameOk(F1)
                 And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4) And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
-            If Ok And (F7 <> '') Then Ok := PlaceEditNameOk(F7);
+            If Ok And (F7 <> '') Then Ok := PlaceEditNetOk(F7);
             If Not Ok Then
             Begin
                 Result := BuildErrorResponse(RequestId, 'BAD_BATCH', 'Item ' + IntToStr(Count) + ': bad kind, layer, number or net');
@@ -5235,6 +5259,7 @@ Var
     Net : IPCB_Net;
     VCX, VCY, VA1, VA2 : TStringList;
     OldMode, PX0, PY0 : Integer;
+    LoX, LoY, HiX, HiY : Integer;
     EditNets : TStringList;
     Seg, Seg2 : TPolySegment;
     Gap : Double;
@@ -5293,7 +5318,8 @@ Begin
                 Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly')
                 Or (F0 = 'addpoly') Or (F0 = 'setpoly') Or (F0 = 'delarc') Or (F0 = 'delpad') Or (F0 = 'clearlayer')
                 Or (F0 = 'setnet') Or (F0 = 'addpad')
-                Or (F0 = 'delpoly') Or (F0 = 'delrule') Or (F0 = 'flip') Or (F0 = 'body3d'))
+                Or (F0 = 'delpoly') Or (F0 = 'delrule') Or (F0 = 'flip') Or (F0 = 'body3d')
+                Or (F0 = 'addtrack') Or (F0 = 'addline') Or (F0 = 'addfill') Or (F0 = 'addtext') Or (F0 = 'setplated'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -5466,14 +5492,37 @@ Begin
                     Begin
                         Try If Poly.Net <> Nil Then NetName := Poly.Net.Name; Except NetName := ''; End;
                     End;
+                End
+                Else If (IS1[J] = 'fill') And (Lyr <> eNoLayer) And (Lyr <> eMultiLayer) Then
+                Begin
+                    { A free fill by its corners x1,y1 - x2,y2 (scripts 2026.11.23.10). }
+                    N := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
+                    If N = 1 Then
+                    Begin
+                        Try If Fill.Net <> Nil Then NetName := Fill.Net.Name; Except NetName := ''; End;
+                    End;
                 End;
-                If N < 0 Then Status := 'refused: s1 must be via, pad or poly, on a layer of this board'
+                If N < 0 Then Status := 'refused: s1 must be via, pad, poly or fill, on a layer of this board'
                 Else If Net = Nil Then Status := 'refused: net not on the board'
-                Else If (IS1[J] = 'poly') And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
+                Else If ((IS1[J] = 'poly') Or (IS1[J] = 'fill')) And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
                 Else If N = 0 Then Status := 'refused: no such free ' + IS1[J] + ' here'
                 Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical objects here'
                 Else If NetName = IS2[J] Then Status := 'unchanged'
                 Else If IS1[J] = 'poly' Then Status := 'would_set (was "' + NetName + '")'
+                Else If IS1[J] = 'fill' Then
+                Begin
+                    If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+                    If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+                    If (HiX - LoX) >= (HiY - LoY) Then
+                        Gap := CopperNearest(Board, IS2[J], Lyr, LoX + (HiY - LoY) Div 2, (LoY + HiY) Div 2,
+                            HiX - (HiY - LoY) Div 2, (LoY + HiY) Div 2, (HiY - LoY) / 2, Clearance, What)
+                    Else
+                        Gap := CopperNearest(Board, IS2[J], Lyr, (LoX + HiX) Div 2, LoY + (HiX - LoX) Div 2,
+                            (LoX + HiX) Div 2, HiY - (HiX - LoX) Div 2, (HiX - LoX) / 2, Clearance, What);
+                    If Gap < Clearance Then
+                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                    Else Status := 'would_set (was "' + NetName + '")';
+                End
                 Else
                 Begin
                     { A via or pad: other-net copper within the clearance of its spot }
@@ -5516,6 +5565,96 @@ Begin
                         If Gap < Clearance Then
                             Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
                         Else Status := 'would_place';
+                    End;
+                End;
+            End
+            Else If IOp[J] = 'addtrack' Then
+            Begin
+                { A copper track inside an edit batch (scripts 2026.11.23.10): x1,y1 - }
+                { x2,y2, w its width, s1 its net. With a deltrack of the same batch a  }
+                { track is cut or rerouted under one tick. The copper writer's tests.  }
+                Net := Nil;
+                If IS1[J] <> '' Then Net := FindNetByName(Board, IS1[J]);
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Or (Not IsCopper) Then
+                    Status := 'refused: addtrack needs a copper layer of this board'
+                Else If Net = Nil Then Status := 'refused: net not on the board'
+                Else If (W <= 0) Or ((X1 = X2) And (Y1 = Y2)) Then Status := 'refused: a track needs a width and two distinct ends'
+                Else If CopperTrackExists(Board, IS1[J], Lyr, X1, Y1, X2, Y2, W) Then Status := 'unchanged'
+                Else
+                Begin
+                    Gap := CopperNearest(Board, IS1[J], Lyr, X1, Y1, X2, Y2, W / 2, Clearance, What);
+                    If Gap < Clearance Then
+                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                    Else Status := 'would_place';
+                End;
+            End
+            Else If IOp[J] = 'addline' Then
+            Begin
+                { A free line on a non-copper layer: the graphics writer's line. }
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: a copper line is an addtrack'
+                Else If (W <= 0) Or ((X1 = X2) And (Y1 = Y2)) Then Status := 'refused: a line needs a width and two distinct ends'
+                Else If FreeLineCount(Board, Lyr, X1, Y1, X2, Y2, Track) > 0 Then Status := 'unchanged'
+                Else Status := 'would_place';
+            End
+            Else If IOp[J] = 'addfill' Then
+            Begin
+                { A free fill: x1,y1 - x2,y2 its corners, s2 its net (copper only). }
+                Net := Nil;
+                If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+                If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: a fill goes on one layer of this board'
+                Else If (X1 = X2) Or (Y1 = Y2) Then Status := 'refused: empty rectangle'
+                Else If (IS2[J] <> '') And (Net = Nil) Then Status := 'refused: net not on the board'
+                Else If (IS2[J] <> '') And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
+                Else If FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill) > 0 Then Status := 'unchanged'
+                Else If Not IsCopper Then Status := 'would_place'
+                Else
+                Begin
+                    If (HiX - LoX) >= (HiY - LoY) Then
+                        Gap := CopperNearest(Board, IS2[J], Lyr, LoX + (HiY - LoY) Div 2, (LoY + HiY) Div 2,
+                            HiX - (HiY - LoY) Div 2, (LoY + HiY) Div 2, (HiY - LoY) / 2, Clearance, What)
+                    Else
+                        Gap := CopperNearest(Board, IS2[J], Lyr, (LoX + HiX) Div 2, LoY + (HiX - LoX) Div 2,
+                            (LoX + HiX) Div 2, HiY - (HiX - LoX) Div 2, (HiX - LoX) / 2, Clearance, What);
+                    If Gap < Clearance Then
+                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                    Else Status := 'would_place';
+                End;
+            End
+            Else If IOp[J] = 'addtext' Then
+            Begin
+                { A free text: x1,y1 its location, x2 its height, y2 its rotation, w }
+                { its stroke, s1 the text. Not on copper.                            }
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: text goes on silk, mechanical or other non-copper layers'
+                Else If (X2 <= 0) Or (W <= 0) Or ((Y2 <> 0) And (Y2 <> 90) And (Y2 <> 180) And (Y2 <> 270)) Then
+                    Status := 'refused: text needs height, stroke and rotation 0/90/180/270'
+                Else If Not EditFreeTextOk(IS1[J]) Then Status := 'refused: text needs 1-40 plain characters'
+                Else If FreeTextCount(Board, Lyr, X1, Y1, IS1[J], Txt) > 0 Then Status := 'unchanged'
+                Else Status := 'would_place';
+            End
+            Else If IOp[J] = 'setplated' Then
+            Begin
+                { The Plated flag of a free drilled pad: x1,y1 centre, x2 size, y2 hole, }
+                { w 1 plated / 0 not.                                                    }
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If (W <> 0) And (W <> 1) Then Status := 'refused: w is 1 (plated) or 0 (not plated)'
+                Else If Y2 <= 0 Then Status := 'refused: only a drilled pad has a Plated flag'
+                Else
+                Begin
+                    N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                    If N = 0 Then Status := 'refused: no such free pad here'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical pads here'
+                    Else If Pad.Plated = (W = 1) Then Status := 'unchanged'
+                    Else If W = 1 Then Status := 'would_set (plated)'
+                    Else
+                    Begin
+                        NetName := '';
+                        Try If Pad.Net <> Nil Then NetName := Pad.Net.Name; Except NetName := ''; End;
+                        If NetName <> '' Then Status := 'refused: the pad is on net ' + NetName + '; a non-plated hole carries no net'
+                        Else Status := 'would_set (not plated)';
                     End;
                 End;
             End
@@ -5961,6 +6100,17 @@ Begin
                                     Try If Pad.Net <> Nil Then NetName := Pad.Net.Name; Except NetName := ''; End;
                                 End;
                             End
+                            Else If IS1[J] = 'fill' Then
+                            Begin
+                                N := FreeFillCount(Board, Lyr, X1, Y1, X2, Y2, Fill);
+                                If Fill <> Nil Then
+                                Begin
+                                    PCBServer.SendMessageToRobots(Fill.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                                    Fill.Net := Net;
+                                    PCBServer.SendMessageToRobots(Fill.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                                    Try If Fill.Net <> Nil Then NetName := Fill.Net.Name; Except NetName := ''; End;
+                                End;
+                            End
                             Else If IS1[J] = 'poly' Then
                             Begin
                                 N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
@@ -6014,6 +6164,103 @@ Begin
                                 + ',' + BoolToJsonStr(Pad.Plated);
                             Ok := (Pad.X = X1) And (Pad.Y = Y1) And (Pad.TopXSize = X2) And (Pad.HoleSize = Y2)
                                 And ((Y2 = 0) Or (Pad.Plated = (W = 1)));
+                        End;
+                    End
+                    Else If IOp[J] = 'addtrack' Then
+                    Begin
+                        Net := FindNetByName(Board, IS1[J]);
+                        Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                        If (Track <> Nil) And (Net <> Nil) Then
+                        Begin
+                            Track.x1 := X1;
+                            Track.y1 := Y1;
+                            Track.x2 := X2;
+                            Track.y2 := Y2;
+                            Track.Width := W;
+                            Track.Layer := Lyr;
+                            Track.Net := Net;
+                            If EditNets.IndexOf(IS1[J]) < 0 Then EditNets.Add(IS1[J]);
+                            Board.AddPCBObject(Track);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                            Back := IntToStr(Track.x1) + ',' + IntToStr(Track.y1) + ',' + IntToStr(Track.x2) + ',' + IntToStr(Track.y2) + ',' + IntToStr(Track.Width);
+                            Ok := (Track.Width = W) And ((((Track.x1 = X1) And (Track.y1 = Y1) And (Track.x2 = X2) And (Track.y2 = Y2)))
+                                Or ((Track.x1 = X2) And (Track.y1 = Y2) And (Track.x2 = X1) And (Track.y2 = Y1)));
+                        End;
+                    End
+                    Else If IOp[J] = 'addline' Then
+                    Begin
+                        Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+                        If Track <> Nil Then
+                        Begin
+                            Track.x1 := X1;
+                            Track.y1 := Y1;
+                            Track.x2 := X2;
+                            Track.y2 := Y2;
+                            Track.Width := W;
+                            Track.Layer := Lyr;
+                            Board.AddPCBObject(Track);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+                            Back := IntToStr(Track.x1) + ',' + IntToStr(Track.y1) + ',' + IntToStr(Track.x2) + ',' + IntToStr(Track.y2) + ',' + IntToStr(Track.Width);
+                            Ok := (Track.Width = W) And ((((Track.x1 = X1) And (Track.y1 = Y1) And (Track.x2 = X2) And (Track.y2 = Y2)))
+                                Or ((Track.x1 = X2) And (Track.y1 = Y2) And (Track.x2 = X1) And (Track.y2 = Y1)));
+                        End;
+                    End
+                    Else If IOp[J] = 'addfill' Then
+                    Begin
+                        Net := Nil;
+                        If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                        If X1 < X2 Then Begin LoX := X1; HiX := X2; End Else Begin LoX := X2; HiX := X1; End;
+                        If Y1 < Y2 Then Begin LoY := Y1; HiY := Y2; End Else Begin LoY := Y2; HiY := Y1; End;
+                        Fill := PCBServer.PCBObjectFactory(eFillObject, eNoDimension, eCreate_Default);
+                        If Fill <> Nil Then
+                        Begin
+                            Fill.X1Location := LoX;
+                            Fill.Y1Location := LoY;
+                            Fill.X2Location := HiX;
+                            Fill.Y2Location := HiY;
+                            Fill.Rotation := 0;
+                            Fill.Layer := Lyr;
+                            If Net <> Nil Then
+                            Begin
+                                Fill.Net := Net;
+                                If EditNets.IndexOf(IS2[J]) < 0 Then EditNets.Add(IS2[J]);
+                            End;
+                            Board.AddPCBObject(Fill);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Fill.I_ObjectAddress);
+                            Back := IntToStr(Fill.X1Location) + ',' + IntToStr(Fill.Y1Location) + ',' + IntToStr(Fill.X2Location) + ',' + IntToStr(Fill.Y2Location);
+                            Ok := (Fill.X1Location = LoX) And (Fill.Y1Location = LoY) And (Fill.X2Location = HiX) And (Fill.Y2Location = HiY);
+                        End;
+                    End
+                    Else If IOp[J] = 'addtext' Then
+                    Begin
+                        Txt := PCBServer.PCBObjectFactory(eTextObject, eNoDimension, eCreate_Default);
+                        If Txt <> Nil Then
+                        Begin
+                            Txt.XLocation := X1;
+                            Txt.YLocation := Y1;
+                            Txt.Layer := Lyr;
+                            Txt.UseTTFonts := False;
+                            If Pos('Bottom', GetLayerString(Lyr)) = 1 Then Txt.MirrorFlag := True;
+                            Txt.Text := IS1[J];
+                            Txt.Size := X2;
+                            Txt.Width := W;
+                            Txt.Rotation := Y2;
+                            Board.AddPCBObject(Txt);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Txt.I_ObjectAddress);
+                            Back := Txt.Text + ',' + IntToStr(Txt.XLocation) + ',' + IntToStr(Txt.YLocation) + ',' + IntToStr(Txt.Size);
+                            Ok := (Txt.Text = IS1[J]) And (Txt.XLocation = X1) And (Txt.YLocation = Y1) And (Txt.Size = X2);
+                        End;
+                    End
+                    Else If IOp[J] = 'setplated' Then
+                    Begin
+                        N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                        If Pad <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            Pad.Plated := (W = 1);
+                            PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := 'plated ' + BoolToJsonStr(Pad.Plated);
+                            Ok := (Pad.Plated = (W = 1));
                         End;
                     End
                     Else If IOp[J] = 'movepoly' Then

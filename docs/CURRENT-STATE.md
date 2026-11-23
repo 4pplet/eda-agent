@@ -122,8 +122,10 @@ Parameter edits have their own tick ("Allow parameter edits").
   `selected-edits-20261123g`, **W22-W26 pending**: `bus`, `busentry`, `sheetsymbol`, `entry`, `footprint`,
   a unit of a multi-part symbol; then scripts `2026.11.23.8`, section 11, runtime `selected-edits-20261123h`,
   **W27-W31 pending**: create-only library items, a new symbol and a new footprint; then scripts
-  `2026.11.23.9`, section 12, runtime `selected-edits-20261123i`, **the runtime to start**: library items
-  counted after each write):
+  `2026.11.23.9`, section 12, runtime `selected-edits-20261123i` (W1 / W2 passed 2026-11-23): library items
+  counted after each write; then scripts `2026.11.23.10`, section 13, runtime `selected-edits-20261123j`,
+  **the runtime to start, W32-W38 pending**: bracketed net names, addtrack / cuttrack / addline / addfill /
+  addtext / setplated / setnet on a fill in an edit batch, bottom-side moves):
   polygons created and reshaped from an
   outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
   polygons read, bottom-layer text mirrored.
