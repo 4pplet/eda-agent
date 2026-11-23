@@ -174,3 +174,35 @@ footprint choice on a placed part, symbol and footprint library editing, Update 
 | W19 | `port` in each style and IO type, `noerc`; then `del` of one port and of the marker | shown as asked; deleted; no script error |
 | W20 | `movepart`, `rotpart`, `delpart` on the part placed in W9 | at the target; rotated; gone |
 | W21 | a small real flow on the new sheet: two parts, wires, labels, a port, power ports; save; compile | `nets` shows the pins on the nets |
+
+## 10. Scripts 2026.11.23.7: hierarchy, buses, a unit of a multi-part symbol, a placed part's footprint
+
+Stefan 2026-11-23: "we will be needing these, why in backlog?". Runtime `selected-edits-20261123g`, carries
+`.6`. **Runtimes `b` to `f` were never started; `g` is the one to start. W1-W26 pending** (PLT-hw
+`tools/eda-agent/QUALIFY-TODO.md`). `lint.py`: 0 errors.
+
+| `proj.edit_schematic_checked` | What | From |
+|---|---|---|
+| `add` kind `bus` | a two-vertex bus `x1,y1` - `x2,y2` | upstream `Gen_PlaceBus` (vertices as the wire) |
+| `add` kind `busentry` | a bus entry, location and corner | upstream `Gen_PlaceBusEntry` |
+| `add` kind `sheetsymbol` | a sheet symbol, bottom-left `x1,y1`, size from `x2,y2`; `s2` the child sheet's file name, `s3` its displayed name | upstream `Gen_PlaceSheetSymbol`: `XSize` / `YSize` (a sheet symbol has no `Corner`); file name and name are sub-objects set through `GetState_SchSheetFileName` / `GetState_SchSheetName` + `SetState_Text` AFTER the registration |
+| `entry`, `s1` = the sheet symbol's name | a sheet entry: `s3` its name, `s2` its side, `n` its IO type, `x1` its distance from the top | upstream `Gen_PlaceSheetEntry`: `AddAndPositionSchObject` discards side and distance (measured there on 90 entries), so both are set again after it and read back; the item reads `placed, not where asked` when Altium kept its own position |
+| `footprint`, `s1` = designator | the placed part's footprint becomes `s3`: every PCBLIB implementation removed, one added through `AddSchImplementation`, bound by name with an empty location | upstream `Lib_LinkFootprint`, which does this on a LIBRARY component. **On a placed part it is unproven** (W25). The name is not checked against the project's libraries |
+| `part` with `x2` > 0 | the unit of a multi-part symbol (`CurrentPartID`), the designator may then repeat on the sheet | upstream's property write (Generic.pas); their caveat stands: a multi-part symbol can load with a lower part count than the library's |
+
+Client: `sch_plan.py` ops `bus`, `busentry`, `sheetsymbol`, `entry`, `footprint`, and `"unit"` on `part`.
+
+**Not built: symbol and footprint LIBRARY editing** (a new part drawn through the bridge). The fork carries
+upstream's `Lib_*` functions; they need a checked tool of their own: a library named in the request and not
+"the focused one", a tick, a preview, a read-back, and a copy of the library as the first target, because a
+library change reaches every project that uses the part. It is the next build, after the tests. Also not
+built: harnesses, a read of a sheet's parts / sheet symbols / buses (the read lists labels, power ports,
+ports, wires, texts, notes, boxes, lines and pins), Update PCB.
+
+| # | Check (disposable project copy) | Pass |
+|---|---|---|
+| W22 | `sheetsymbol` pointing at the sheet made in W18, then two `entry` items (left and right side) | the symbol shows with file name and name; the entries sit where asked, or the item says they do not |
+| W23 | compile the project with that sheet symbol | the new sheet is a child in the project tree; a port on it and the matching entry connect (`nets`) |
+| W24 | `bus` and `busentry` | drawn; no script error |
+| W25 | `footprint` on a placed resistor, to another footprint of `lib\PLT_lib.PcbLib`; save; compile | the part's footprint in the properties and in `bom` is the new one; no "missing model" in the messages |
+| W26 | `part` with `unit` 1 and 2 of a dual symbol under one designator | two units placed; pins of both in `sch read` |

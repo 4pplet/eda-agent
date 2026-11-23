@@ -6325,7 +6325,10 @@ Begin
     Else If Kind = 'line' Then Result := eLine
     Else If Kind = 'note' Then Result := eTextFrame
     Else If Kind = 'port' Then Result := ePort          { scripts 2026.11.23.6 }
-    Else If Kind = 'noerc' Then Result := eNoERC;
+    Else If Kind = 'noerc' Then Result := eNoERC
+    Else If Kind = 'bus' Then Result := eBus            { scripts 2026.11.23.7 }
+    Else If Kind = 'busentry' Then Result := eBusEntry
+    Else If Kind = 'sheetsymbol' Then Result := eSheetSymbol;
 End;
 
 Function SchEditHasText(Kind : String) : Boolean;
@@ -6699,6 +6702,11 @@ Var
     T : ISch_TextFrame;
     W : ISch_Wire;
     Pt : ISch_Port;
+    Bs : ISch_Bus;
+    Be : ISch_BusEntry;
+    Sym : ISch_SheetSymbol;
+    FNObj : ISch_SheetFileName;
+    NMObj : ISch_SheetName;
     Loc : TLocation;
     FontId, Color : Integer;
 Begin
@@ -6739,6 +6747,33 @@ Begin
         Try T.WordWrap := True; Except End;
         Try T.ClipToRect := True; Except End;
         Try T.ShowBorder := False; Except End;
+    End
+    Else If Kind = 'bus' Then
+    Begin
+        { Upstream Gen_PlaceBus: a two-vertex bus, written like the wire. }
+        Bs := Obj;
+        Bs.Location := Point(X1, Y1);
+        Bs.InsertVertex := 1;
+        Bs.SetState_Vertex(1, Point(X1, Y1));
+        Bs.InsertVertex := 2;
+        Bs.SetState_Vertex(2, Point(X2, Y2));
+    End
+    Else If Kind = 'busentry' Then
+    Begin
+        { Upstream Gen_PlaceBusEntry: ISch_BusEntry is a line, location and corner. }
+        Be := Obj;
+        Be.Location := Point(X1, Y1);
+        Be.Corner := Point(X2, Y2);
+    End
+    Else If Kind = 'sheetsymbol' Then
+    Begin
+        { Upstream Gen_PlaceSheetSymbol: no Corner on a sheet symbol, the size is }
+        { XSize / YSize from the bottom-left location. File name and name are     }
+        { sub-objects, set after the registration below.                          }
+        Sym := Obj;
+        Sym.Location := Point(X1, Y1);
+        Sym.XSize := X2 - X1;
+        Sym.YSize := Y2 - Y1;
     End
     Else If Kind = 'port' Then
     Begin
@@ -6791,6 +6826,17 @@ Begin
     End;
     Doc.RegisterSchObjectInContainer(Obj);
     SchRegisterObject(Doc, Obj);
+    If Kind = 'sheetsymbol' Then
+    Begin
+        { Style carries the child sheet's file name, Txt the displayed name. }
+        Sym := Obj;
+        FNObj := Nil;
+        Try FNObj := Sym.GetState_SchSheetFileName; Except End;
+        If FNObj <> Nil Then FNObj.SetState_Text(Style);
+        NMObj := Nil;
+        Try NMObj := Sym.GetState_SchSheetName; Except End;
+        If NMObj <> Nil Then NMObj.SetState_Text(Txt);
+    End;
     Result := Obj;
 End;
 
@@ -6875,6 +6921,87 @@ Begin
         Doc.SchIterator_Destroy(Iter);
     End;
     If (Result = 0) And (Status = '') Then Status := Des + ' is not on this sheet';
+End;
+
+{ Sheet symbols on a sheet whose displayed name is SymName (scripts 2026.11.23.7, }
+{ op `entry`). The name is a sub-object: its text is read through .Text.          }
+Function SchEditSymbolByName(Doc : ISch_Document; SymName : String; Var First : ISch_SheetSymbol) : Integer;
+Var
+    Iter : ISch_Iterator;
+    Sym : ISch_SheetSymbol;
+    ThisName : String;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSheetSymbol));
+        Sym := Iter.FirstSchObject;
+        While Sym <> Nil Do
+        Begin
+            ThisName := '';
+            Try
+                If Sym.SheetName <> Nil Then ThisName := Sym.SheetName.Text;
+            Except
+            End;
+            If ThisName = SymName Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Sym;
+            End;
+            Sym := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+End;
+
+{ The footprint of a PLACED part (scripts 2026.11.23.7, op `footprint`): every }
+{ PCBLIB implementation removed, one added and bound by name with an empty     }
+{ location, as upstream Lib_LinkFootprint does it on a library component (the  }
+{ factory AddSchImplementation; a path as location wedged AD26 there).         }
+Function SchEditSetFootprint(Comp : ISch_Component; FootprintName : String) : Boolean;
+Var
+    ImplIter : ISch_Iterator;
+    Impl, Impl2, Found : ISch_Implementation;
+    Guard : Integer;
+    MT, Blank, LibKind : String;
+Begin
+    Result := False;
+    Blank := '';
+    LibKind := 'PCBLib';
+    Guard := 50;
+    While Guard > 0 Do
+    Begin
+        Found := Nil;
+        ImplIter := Comp.SchIterator_Create;
+        Try
+            ImplIter.AddFilter_ObjectSet(MkSet(eImplementation));
+            Impl2 := ImplIter.FirstSchObject;
+            While Impl2 <> Nil Do
+            Begin
+                MT := '';
+                Try MT := Impl2.ModelType; Except End;
+                If (MT = cDocKind_PcbLib) And (Found = Nil) Then Found := Impl2;
+                Impl2 := ImplIter.NextSchObject;
+            End;
+        Finally
+            Comp.SchIterator_Destroy(ImplIter);
+        End;
+        If Found = Nil Then Break;
+        Try Comp.RemoveSchImplementation(Found); Except End;
+        Dec(Guard);
+    End;
+    Impl := Comp.AddSchImplementation;
+    If Impl <> Nil Then
+    Begin
+        Try Impl.ClearAllDatafileLinks; Except End;
+        Impl.ModelName := FootprintName;
+        Impl.ModelType := cDocKind_PcbLib;
+        Try Impl.IsCurrent := True; Except End;
+        Try Impl.AddDataFileLink(FootprintName, Blank, LibKind); Except End;
+        Result := (Impl.ModelName = FootprintName);
+    End;
 End;
 
 { Parts on a sheet carrying the designator Des (scripts 2026.11.23.6: delpart,  }
@@ -6996,6 +7123,9 @@ Var
     Loc : TLocation;
     Comp : ISch_Component;
     Avail : String;
+    Sym : ISch_SheetSymbol;
+    Entry : ISch_SheetEntry;
+    WantSide : Integer;
 Begin
     Mode := ExtractJsonValue(Params, 'mode');
     BatchHash := ExtractJsonValue(Params, 'batch_hash');
@@ -7123,11 +7253,16 @@ Begin
                 Or (Not PlaceEditIntOk(IX2[J])) Or (Not PlaceEditIntOk(IY2[J]))
                 Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
                 Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam')
-                    And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')))
-                Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart'))
+                    And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
+                    Or (Op = 'entry') Or (Op = 'footprint')))
+                Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
+                    Or (Op = 'entry') Or (Op = 'footprint'))
                     And (SchEditKindId(Kind) < 0))
-                Or (((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')) And (Kind = ''))
+                Or (((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
+                    Or (Op = 'entry') Or (Op = 'footprint')) And (Kind = ''))
                 Or ((Op = 'add') And (Kind = 'port') And (S3 = ''))
+                Or ((Op = 'add') And (Kind = 'sheetsymbol') And ((S2 = '') Or (S3 = '')))
+                Or (((Op = 'entry') Or (Op = 'footprint')) And (S3 = ''))
                 Or ((Op = 'part') And ((Kind = '') Or (S2 = '') Or (S3 = '')
                     Or (StrToIntDef(IN_[J], -1) < 0) Or (StrToIntDef(IN_[J], 9) > 3)))
                 Or ((Op = 'compparam') And ((Pos('/', Kind) < 2) Or (Pos('/', Kind) = Length(Kind))
@@ -7174,6 +7309,20 @@ Begin
                 CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
                 SchEditCompParam(Doc, CDes, CName, S2, IS3[J], StrToInt(IN_[J]) = 1, False, Status);
             End
+            Else If Op = 'entry' Then
+            Begin
+                { A sheet entry on the sheet symbol named s1: s3 its name, s2 its side, }
+                { n its IO type, x1 its distance from the symbol's top.                 }
+                Hits := SchEditSymbolByName(Doc, Kind, Sym);
+                If Hits <> 1 Then
+                    Status := 'sheet symbol ' + Kind + ' found ' + IntToStr(Hits) + ' times on this sheet';
+            End
+            Else If Op = 'footprint' Then
+            Begin
+                Hits := SchEditPartByDes(Doc, Kind, Comp);
+                If Hits = 0 Then Status := 'no part ' + Kind + ' on this sheet'
+                Else If Hits > 1 Then Status := Kind + ' has ' + IntToStr(Hits) + ' parts on this sheet (a multi-part symbol)';
+            End
             Else If Op = 'newsheet' Then
             Begin
                 If FileExists(ExtractFilePath(P.DM_ProjectFullPath) + Kind + '.SchDoc') Then
@@ -7200,7 +7349,7 @@ Begin
                 If Not ResolveLibRef(S2, Kind, Avail) Then
                     Status := 'no part "' + Kind + '" in that library (it holds: ' + Avail + ')'
                 Else If Hits > 0 Then Status := 'a part is already at this place'
-                Else If (Hits2 > 0) And (Pos('?', IS3[J]) = 0) Then
+                Else If (Hits2 > 0) And (Pos('?', IS3[J]) = 0) And (X2 = 0) Then
                     Status := 'designator ' + IS3[J] + ' is already on this sheet';
             End
             Else If Op = 'add' Then
@@ -7286,6 +7435,46 @@ Begin
                             Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S3) Then Back := 'text differs'
                             Else Back := 'ok';
                         End
+                        Else If Op = 'entry' Then
+                        Begin
+                            Hits := SchEditSymbolByName(Doc, Kind, Sym);
+                            Entry := Nil;
+                            If Sym <> Nil Then Entry := SchServer.SchObjectFactory(eSheetEntry, eCreate_Default);
+                            If Entry = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Touched := True;
+                                Entry.Name := S3;
+                                Entry.DistanceFromTop := X1;
+                                If N = 1 Then Entry.IOType := ePortOutput
+                                Else If N = 2 Then Entry.IOType := ePortInput
+                                Else If N = 3 Then Entry.IOType := ePortBidirectional
+                                Else Entry.IOType := ePortUnspecified;
+                                If S2 = 'right' Then WantSide := eRightSide
+                                Else If S2 = 'top' Then WantSide := eTopSide
+                                Else If S2 = 'bottom' Then WantSide := eBottomSide
+                                Else WantSide := eLeftSide;
+                                Entry.Side := WantSide;
+                                { Upstream measured that AddAndPositionSchObject discards side }
+                                { and distance: both are set again after it, then read back.   }
+                                Sym.AddAndPositionSchObject(Entry);
+                                Try Entry.Side := WantSide; Except End;
+                                Try Entry.DistanceFromTop := X1; Except End;
+                                SchRegisterObject(Sym, Entry);
+                                If (Entry.Side = WantSide) And (Entry.DistanceFromTop = X1) Then Back := 'ok'
+                                Else Back := 'placed, not where asked';
+                            End;
+                        End
+                        Else If Op = 'footprint' Then
+                        Begin
+                            Hits := SchEditPartByDes(Doc, Kind, Comp);
+                            If Comp = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Touched := True;
+                                If SchEditSetFootprint(Comp, S3) Then Back := 'ok' Else Back := 'text differs';
+                            End;
+                        End
                         Else If Op = 'delpart' Then
                         Begin
                             Hits := SchEditPartByDes(Doc, Kind, Comp);
@@ -7341,6 +7530,11 @@ Begin
                                 Comp.MoveToXY(X1, Y1);
                                 Comp.SetState_Orientation(N);
                                 Comp.Designator.Text := S3;
+                                { x2 > 0: the unit of a multi-part symbol (upstream sets it this way). }
+                                If X2 > 0 Then
+                                Begin
+                                    Try Comp.CurrentPartID := X2; Except End;
+                                End;
                                 SchRegisterObject(Doc, Comp);
                                 Hits := SchEditPartAt(Doc, X1, Y1, S3, Hits2);
                                 If (Hits = 1) And (Hits2 >= 1) Then Back := 'ok' Else Back := 'missing';

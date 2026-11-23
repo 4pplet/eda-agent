@@ -117,8 +117,10 @@ Parameter edits have their own tick ("Allow parameter edits").
   `selected-edits-20261123c`, **W9-W11 pending**: a library part placed on a sheet, schematic op `part`; then
   scripts `2026.11.23.4`, section 7, runtime `selected-edits-20261123d`, **W12-W16 pending**: `delpoly`, `delrule`, `flip`, `body3d`; then scripts `2026.11.23.5`, section 8, runtime
   `selected-edits-20261123e`, **W17 pending**: `setnet` with a clearance test; then scripts `2026.11.23.6`,
-  section 9, runtime `selected-edits-20261123f`, **W18-W21 pending, the runtime to start**: schematic ops
-  `newsheet`, `port`, `noerc`, `delpart` / `movepart` / `rotpart`):
+  section 9, runtime `selected-edits-20261123f`, **W18-W21 pending**: schematic ops `newsheet`, `port`,
+  `noerc`, `delpart` / `movepart` / `rotpart`; then scripts `2026.11.23.7`, section 10, runtime
+  `selected-edits-20261123g`, **W22-W26 pending, the runtime to start**: `bus`, `busentry`, `sheetsymbol`,
+  `entry`, `footprint`, a unit of a multi-part symbol):
   polygons created and reshaped from an
   outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
   polygons read, bottom-layer text mirrored.
