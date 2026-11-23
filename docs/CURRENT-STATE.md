@@ -110,7 +110,10 @@ Parameter edits have their own tick ("Allow parameter edits").
   Scripts `2026.11.23.1`
   ([PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read](PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read.md),
   runtime `selected-edits-20261123a`, **V1-V4, V6-V8 passed 2026-11-23 on the real 22p, with P4-P6, P8, P13 of
-  `2026.11.20.x`; V5 / V9 / P9 not run live**, carries `.2`): polygons created and reshaped from an
+  `2026.11.20.x`; V5 / V9 / P9 not run live**, carries `.2`; then scripts `2026.11.23.2`,
+  [PROPOSAL-2026-11-23-net-on-free-copper-pad-in-edit-clearlayer-texts](PROPOSAL-2026-11-23-net-on-free-copper-pad-in-edit-clearlayer-texts.md),
+  runtime `selected-edits-20261123b`, **W1-W8 pending**: `setnet`, `addpad`, `clearlayer` with texts, free
+  pads in the free-graphics read): polygons created and reshaped from an
   outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
   polygons read, bottom-layer text mirrored.
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.

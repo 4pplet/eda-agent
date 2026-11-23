@@ -4705,6 +4705,35 @@ Begin
     End;
 End;
 
+{ Free texts on a layer (not in a component or dimension): what clearlayer     }
+{ removes with the texts option (scripts 2026.11.23.2).                        }
+Function FreeLayerTexts(Board : IPCB_Board; Lyr : TLayer; Var First : IPCB_Text) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Txt : IPCB_Text;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTextObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Txt := Iter.FirstPCBObject;
+        While Txt <> Nil Do
+        Begin
+            If (Not Txt.InComponent) And (Not Txt.InDimension) And (Txt.Layer = Lyr) Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Txt;
+            End;
+            Txt := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
 { Polygons on a layer whose FIRST outline vertex is exactly X, Y and that have }
 { NPts vertices (scripts 2026.11.20.2, movepoly). The first vertex and not the }
 { bounding rectangle names the polygon: a rectangle read after segment writes  }
@@ -4988,6 +5017,7 @@ Var
     IOp, ILay, IX1, IY1, IX2, IY2, IW, IS1, IS2, IStatus, IBack, VX, VY : TStringList;
     J, K, Count, Would, Refused, Done, NPads, NFills, NTexts, NLines, NVias, NShape, Clearance, N : Integer;
     X1, Y1, X2, Y2, W, Hole, NTracks : Integer;
+    NT, KT : Integer;
     Apply, PcbModified, Partial, Touched, Ok, IsCopper : Boolean;
     Board : IPCB_Board;
     Lyr : TLayer;
@@ -5059,7 +5089,8 @@ Begin
             Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape')
                 Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename')
                 Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly')
-                Or (F0 = 'addpoly') Or (F0 = 'setpoly') Or (F0 = 'delarc') Or (F0 = 'delpad') Or (F0 = 'clearlayer'))
+                Or (F0 = 'addpoly') Or (F0 = 'setpoly') Or (F0 = 'delarc') Or (F0 = 'delpad') Or (F0 = 'clearlayer')
+                Or (F0 = 'setnet') Or (F0 = 'addpad'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -5186,9 +5217,78 @@ Begin
                 Else
                 Begin
                     N := FreeLayerObjects(Board, Lyr, Prim0);
+                    { s1 = 'texts' (scripts 2026.11.23.2): the free texts go too, s2 }
+                    { is the number of texts the plan expects.                       }
+                    NT := 0;
+                    If IS1[J] = 'texts' Then NT := FreeLayerTexts(Board, Lyr, Txt);
                     If N <> W Then Status := 'refused: the layer holds ' + IntToStr(N) + ' free objects, the plan says ' + IntToStr(W)
-                    Else If N = 0 Then Status := 'unchanged'
+                    Else If (IS1[J] = 'texts') And (NT <> StrToIntDef(IS2[J], -1)) Then
+                        Status := 'refused: the layer holds ' + IntToStr(NT) + ' free texts, the plan says ' + IS2[J]
+                    Else If (N = 0) And (NT = 0) Then Status := 'unchanged'
+                    Else If IS1[J] = 'texts' Then
+                        Status := 'would_clear (' + IntToStr(N) + ' objects, ' + IntToStr(NT) + ' texts)'
                     Else Status := 'would_clear (' + IntToStr(N) + ' objects)';
+                End;
+            End
+            Else If IOp[J] = 'setnet' Then
+            Begin
+                { The net of a free via (x1,y1 centre, x2 size, y2 hole), of a free pad }
+                { (the same, on `layer`) or of a polygon (x1,y1 first vertex, w vertex  }
+                { count) becomes the net in s2; s1 names the kind. Nothing moves, so    }
+                { there is no clearance test here: the DRC after it is the check.       }
+                Net := Nil;
+                If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                NetName := '';
+                N := -1;
+                If IS1[J] = 'via' Then
+                Begin
+                    N := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
+                    If N = 1 Then
+                    Begin
+                        Try If Via.Net <> Nil Then NetName := Via.Net.Name; Except NetName := ''; End;
+                    End;
+                End
+                Else If (IS1[J] = 'pad') And (Lyr <> eNoLayer) Then
+                Begin
+                    N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                    If N = 1 Then
+                    Begin
+                        Try If Pad.Net <> Nil Then NetName := Pad.Net.Name; Except NetName := ''; End;
+                    End;
+                End
+                Else If (IS1[J] = 'poly') And (Lyr <> eNoLayer) And (Lyr <> eMultiLayer) Then
+                Begin
+                    N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                    If N = 1 Then
+                    Begin
+                        Try If Poly.Net <> Nil Then NetName := Poly.Net.Name; Except NetName := ''; End;
+                    End;
+                End;
+                If N < 0 Then Status := 'refused: s1 must be via, pad or poly, on a layer of this board'
+                Else If Net = Nil Then Status := 'refused: net not on the board'
+                Else If (IS1[J] = 'poly') And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
+                Else If N = 0 Then Status := 'refused: no such free ' + IS1[J] + ' here'
+                Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical objects here'
+                Else If NetName = IS2[J] Then Status := 'unchanged'
+                Else Status := 'would_set (was "' + NetName + '")';
+            End
+            Else If IOp[J] = 'addpad' Then
+            Begin
+                { A free round pad on MultiLayer: x1,y1 centre, x2 size, y2 hole, w 1 }
+                { plated / 0 not, s2 its net. The graphics writer's pad, inside an    }
+                { edit batch so that a via becomes a pad under one tick.              }
+                Net := Nil;
+                If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                If Lyr <> eMultiLayer Then Status := 'refused: addpad places on MultiLayer'
+                Else If (X2 <= 0) Or (Y2 < 0) Or (Y2 >= X2) Then Status := 'refused: the size must exceed the hole'
+                Else If (IS2[J] <> '') And (Net = Nil) Then Status := 'refused: net not on the board'
+                Else If FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad) > 0 Then Status := 'unchanged'
+                Else
+                Begin
+                    Gap := CopperNearest(Board, IS2[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, What);
+                    If Gap < Clearance Then
+                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                    Else Status := 'would_place';
                 End;
             End
             Else If IOp[J] = 'movepoly' Then
@@ -5475,6 +5575,104 @@ Begin
                         End;
                         Back := 'removed ' + IntToStr(K) + ' remaining ' + IntToStr(N);
                         Ok := (N = 0) And (K = W);
+                        If IS1[J] = 'texts' Then
+                        Begin
+                            KT := 0;
+                            NT := FreeLayerTexts(Board, Lyr, Txt);
+                            While (Txt <> Nil) And (KT < StrToIntDef(IS2[J], 0)) Do
+                            Begin
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Txt.I_ObjectAddress);
+                                Board.RemovePCBObject(Txt);
+                                Inc(KT);
+                                NT := FreeLayerTexts(Board, Lyr, Txt);
+                            End;
+                            Back := Back + ' texts removed ' + IntToStr(KT) + ' remaining ' + IntToStr(NT);
+                            Ok := Ok And (NT = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'setnet' Then
+                    Begin
+                        Net := FindNetByName(Board, IS2[J]);
+                        NetName := '';
+                        If Net <> Nil Then
+                        Begin
+                            If EditNets.IndexOf(IS2[J]) < 0 Then EditNets.Add(IS2[J]);
+                            If IS1[J] = 'via' Then
+                            Begin
+                                N := FreeViaCount(Board, X1, Y1, X2, Y2, Via);
+                                If Via <> Nil Then
+                                Begin
+                                    PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                                    Via.Net := Net;
+                                    PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                                    Try If Via.Net <> Nil Then NetName := Via.Net.Name; Except NetName := ''; End;
+                                End;
+                            End
+                            Else If IS1[J] = 'pad' Then
+                            Begin
+                                N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                                If Pad <> Nil Then
+                                Begin
+                                    PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                                    Pad.Net := Net;
+                                    PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                                    Try If Pad.Net <> Nil Then NetName := Pad.Net.Name; Except NetName := ''; End;
+                                End;
+                            End
+                            Else If IS1[J] = 'poly' Then
+                            Begin
+                                N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                                If Poly <> Nil Then
+                                Begin
+                                    Poly.BeginModify;
+                                    Poly.Net := Net;
+                                    PolyRepour(Poly);
+                                    Poly.EndModify;
+                                    Poly.GraphicallyInvalidate;
+                                    Try If Poly.Net <> Nil Then NetName := Poly.Net.Name; Except NetName := ''; End;
+                                End;
+                            End;
+                        End;
+                        Back := 'net ' + NetName;
+                        Ok := (NetName = IS2[J]) And (NetName <> '');
+                    End
+                    Else If IOp[J] = 'addpad' Then
+                    Begin
+                        Net := Nil;
+                        If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                        Pad := PCBServer.PCBObjectFactory(ePadObject, eNoDimension, eCreate_Default);
+                        If Pad <> Nil Then
+                        Begin
+                            Pad.X := X1;
+                            Pad.Y := Y1;
+                            { Same no-ring order rule as the graphics writer's pad. }
+                            If X2 > Pad.HoleSize Then
+                            Begin
+                                Pad.TopXSize := X2;
+                                Pad.TopYSize := X2;
+                                Pad.HoleSize := Y2;
+                            End
+                            Else
+                            Begin
+                                Pad.HoleSize := Y2;
+                                Pad.TopXSize := X2;
+                                Pad.TopYSize := X2;
+                            End;
+                            Pad.Layer := Lyr;
+                            Pad.TopShape := 1;
+                            If Y2 > 0 Then Pad.Plated := (W = 1);
+                            If Net <> Nil Then
+                            Begin
+                                Pad.Net := Net;
+                                If EditNets.IndexOf(IS2[J]) < 0 Then EditNets.Add(IS2[J]);
+                            End;
+                            Board.AddPCBObject(Pad);
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+                            Back := IntToStr(Pad.X) + ',' + IntToStr(Pad.Y) + ',' + IntToStr(Pad.TopXSize) + ',' + IntToStr(Pad.HoleSize)
+                                + ',' + BoolToJsonStr(Pad.Plated);
+                            Ok := (Pad.X = X1) And (Pad.Y = Y1) And (Pad.TopXSize = X2) And (Pad.HoleSize = Y2)
+                                And ((Y2 = 0) Or (Pad.Plated = (W = 1)));
+                        End;
                     End
                     Else If IOp[J] = 'movepoly' Then
                     Begin

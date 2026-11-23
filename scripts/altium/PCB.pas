@@ -6685,8 +6685,10 @@ Var
     Fill : IPCB_Fill;
     Region : IPCB_Region;
     Contour : IPCB_Contour;
-    JsonItems, LayerStr, Row, FillsJson, RegionsJson, NetName : String;
+    Pad : IPCB_Pad;
+    JsonItems, LayerStr, Row, FillsJson, RegionsJson, NetName, PadsJson : String;
     Count, Total, FillCount, FillTotal, RegionCount, RegionTotal, PtCount, HoleCount, K : Integer;
+    PadCount, PadTotal : Integer;
 Begin
     JsonItems := '';
     Count := 0;
@@ -6808,11 +6810,48 @@ Begin
     Finally
         Board.BoardIterator_Destroy(Iter);
     End;
+    { Free pads (not in a component), scripts 2026.11.23.2: centre, size, hole, }
+    { plated, layer and net, so a hand-placed pad can be found and deleted.      }
+    PadsJson := '';
+    PadCount := 0;
+    PadTotal := 0;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If Not Prim.InComponent Then
+            Begin
+                Inc(PadTotal);
+                If PadCount < 500 Then
+                Begin
+                    Pad := Prim;
+                    LayerStr := GetLayerString(Prim.Layer);
+                    NetName := '';
+                    Try If Prim.Net <> Nil Then NetName := Prim.Net.Name; Except NetName := ''; End;
+                    If PadCount > 0 Then PadsJson := PadsJson + ',';
+                    PadsJson := PadsJson + '{"layer":"' + EscapeJsonString(LayerStr) + '",'
+                        + '"net":"' + EscapeJsonString(NetName) + '",'
+                        + '"x":' + IntToStr(Pad.x) + ',"y":' + IntToStr(Pad.y) + ','
+                        + '"size":' + IntToStr(Pad.TopXSize) + ',"size_y":' + IntToStr(Pad.TopYSize) + ','
+                        + '"hole":' + IntToStr(Pad.HoleSize) + ',"plated":' + BoolToJsonStr(Pad.Plated) + '}';
+                    Inc(PadCount);
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
     Result := BuildSuccessResponse(RequestId,
         '{"graphics":[' + JsonItems + '],"count":' + IntToStr(Count)
         + ',"total":' + IntToStr(Total) + ',"truncated":' + BoolToJsonStr(Total > Count)
         + ',"fills":[' + FillsJson + '],"fill_total":' + IntToStr(FillTotal)
         + ',"regions":[' + RegionsJson + '],"region_total":' + IntToStr(RegionTotal)
+        + ',"pads":[' + PadsJson + '],"pad_total":' + IntToStr(PadTotal)
         + ',"units":"coord","coord_per_mil":10000}');
 End;
 
