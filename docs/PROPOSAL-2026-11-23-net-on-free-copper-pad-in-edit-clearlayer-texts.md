@@ -127,3 +127,19 @@ gate: Stefan's decision), parameter add in the PCB parameter writer.
 | W14 | disposable copy: `flip` an unrouted two-pad part and back | on the bottom, then on the top; pads on the right layer |
 | W15 | disposable copy: `body3d` with `display-on-board.step` at the board origin | no crash; the body shows in 3D where the holder is |
 | W16 | `delvia` + `addpad` of a no-net via to a GND pad in one batch | would_place (replaces a via of this batch), done |
+
+## 8. Scripts 2026.11.23.5: `setnet` with a clearance test
+
+Runtime `selected-edits-20261123e`, carries `.4`. **Runtimes `b`, `c` and `d` were never started; `e` is the
+one to start. W1-W17 pending.** `lint.py`: 0 errors.
+
+`setnet` on a via or a pad is now refused when other-net copper (pads, vias, tracks, arcs) lies within the
+plan's clearance of its spot under the NEW net: that would be a short. The test is `CopperNearestExcept`, a
+copy of `CopperNearest` that leaves one primitive out (the object itself still carries its old net and would
+be found on its own spot); the qualified `CopperNearest` that the copper, graphics and via writers use is not
+touched. A polygon has no such test: it repours around what is there, and the DRC is its check. This replaces
+"no clearance test" in section 1.
+
+| # | Check | Pass |
+|---|---|---|
+| W17 | `setnet` of a scratch no-net via that sits on a track of another net, to GND; then of a free one | refused naming the track and the gap; the free one would_set, done |
