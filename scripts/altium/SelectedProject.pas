@@ -1778,6 +1778,175 @@ Begin
     End;
 End;
 
+{ CopperNearest with one primitive left out (scripts 2026.11.23.5): the object  }
+{ whose net `setnet` changes still carries its old net and would be found as   }
+{ other-net copper on its own spot. A copy, so that the qualified function the  }
+{ copper, graphics and via writers use is not touched.                          }
+Function CopperNearestExcept(Board : IPCB_Board; NetName : String; Layer : TLayer;
+    AX, AY, BX, BY, HW, Clearance : Double; Skip : IPCB_Primitive; Var What : String) : Double;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Pad : IPCB_Pad;
+    Via : IPCB_Via;
+    Track : IPCB_Track;
+    R : TCoordRect;
+    LayerStr, PrimNet : String;
+    Gap, Reach, LoX, LoY, HiX, HiY, Half, HX, HY, PRX1, PRY1, PRX2, PRY2 : Double;
+    PadRot : Integer;
+    Relevant, IsRound : Boolean;
+Begin
+    Result := 1.0E12;
+    What := '';
+    AX := AX * 1.0;
+    AY := AY * 1.0;
+    BX := BX * 1.0;
+    BY := BY * 1.0;
+    HW := HW * 1.0;
+    Clearance := Clearance * 1.0;
+    Reach := HW + Clearance;
+    If AX < BX Then Begin LoX := AX; HiX := BX; End Else Begin LoX := BX; HiX := AX; End;
+    If AY < BY Then Begin LoY := AY; HiY := BY; End Else Begin LoY := BY; HiY := AY; End;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject, eViaObject, eTrackObject, eArcObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            Relevant := False;
+            If Prim.ObjectId = eViaObject Then Relevant := True
+            Else If Prim.ObjectId = ePadObject Then
+            Begin
+                If Prim.Layer = eMultiLayer Then Relevant := True
+                Else Relevant := (Layer = eNoLayer) Or (Prim.Layer = Layer);
+                If Relevant And (Layer <> eNoLayer) And (Prim.Layer <> eMultiLayer) Then
+                    Relevant := PCB_IsCopperLayerName(GetLayerString(Prim.Layer));
+            End
+            Else
+            Begin
+                LayerStr := GetLayerString(Prim.Layer);
+                If PCB_IsCopperLayerName(LayerStr) Then
+                    Relevant := (Layer = eNoLayer) Or (Prim.Layer = Layer);
+            End;
+            If (Skip <> Nil) And (Prim.I_ObjectAddress = Skip.I_ObjectAddress) Then Relevant := False;
+            If Relevant Then
+            Begin
+                R := Prim.BoundingRectangle;
+                If Prim.ObjectId = ePadObject Then
+                Begin
+                    { A pad's BoundingRectangle includes its solder-mask expansion (an 0.85 x }
+                    { 0.80 mm pad reported 1.05 x 1.00 on 2026-10-09): build the copper      }
+                    { rectangle from the centre and size instead, turned with the pad. A pad  }
+                    { at an odd angle gets the circumscribed square (conservative).           }
+                    Pad := Prim;
+                    HX := Pad.TopXSize / 2;
+                    HY := Pad.TopYSize / 2;
+                    PadRot := 0;
+                    Try PadRot := Round(Pad.Rotation) Mod 180; Except PadRot := 0; End;
+                    If PadRot < 0 Then PadRot := PadRot + 180;
+                    If PadRot = 90 Then
+                    Begin
+                        Half := HX;
+                        HX := HY;
+                        HY := Half;
+                    End
+                    Else If PadRot <> 0 Then
+                    Begin
+                        Half := Sqrt(HX * HX + HY * HY);
+                        HX := Half;
+                        HY := Half;
+                    End;
+                    PRX1 := Pad.x - HX;
+                    PRY1 := Pad.y - HY;
+                    PRX2 := Pad.x + HX;
+                    PRY2 := Pad.y + HY;
+                End
+                Else
+                Begin
+                    PRX1 := R.X1 * 1.0;
+                    PRY1 := R.Y1 * 1.0;
+                    PRX2 := R.X2 * 1.0;
+                    PRY2 := R.Y2 * 1.0;
+                End;
+                { Cheap box test before any geometry. }
+                If (PRX1 - Reach > HiX) Or (PRX2 + Reach < LoX) Or (PRY1 - Reach > HiY) Or (PRY2 + Reach < LoY) Then
+                    Relevant := False;
+            End;
+            If Relevant Then
+            Begin
+                PrimNet := '';
+                Try If Prim.Net <> Nil Then PrimNet := Prim.Net.Name; Except PrimNet := ''; End;
+                If PrimNet = NetName Then Relevant := False;
+            End;
+            If Relevant Then
+            Begin
+                Gap := 1.0E12;
+                If Prim.ObjectId = eViaObject Then
+                Begin
+                    Via := Prim;
+                    Gap := CopperPtSeg(Via.x, Via.y, AX, AY, BX, BY) - HW - Via.Size / 2;
+                End
+                Else If Prim.ObjectId = ePadObject Then
+                Begin
+                    Pad := Prim;
+                    IsRound := False;
+                    Try
+                        IsRound := (Pad.TopShape = eRounded) And (Pad.TopXSize = Pad.TopYSize);
+                    Except
+                        IsRound := False;
+                    End;
+                    If IsRound Then
+                    Begin
+                        Half := Pad.TopXSize / 2;
+                        Gap := CopperPtSeg(Pad.x, Pad.y, AX, AY, BX, BY) - HW - Half;
+                    End
+                    Else
+                        Gap := CopperSegRect(AX, AY, BX, BY, PRX1, PRY1, PRX2, PRY2) - HW;
+                End
+                Else If Prim.ObjectId = eTrackObject Then
+                Begin
+                    Track := Prim;
+                    Gap := CopperSegSeg(AX, AY, BX, BY, Track.x1, Track.y1, Track.x2, Track.y2) - HW - Track.Width / 2;
+                End
+                Else
+                    Gap := CopperSegRect(AX, AY, BX, BY, R.X1 * 1.0, R.Y1 * 1.0, R.X2 * 1.0, R.Y2 * 1.0) - HW;
+                If Gap < Result Then
+                Begin
+                    Result := Gap;
+                    If Prim.ObjectId = eViaObject Then What := 'via'
+                    Else If Prim.ObjectId = ePadObject Then What := 'pad'
+                    Else If Prim.ObjectId = eTrackObject Then What := 'track'
+                    Else What := 'arc';
+                    If Prim.InComponent Then
+                    Begin
+                        Try What := What + ' of ' + Prim.Component.Name.Text; Except End;
+                    End;
+                    If PrimNet <> '' Then What := What + ' on ' + PrimNet;
+                    { The prim's bounding rectangle, raw units: the first live run (2026-10-09)  }
+                    { refused spots the offline geometry found clear, so the refusal shows what  }
+                    { Altium reported.                                                           }
+                    What := What + ' rect [' + IntToStr(R.X1) + ',' + IntToStr(R.Y1) + ','
+                        + IntToStr(R.X2) + ',' + IntToStr(R.Y2) + ']';
+                    If Prim.ObjectId = ePadObject Then
+                    Begin
+                        Try
+                            What := What + ' pad ' + Pad.Name + ' at ' + IntToStr(Pad.x) + ',' + IntToStr(Pad.y)
+                                + ' size ' + IntToStr(Pad.TopXSize) + 'x' + IntToStr(Pad.TopYSize)
+                                + ' shape ' + IntToStr(Pad.TopShape) + ' layer ' + GetLayerString(Pad.Layer);
+                        Except
+                        End;
+                    End;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
 { An identical free via (same net, centre, size and hole) already on the board. }
 Function CopperViaExists(Board : IPCB_Board; NetName : String; X, Y, Size, Hole : Integer) : Boolean;
 Var
@@ -5268,8 +5437,8 @@ Begin
             Begin
                 { The net of a free via (x1,y1 centre, x2 size, y2 hole), of a free pad }
                 { (the same, on `layer`) or of a polygon (x1,y1 first vertex, w vertex  }
-                { count) becomes the net in s2; s1 names the kind. Nothing moves, so    }
-                { there is no clearance test here: the DRC after it is the check.       }
+                { count) becomes the net in s2; s1 names the kind. A via or pad is      }
+                { tested against other-net copper; a polygon is repoured.               }
                 Net := Nil;
                 If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
                 NetName := '';
@@ -5304,7 +5473,20 @@ Begin
                 Else If N = 0 Then Status := 'refused: no such free ' + IS1[J] + ' here'
                 Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical objects here'
                 Else If NetName = IS2[J] Then Status := 'unchanged'
-                Else Status := 'would_set (was "' + NetName + '")';
+                Else If IS1[J] = 'poly' Then Status := 'would_set (was "' + NetName + '")'
+                Else
+                Begin
+                    { A via or pad: other-net copper within the clearance of its spot }
+                    { would be a short under the new net (scripts 2026.11.23.5). A    }
+                    { pour is not copper to this test: it repours around the object.  }
+                    If IS1[J] = 'via' Then
+                        Gap := CopperNearestExcept(Board, IS2[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, Via, What)
+                    Else
+                        Gap := CopperNearestExcept(Board, IS2[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, Pad, What);
+                    If Gap < Clearance Then
+                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                    Else Status := 'would_set (was "' + NetName + '")';
+                End;
             End
             Else If IOp[J] = 'addpad' Then
             Begin
