@@ -4528,10 +4528,11 @@ End;
 { fields).                                                                      }
 Function PolyVertices(S : String; VX, VY, VCX, VCY, VA1, VA2 : TStringList) : Boolean;
 Var
-    Rest, Tok, A, B, C, D, E : String;
+    Rest, Tok, A, B, C, D, E, Blank : String;
     Commas : Integer;
 Begin
     Result := False;
+    Blank := '';
     Rest := S;
     While Rest <> '' Do
     Begin
@@ -4543,7 +4544,7 @@ Begin
         If Commas = 1 Then
         Begin
             If (Not PlaceEditIntOk(A)) Or (Not PlaceEditIntOk(Tok)) Then Exit;
-            VX.Add(A); VY.Add(Tok); VCX.Add(''); VCY.Add(''); VA1.Add(''); VA2.Add('');
+            VX.Add(A); VY.Add(Tok); VCX.Add(Blank); VCY.Add(Blank); VA1.Add(Blank); VA2.Add(Blank);
         End
         Else
         Begin
@@ -4699,6 +4700,34 @@ Begin
                 If First = Nil Then First := Prim;
             End;
             Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Design rules carrying this exact name (scripts 2026.11.23.4, delrule). }
+Function RuleByName(Board : IPCB_Board; RuleName : String; Var First : IPCB_Rule) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Rule : IPCB_Rule;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Rule := Iter.FirstPCBObject;
+        While Rule <> Nil Do
+        Begin
+            If Rule.Name = RuleName Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Rule;
+            End;
+            Rule := Iter.NextPCBObject;
         End;
     Finally
         Board.BoardIterator_Destroy(Iter);
@@ -5018,6 +5047,10 @@ Var
     J, K, Count, Would, Refused, Done, NPads, NFills, NTexts, NLines, NVias, NShape, Clearance, N : Integer;
     X1, Y1, X2, Y2, W, Hole, NTracks : Integer;
     NT, KT : Integer;
+    Rule : IPCB_Rule;
+    Body : IPCB_ComponentBody;
+    Model : IPCB_Model;
+    ModelPath : String;
     Apply, PcbModified, Partial, Touched, Ok, IsCopper : Boolean;
     Board : IPCB_Board;
     Lyr : TLayer;
@@ -5090,7 +5123,8 @@ Begin
                 Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename')
                 Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly')
                 Or (F0 = 'addpoly') Or (F0 = 'setpoly') Or (F0 = 'delarc') Or (F0 = 'delpad') Or (F0 = 'clearlayer')
-                Or (F0 = 'setnet') Or (F0 = 'addpad'))
+                Or (F0 = 'setnet') Or (F0 = 'addpad')
+                Or (F0 = 'delpoly') Or (F0 = 'delrule') Or (F0 = 'flip') Or (F0 = 'body3d'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -5285,11 +5319,62 @@ Begin
                 Else If FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad) > 0 Then Status := 'unchanged'
                 Else
                 Begin
-                    Gap := CopperNearest(Board, IS2[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, What);
-                    If Gap < Clearance Then
-                        Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
-                    Else Status := 'would_place';
+                    { A pad that takes the place of a via this batch deletes (same    }
+                    { centre, the pad no larger than the via) stands where copper     }
+                    { already stood: no clearance test, the via would be found as     }
+                    { other-net copper when its net differs from the pad's.           }
+                    Ok := False;
+                    For K := 0 To IOp.Count - 1 Do
+                        If (IOp[K] = 'delvia') And (IX1[K] = IX1[J]) And (IY1[K] = IY1[J])
+                            And (StrToInt(IX2[K]) >= X2) Then Ok := True;
+                    If Ok Then Status := 'would_place (replaces a via of this batch)'
+                    Else
+                    Begin
+                        Gap := CopperNearest(Board, IS2[J], eNoLayer, X1, Y1, X1, Y1, X2 / 2, Clearance, What);
+                        If Gap < Clearance Then
+                            Status := 'refused: ' + What + ' within clearance (' + CoordToMMStr(Gap) + ' mm of ' + CoordToMMStr(Clearance) + ' mm)'
+                        Else Status := 'would_place';
+                    End;
                 End;
+            End
+            Else If IOp[J] = 'delpoly' Then
+            Begin
+                { A polygon removed: x1,y1 its first vertex, w its vertex count. }
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
+                Else
+                Begin
+                    N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                    If N = 0 Then Status := 'refused: no polygon with this first vertex and vertex count on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical polygons here'
+                    Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'delrule' Then
+            Begin
+                N := RuleByName(Board, IS1[J], Rule);
+                If N = 0 Then Status := 'refused: no design rule with this name'
+                Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' rules carry this name'
+                Else Status := 'would_delete';
+            End
+            Else If IOp[J] = 'flip' Then
+            Begin
+                { A part to the other side of the board (upstream PCB_FlipComponent). }
+                Comp := Nil;
+                Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                If Comp = Nil Then Status := 'refused: no such part'
+                Else If Comp.Layer = eTopLayer Then Status := 'would_flip (to the bottom)'
+                Else If Comp.Layer = eBottomLayer Then Status := 'would_flip (to the top)'
+                Else Status := 'refused: the part is on neither outer layer';
+            End
+            Else If IOp[J] = 'body3d' Then
+            Begin
+                { A STEP model as a free 3D body: s1 its path (forward slashes), x1,y1 }
+                { where the model's origin goes, x2 the standoff, layer the side. No   }
+                { rotation (upstream: assigning one is an undeclared identifier).      }
+                ModelPath := StringReplace(IS1[J], '/', '\', -1);
+                If (Lyr <> eTopLayer) And (Lyr <> eBottomLayer) Then Status := 'refused: a body goes on TopLayer or BottomLayer'
+                Else If Not FileExists(ModelPath) Then Status := 'refused: no model file at that path'
+                Else Status := 'would_place';
             End
             Else If IOp[J] = 'movepoly' Then
             Begin
@@ -5588,6 +5673,81 @@ Begin
                             End;
                             Back := Back + ' texts removed ' + IntToStr(KT) + ' remaining ' + IntToStr(NT);
                             Ok := Ok And (NT = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'delpoly' Then
+                    Begin
+                        N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                        If Poly <> Nil Then
+                        Begin
+                            Try
+                                If Poly.Net <> Nil Then
+                                    If EditNets.IndexOf(Poly.Net.Name) < 0 Then EditNets.Add(Poly.Net.Name);
+                            Except
+                            End;
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Poly.I_ObjectAddress);
+                            Board.RemovePCBObject(Poly);
+                            K := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'delrule' Then
+                    Begin
+                        N := RuleByName(Board, IS1[J], Rule);
+                        If Rule <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Rule.I_ObjectAddress);
+                            Board.RemovePCBObject(Rule);
+                            K := RuleByName(Board, IS1[J], Rule);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'flip' Then
+                    Begin
+                        Comp := Nil;
+                        Try Comp := Board.GetPcbComponentByRefDes(IS1[J]); Except Comp := Nil; End;
+                        If Comp <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+                            If Comp.Layer = eTopLayer Then
+                            Begin
+                                Comp.Layer := eBottomLayer;
+                                Ok := (Comp.Layer = eBottomLayer);
+                            End
+                            Else
+                            Begin
+                                Comp.Layer := eTopLayer;
+                                Ok := (Comp.Layer = eTopLayer);
+                            End;
+                            PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+                            Back := GetLayerString(Comp.Layer);
+                        End;
+                    End
+                    Else If IOp[J] = 'body3d' Then
+                    Begin
+                        { Upstream's order (PCB_Place3DBody), measured there by crashes: }
+                        { factory, load, SetState_FromModel, model, ADD and register,    }
+                        { and only then layer, MoveByXY and the standoff.                }
+                        ModelPath := StringReplace(IS1[J], '/', '\', -1);
+                        Body := PCBServer.PCBObjectFactory(eComponentBodyObject, eNoDimension, eCreate_Default);
+                        If Body <> Nil Then
+                        Begin
+                            Model := Body.ModelFactory_FromFilename(ModelPath, False);
+                            If Model <> Nil Then
+                            Begin
+                                Body.SetState_FromModel;
+                                Body.Model := Model;
+                                Board.AddPCBObject(Body);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Body.I_ObjectAddress);
+                                Body.Layer := Lyr;
+                                Body.MoveByXY(X1 - Body.x, Y1 - Body.y);
+                                If X2 <> 0 Then Body.StandoffHeight := X2;
+                                Back := IntToStr(Body.x) + ',' + IntToStr(Body.y);
+                                Ok := (Body.x = X1) And (Body.y = Y1);
+                            End
+                            Else Back := 'the model did not load';
                         End;
                     End
                     Else If IOp[J] = 'setnet' Then

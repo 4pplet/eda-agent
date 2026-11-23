@@ -98,3 +98,32 @@ the NEXT read only, so wiring (`pinnet` / `pinpower`) is a second plan after the
 | W9 | on a scratch sheet of a disposable project copy: `sch preview` then `apply` of one `part` from `lib/PLT_lib.SchLib` (a resistor, `R?`) | no script error; the part shows on the sheet at the place, rotated as asked; `sch read` lists its pins |
 | W10 | a second plan: `pinnet` / `pinpower` on the new part's pins; save; `sch verify` | the compiled netlist has the pins on the nets |
 | W11 | refusals: an unknown `lib_ref`; a designator already used; a part already at the location | refused with the reason, nothing written, no dialog |
+
+## 7. Scripts 2026.11.23.4: polygon delete, rule delete, part flip, 3D body; audit fixes
+
+Stefan 2026-11-23, on the list of what was still not built: "we can build this?" / "this is a good time for it".
+Runtime `selected-edits-20261123d`, carries `.3`. **Runtimes `b` and `c` were never started; `d` is the one to
+start. W1-W16 pending.** `lint.py` reports 0 errors on this build.
+
+| `pcb.edit_free_checked` op | What | From |
+|---|---|---|
+| `delpoly` | the polygon with first vertex `x1,y1` and `w` vertices removed (`RemovePCBObject` after the registration message) | new: **what becomes of the pour's child regions is not known.** W12 on a scratch polygon decides it; until then not on a real pour |
+| `delrule` | the design rule named `s1` removed; refused unless exactly one rule carries the name | upstream `PCB_DeleteDesignRule` |
+| `flip` | the part `s1` to the other outer layer (`Comp.Layer :=` between the modify messages) | upstream `PCB_FlipComponent`. Tracks on the part's pads stay where they are: for unrouted parts |
+| `body3d` | the STEP model at path `s1` (forward slashes, turned into backslashes natively) as a free 3D body: origin at `x1,y1`, `layer` TopLayer / BottomLayer, `x2` standoff. No rotation | upstream `PCB_Place3DBody`, in its order of calls (factory, `ModelFactory_FromFilename`, `SetState_FromModel`, `Model :=`, add and register, THEN layer, `MoveByXY`, `StandoffHeight`): upstream measured an access violation in ADVPCB.DLL with any other order. **First on a disposable board copy** |
+
+Audit fixes: `addpad` skips the clearance test when the same batch deletes a via at the same centre that is at
+least as large (a no-net via becomes a GND pad in one batch); `PolyVertices` no longer passes `''` as an
+argument (lint `empty-string-literal-arg`, four times; the code had passed V3 / V4 live).
+
+Not built: a track cut and fills / texts / lines inside an edit batch (they need the copper writer's track
+creation inside the edit writer), bottom-side moves in `moves`, a second batch on an unsaved board (a safety
+gate: Stefan's decision), parameter add in the PCB parameter writer.
+
+| # | Check | Pass |
+|---|---|---|
+| W12 | disposable copy: `addpoly` a small no-net polygon on a copper layer, then `delpoly` it | would_delete, done, remaining 0; `polygons` and the layer's regions show nothing left behind; DRC clean |
+| W13 | `setup` a scratch rule, then `delrule` it | would_delete, done; gone from `rules` |
+| W14 | disposable copy: `flip` an unrouted two-pad part and back | on the bottom, then on the top; pads on the right layer |
+| W15 | disposable copy: `body3d` with `display-on-board.step` at the board origin | no crash; the body shows in 3D where the holder is |
+| W16 | `delvia` + `addpad` of a no-net via to a GND pad in one batch | would_place (replaces a via of this batch), done |
