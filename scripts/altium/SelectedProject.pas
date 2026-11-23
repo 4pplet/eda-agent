@@ -4384,6 +4384,9 @@ Begin
                             TextObj.YLocation := Y1;
                             TextObj.Layer := Lyr;
                             TextObj.UseTTFonts := False;
+                            { A text on a bottom layer reads from the bottom: mirrored (upstream }
+                            { 5cfd20f). Scripts 2026.11.23.1.                                    }
+                            If Pos('Bottom', GetLayerString(Lyr)) = 1 Then TextObj.MirrorFlag := True;
                             TextObj.Text := IText[J];
                             TextObj.Size := X2;
                             TextObj.Width := W;
@@ -4509,6 +4512,191 @@ Begin
                     Inc(Result);
                     If First = Nil Then First := Track;
                 End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ ---- Scripts 2026.11.23.1: polygon outlines from a plan, more free-object deletes ---- }
+{ A polygon outline 'x,y x,y,cx,cy,a1,a2 ...' (raw units, angles in             }
+{ millidegrees): a token with two numbers is a line vertex, one with six an arc }
+{ from this vertex to the next, centre cx,cy, from angle a1 to a2 counter-      }
+{ clockwise. 3 to 64 vertices. The lists stay parallel ('' for a line's arc     }
+{ fields).                                                                      }
+Function PolyVertices(S : String; VX, VY, VCX, VCY, VA1, VA2 : TStringList) : Boolean;
+Var
+    Rest, Tok, A, B, C, D, E : String;
+    Commas : Integer;
+Begin
+    Result := False;
+    Rest := S;
+    While Rest <> '' Do
+    Begin
+        Tok := ParamEditTake(Rest, ' ');
+        If Tok = '' Then Continue;
+        Commas := ParamEditCountChar(Tok, ',');
+        If (Commas <> 1) And (Commas <> 5) Then Exit;
+        A := ParamEditTake(Tok, ',');
+        If Commas = 1 Then
+        Begin
+            If (Not PlaceEditIntOk(A)) Or (Not PlaceEditIntOk(Tok)) Then Exit;
+            VX.Add(A); VY.Add(Tok); VCX.Add(''); VCY.Add(''); VA1.Add(''); VA2.Add('');
+        End
+        Else
+        Begin
+            B := ParamEditTake(Tok, ','); C := ParamEditTake(Tok, ','); D := ParamEditTake(Tok, ',');
+            E := ParamEditTake(Tok, ',');
+            If (Not PlaceEditIntOk(A)) Or (Not PlaceEditIntOk(B)) Or (Not PlaceEditIntOk(C)) Or (Not PlaceEditIntOk(D))
+                Or (Not PlaceEditIntOk(E)) Or (Not PlaceEditIntOk(Tok)) Then Exit;
+            VX.Add(A); VY.Add(B); VCX.Add(C); VCY.Add(D); VA1.Add(E); VA2.Add(Tok);
+        End;
+        If VX.Count > 64 Then Exit;
+    End;
+    Result := VX.Count >= 3;
+End;
+
+{ Write an outline into a polygon: PointCount, every segment as a whole record, }
+{ then the closing vertex one past PointCount (upstream ClosePolySegments). The }
+{ record is instantiated as our shape op does it; an arc carries its radius.    }
+Procedure PolyWriteOutline(Poly : IPCB_Polygon; VX, VY, VCX, VCY, VA1, VA2 : TStringList);
+Var
+    K : Integer;
+    Seg : TPolySegment;
+    DX, DY : Double;
+Begin
+    Poly.PointCount := VX.Count;
+    For K := 0 To VX.Count - 1 Do
+    Begin
+        Seg := TPolySegment;
+        Seg.vx := StrToInt(VX[K]);
+        Seg.vy := StrToInt(VY[K]);
+        If VCX[K] = '' Then
+            Seg.Kind := ePolySegmentLine
+        Else
+        Begin
+            Seg.Kind := ePolySegmentArc;
+            Seg.cx := StrToInt(VCX[K]);
+            Seg.cy := StrToInt(VCY[K]);
+            DX := (StrToInt(VX[K]) - StrToInt(VCX[K])) * 1.0;
+            DY := (StrToInt(VY[K]) - StrToInt(VCY[K])) * 1.0;
+            Seg.Radius := Round(Sqrt(DX * DX + DY * DY));
+            Seg.Angle1 := StrToInt(VA1[K]) / 1000.0;
+            Seg.Angle2 := StrToInt(VA2[K]) / 1000.0;
+        End;
+        Poly.Segments[K] := Seg;
+    End;
+    Seg := Poly.Segments[0];
+    Seg.Kind := ePolySegmentLine;
+    Poly.Segments[VX.Count] := Seg;
+End;
+
+{ Repour one polygon as the repour action does it (the option forced to Always). }
+Procedure PolyRepour(Poly : IPCB_Polygon);
+Var
+    OldMode : Integer;
+Begin
+    OldMode := PCBServer.SystemOptions.PolygonRepour;
+    PCBServer.SystemOptions.PolygonRepour := 2;
+    Try
+        Poly.SetState_CopperPourInvalid;
+        Poly.Rebuild;
+    Finally
+        PCBServer.SystemOptions.PolygonRepour := OldMode;
+    End;
+End;
+
+{ Free arcs on a non-copper layer with this centre and radius whose start angle }
+{ is within 0.002 degrees of StartMilli / 1000.                                 }
+Function FreeArcCount(Board : IPCB_Board; Lyr : TLayer; XC, YC, R, StartMilli : Integer; Var First : IPCB_Arc) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Arc : IPCB_Arc;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eArcObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) And (Prim.Layer = Lyr) Then
+            Begin
+                Arc := Prim;
+                If (Arc.XCenter = XC) And (Arc.YCenter = YC) And (Arc.Radius = R)
+                    And (Abs(Round(Arc.StartAngle * 1000.0) - StartMilli) <= 2) Then
+                Begin
+                    Inc(Result);
+                    If First = Nil Then First := Arc;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Free pads (not in a component) on a layer with this centre, size and hole.   }
+Function FreePadCount(Board : IPCB_Board; Lyr : TLayer; X, Y, Size, Hole : Integer; Var First : IPCB_Pad) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+    Pad : IPCB_Pad;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Prim.Layer = Lyr) Then
+            Begin
+                Pad := Prim;
+                If (Pad.x = X) And (Pad.y = Y) And (Pad.TopXSize = Size) And (Pad.HoleSize = Hole) Then
+                Begin
+                    Inc(Result);
+                    If First = Nil Then First := Pad;
+                End;
+            End;
+            Prim := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Free lines, arcs, fills and regions on a layer (not in a component, polygon  }
+{ or dimension): the objects clearlayer removes. Texts are not counted.        }
+Function FreeLayerObjects(Board : IPCB_Board; Lyr : TLayer; Var First : IPCB_Primitive) : Integer;
+Var
+    Iter : IPCB_BoardIterator;
+    Prim : IPCB_Primitive;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eFillObject, eRegionObject));
+        Iter.AddFilter_LayerSet(MkSet(Lyr));
+        Iter.AddFilter_Method(eProcessAll);
+        Prim := Iter.FirstPCBObject;
+        While Prim <> Nil Do
+        Begin
+            If (Not Prim.InComponent) And (Not Prim.InPolygon) And (Not Prim.InDimension) And (Prim.Layer = Lyr) Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Prim;
             End;
             Prim := Iter.NextPCBObject;
         End;
@@ -4809,6 +4997,11 @@ Var
     Comp : IPCB_Component;
     Fill : IPCB_Fill;
     Poly : IPCB_Polygon;
+    Arc : IPCB_Arc;
+    Pad : IPCB_Pad;
+    Prim0 : IPCB_Primitive;
+    Net : IPCB_Net;
+    VCX, VCY, VA1, VA2 : TStringList;
     OldMode, PX0, PY0 : Integer;
     EditNets : TStringList;
     Seg, Seg2 : TPolySegment;
@@ -4845,6 +5038,7 @@ Begin
     IX2 := TStringList.Create; IY2 := TStringList.Create; IW := TStringList.Create; IS1 := TStringList.Create;
     IS2 := TStringList.Create; IStatus := TStringList.Create; IBack := TStringList.Create;
     VX := TStringList.Create; VY := TStringList.Create;
+    VCX := TStringList.Create; VCY := TStringList.Create; VA1 := TStringList.Create; VA2 := TStringList.Create;
     EditNets := TStringList.Create;
     SelectedBusy := True;
     Try
@@ -4864,7 +5058,8 @@ Begin
             F6 := ParamEditTake(OpStr, '|'); F7 := ParamEditTake(OpStr, '|'); F8 := OpStr;
             Ok := ((F0 = 'delline') Or (F0 = 'delvia') Or (F0 = 'movevia') Or (F0 = 'text') Or (F0 = 'shape')
                 Or (F0 = 'deltrack') Or (F0 = 'deltext') Or (F0 = 'movetext') Or (F0 = 'movename')
-                Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly'))
+                Or (F0 = 'showname') Or (F0 = 'hidename') Or (F0 = 'delfill') Or (F0 = 'movepoly')
+                Or (F0 = 'addpoly') Or (F0 = 'setpoly') Or (F0 = 'delarc') Or (F0 = 'delpad') Or (F0 = 'clearlayer'))
                 And CopperLayerNameOk(F1) And PlaceEditIntOk(F2) And PlaceEditIntOk(F3) And PlaceEditIntOk(F4)
                 And PlaceEditIntOk(F5) And PlaceEditIntOk(F6);
             If Not Ok Then
@@ -4930,6 +5125,70 @@ Begin
                     If N = 0 Then Status := 'refused: no free line with these exact ends on this layer'
                     Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
                     Else Status := 'would_delete';
+                End;
+            End
+            Else If (IOp[J] = 'addpoly') Or (IOp[J] = 'setpoly') Then
+            Begin
+                { addpoly: a new polygon on `layer` from the outline in s1 (s2 its net, }
+                { copper only). setpoly: the polygon whose first vertex is x1,y1 with w }
+                { vertices takes the outline in s1. Both are repoured.                  }
+                VX.Clear; VY.Clear; VCX.Clear; VCY.Clear; VA1.Clear; VA2.Clear;
+                Net := Nil;
+                If (IOp[J] = 'addpoly') And (IS2[J] <> '') Then Net := FindNetByName(Board, IS2[J]);
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
+                Else If Not PolyVertices(IS1[J], VX, VY, VCX, VCY, VA1, VA2) Then
+                    Status := 'refused: the outline must be 3-64 vertices x,y or x,y,cx,cy,a1,a2'
+                Else If IOp[J] = 'addpoly' Then
+                Begin
+                    If (IS2[J] <> '') And (Net = Nil) Then Status := 'refused: net not on the board'
+                    Else If (IS2[J] <> '') And (Not IsCopper) Then Status := 'refused: a net on a non-copper layer'
+                    Else If PolyAtFirstVertex(Board, Lyr, StrToInt(VX[0]), StrToInt(VY[0]), VX.Count, Poly) > 0 Then
+                        Status := 'refused: a polygon with this first vertex and vertex count is already on this layer'
+                    Else Status := 'would_add (' + IntToStr(VX.Count) + ' vertices)';
+                End
+                Else
+                Begin
+                    N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                    If N = 0 Then Status := 'refused: no polygon with this first vertex and vertex count on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical polygons here'
+                    Else Status := 'would_reshape (' + IntToStr(VX.Count) + ' vertices)';
+                End;
+            End
+            Else If IOp[J] = 'delarc' Then
+            Begin
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: copper arcs are not deleted here'
+                Else
+                Begin
+                    N := FreeArcCount(Board, Lyr, X1, Y1, X2, Y2, Arc);
+                    If N = 0 Then Status := 'refused: no free arc with this centre, radius and start angle on this layer'
+                    Else If N > 1 Then Status := 'would_delete (1 of ' + IntToStr(N) + ' identical)'
+                    Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'delpad' Then
+            Begin
+                If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
+                Else
+                Begin
+                    N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                    If N = 0 Then Status := 'refused: no free pad with this centre, size and hole on this layer'
+                    Else If N > 1 Then Status := 'refused: ' + IntToStr(N) + ' identical pads here'
+                    Else Status := 'would_delete';
+                End;
+            End
+            Else If IOp[J] = 'clearlayer' Then
+            Begin
+                { Every free line, arc, fill and region on a non-copper layer; w is the }
+                { number the plan expects, so a layer that changed is refused.          }
+                If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
+                Else If IsCopper Then Status := 'refused: a copper layer is not cleared'
+                Else
+                Begin
+                    N := FreeLayerObjects(Board, Lyr, Prim0);
+                    If N <> W Then Status := 'refused: the layer holds ' + IntToStr(N) + ' free objects, the plan says ' + IntToStr(W)
+                    Else If N = 0 Then Status := 'unchanged'
+                    Else Status := 'would_clear (' + IntToStr(N) + ' objects)';
                 End;
             End
             Else If IOp[J] = 'movepoly' Then
@@ -5116,6 +5375,106 @@ Begin
                             Back := 'remaining ' + IntToStr(K);
                             Ok := (K = N - 1);
                         End;
+                    End
+                    Else If (IOp[J] = 'addpoly') Or (IOp[J] = 'setpoly') Then
+                    Begin
+                        VX.Clear; VY.Clear; VCX.Clear; VCY.Clear; VA1.Clear; VA2.Clear;
+                        PolyVertices(IS1[J], VX, VY, VCX, VCY, VA1, VA2);
+                        Poly := Nil;
+                        If IOp[J] = 'addpoly' Then
+                        Begin
+                            Poly := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
+                            If Poly <> Nil Then
+                            Begin
+                                Poly.Layer := Lyr;
+                                Poly.PolyHatchStyle := ePolySolid;
+                                PolyWriteOutline(Poly, VX, VY, VCX, VCY, VA1, VA2);
+                                Net := Nil;
+                                If IS2[J] <> '' Then Net := FindNetByName(Board, IS2[J]);
+                                If Net <> Nil Then
+                                Begin
+                                    Poly.Net := Net;
+                                    If EditNets.IndexOf(IS2[J]) < 0 Then EditNets.Add(IS2[J]);
+                                End;
+                                Poly.PourOver := ePolygonPourOver_SameNet;
+                                Board.AddPCBObject(Poly);
+                                PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Poly.I_ObjectAddress);
+                                PolyRepour(Poly);
+                                Poly.GraphicallyInvalidate;
+                            End;
+                        End
+                        Else
+                        Begin
+                            N := PolyAtFirstVertex(Board, Lyr, X1, Y1, W, Poly);
+                            If Poly <> Nil Then
+                            Begin
+                                Try
+                                    If Poly.Net <> Nil Then
+                                        If EditNets.IndexOf(Poly.Net.Name) < 0 Then EditNets.Add(Poly.Net.Name);
+                                Except
+                                End;
+                                Poly.BeginModify;
+                                PolyWriteOutline(Poly, VX, VY, VCX, VCY, VA1, VA2);
+                                PolyRepour(Poly);
+                                Poly.EndModify;
+                                Poly.GraphicallyInvalidate;
+                            End;
+                        End;
+                        If Poly <> Nil Then
+                        Begin
+                            K := VX.Count - 1;
+                            Back := 'first vertex ' + IntToStr(Poly.Segments[0].vx) + ',' + IntToStr(Poly.Segments[0].vy)
+                                + ' points ' + IntToStr(Poly.PointCount);
+                            Ok := (Poly.PointCount = VX.Count)
+                                And (Poly.Segments[0].vx = StrToInt(VX[0])) And (Poly.Segments[0].vy = StrToInt(VY[0]))
+                                And (Poly.Segments[K].vx = StrToInt(VX[K])) And (Poly.Segments[K].vy = StrToInt(VY[K]))
+                                And (PolyAtFirstVertex(Board, Lyr, StrToInt(VX[0]), StrToInt(VY[0]), VX.Count, Poly) = 1);
+                        End;
+                    End
+                    Else If IOp[J] = 'delarc' Then
+                    Begin
+                        N := FreeArcCount(Board, Lyr, X1, Y1, X2, Y2, Arc);
+                        If Arc <> Nil Then
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
+                            Board.RemovePCBObject(Arc);
+                            K := FreeArcCount(Board, Lyr, X1, Y1, X2, Y2, Arc);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = N - 1);
+                        End;
+                    End
+                    Else If IOp[J] = 'delpad' Then
+                    Begin
+                        N := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                        If Pad <> Nil Then
+                        Begin
+                            Try
+                                If Pad.Net <> Nil Then
+                                    If EditNets.IndexOf(Pad.Net.Name) < 0 Then EditNets.Add(Pad.Net.Name);
+                            Except
+                            End;
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+                            Board.RemovePCBObject(Pad);
+                            K := FreePadCount(Board, Lyr, X1, Y1, X2, Y2, Pad);
+                            Back := 'remaining ' + IntToStr(K);
+                            Ok := (K = 0);
+                        End;
+                    End
+                    Else If IOp[J] = 'clearlayer' Then
+                    Begin
+                        { One object at a time, found again after each removal: nothing is }
+                        { removed while an iterator is open. W bounds the loop.            }
+                        N := FreeLayerObjects(Board, Lyr, Prim0);
+                        K := 0;
+                        While (Prim0 <> Nil) And (K < W) Do
+                        Begin
+                            PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Prim0.I_ObjectAddress);
+                            Board.RemovePCBObject(Prim0);
+                            Inc(K);
+                            N := FreeLayerObjects(Board, Lyr, Prim0);
+                        End;
+                        Back := 'removed ' + IntToStr(K) + ' remaining ' + IntToStr(N);
+                        Ok := (N = 0) And (K = W);
                     End
                     Else If IOp[J] = 'movepoly' Then
                     Begin
@@ -5387,6 +5746,7 @@ Begin
         SelectedBusy := False;
         IOp.Free; ILay.Free; IX1.Free; IY1.Free; IX2.Free; IY2.Free; IW.Free; IS1.Free;
         IS2.Free; IStatus.Free; IBack.Free; VX.Free; VY.Free; EditNets.Free;
+        VCX.Free; VCY.Free; VA1.Free; VA2.Free;
     End;
 End;
 
@@ -6549,7 +6909,7 @@ Begin
                     + '","limit":"' + EscapeJsonString(ExtractJsonValue(Params, 'limit')) + '"}',
                     RequestId)
             Else If Command = 'pcb.get_polygons' Then
-                Reply := PCB_GetPolygonsForBoard(Board, RequestId)
+                Reply := PCB_GetPolygonsForBoard(Board, StrToIntDef(ExtractJsonValue(Params, 'copper_index'), -1), RequestId)
             Else If Command = 'pcb.get_unrouted_nets' Then
                 Reply := PCB_GetUnroutedNetsForBoard(Board, RequestId)
             Else If Command = 'pcb.get_layer_primitive_counts' Then

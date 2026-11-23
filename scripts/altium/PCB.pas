@@ -7520,13 +7520,75 @@ End;
 { PCB_GetPolygons - Get all polygon pours with layer, net, hatching, etc.    }
 {..............................................................................}
 
+{ One contour as [[x,y],...] in raw units. MainContour and a hole contour are }
+{ 1-based (X[K] / Y[K]), as the board render and the free-regions read use    }
+{ them. Budget is the number of points still allowed in this reply; a contour }
+{ that does not fit is cut and Truncated set. Scripts 2026.11.23.1.           }
+Function PolyContourJson(Contour : IPCB_Contour; Var Budget : Integer; Var Truncated : Boolean) : String;
+Var
+    K, N : Integer;
+Begin
+    Result := '';
+    N := 0;
+    Try If Contour <> Nil Then N := Contour.Count; Except N := 0; End;
+    For K := 1 To N Do
+    Begin
+        If Budget <= 0 Then
+        Begin
+            Truncated := True;
+            Break;
+        End;
+        If Result <> '' Then Result := Result + ',';
+        Result := Result + '[' + IntToStr(Contour.X[K]) + ',' + IntToStr(Contour.Y[K]) + ']';
+        Dec(Budget);
+    End;
+End;
+
+{ The poured copper of one polygon: each child region's outline and its holes }
+{ (a via or pad the pour cleared is a hole; one it connects to is not). Holes }
+{ as upstream reads them (Region.HoleCount, Region.Holes[H]). At most 6000    }
+{ points in all.                                                              }
+Function PolyCopperJson(Polygon : IPCB_Polygon; Var Truncated : Boolean) : String;
+Var
+    GIter : IPCB_GroupIterator;
+    Region : IPCB_Region;
+    Row, Holes : String;
+    Budget, H, HoleCount : Integer;
+Begin
+    Result := '';
+    Truncated := False;
+    Budget := 6000;
+    GIter := Polygon.GroupIterator_Create;
+    GIter.AddFilter_ObjectSet(MkSet(eRegionObject));
+    Region := GIter.FirstPCBObject;
+    While Region <> Nil Do
+    Begin
+        HoleCount := 0;
+        Try HoleCount := Region.HoleCount; Except HoleCount := -1; End;
+        Row := '{"pts":[' + PolyContourJson(Region.MainContour, Budget, Truncated) + '],"hole_count":' + IntToStr(HoleCount);
+        Holes := '';
+        For H := 0 To HoleCount - 1 Do
+        Begin
+            If Holes <> '' Then Holes := Holes + ',';
+            Holes := Holes + '[' + PolyContourJson(Region.Holes[H], Budget, Truncated) + ']';
+        End;
+        Row := Row + ',"holes":[' + Holes + ']}';
+        If Result <> '' Then Result := Result + ',';
+        Result := Result + Row;
+        Region := GIter.NextPCBObject;
+    End;
+    Polygon.GroupIterator_Destroy(GIter);
+End;
+
 { Core body shared with the selection-scoped profile (see PCB_GetComponents). }
-Function PCB_GetPolygonsForBoard(Board : IPCB_Board; RequestId : String) : String;
+{ CopperIndex: the polygon (by "index") whose poured copper is added as        }
+{ "copper"; -1 for none.                                                       }
+Function PCB_GetPolygonsForBoard(Board : IPCB_Board; CopperIndex : Integer; RequestId : String) : String;
 Var
     Iterator : IPCB_BoardIterator;
     Polygon : IPCB_Polygon;
-    JsonItems, NetName, LayerStr, HatchStr, VertJson : String;
-    First, IsPoured : Boolean;
+    JsonItems, NetName, LayerStr, HatchStr, VertJson, CopperJson : String;
+    First, IsPoured, CopperCut : Boolean;
     Count, VCount, I, Pieces : Integer;
     AreaInternal : Int64;
     AreaSqMils, AreaMm2, BBoxMm2 : Double;
@@ -7633,8 +7695,15 @@ Begin
             + IntToStr(BR.Right) + ',' + IntToStr(BR.Top) + '],'
             + '"poured":' + BoolToJsonStr(IsPoured) + ','
             + '"copper_pieces":' + IntToStr(Pieces) + ','
-            + '"vertices":[' + VertJson + '],'
-            + '"vertex_count":' + IntToStr(VCount) + '}';
+            + '"vertices":[' + VertJson + '],';
+        If Count = CopperIndex Then
+        Begin
+            CopperJson := '';
+            CopperCut := False;
+            Try CopperJson := PolyCopperJson(Polygon, CopperCut); Except CopperCut := True; End;
+            JsonItems := JsonItems + '"copper":[' + CopperJson + '],"copper_truncated":' + BoolToJsonStr(CopperCut) + ',';
+        End;
+        JsonItems := JsonItems + '"vertex_count":' + IntToStr(VCount) + '}';
         Inc(Count);
         Polygon := Iterator.NextPCBObject;
     End;
@@ -7655,7 +7724,7 @@ Begin
         Result := BuildErrorResponse(RequestId, 'NO_PCB', 'No PCB document is active');
         Exit;
     End;
-    Result := PCB_GetPolygonsForBoard(Board, RequestId);
+    Result := PCB_GetPolygonsForBoard(Board, StrToIntDef(ExtractJsonValue(Params, 'copper_index'), -1), RequestId);
 End;
 
 {..............................................................................}

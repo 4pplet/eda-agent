@@ -107,6 +107,11 @@ Parameter edits have their own tick ("Allow parameter edits").
   vertices, free fills and regions in the free-graphics read, designator show / hide, fill delete, text moves
   through `MoveByXY`. Scripts `2026.11.20.2` (the same proposal, section 6; runtime `selected-edits-20261120b`,
   **P10-P12 passed 2026-11-20, P13 pending**, carries `.1`): `movepoly`, a polygon moved by an offset.
+  Scripts `2026.11.23.1`
+  ([PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read](PROPOSAL-2026-11-23-polygon-outlines-layer-clear-copper-read.md),
+  runtime `selected-edits-20261123a`, **V1-V10 pending**, carries `.2`): polygons created and reshaped from an
+  outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
+  polygons read, bottom-layer text mirrored.
   Until they are qualified, `selected-edits-20261118a` with PLT-hw at the commit before the version bumps is the fallback.
 
 ### Roadmap and known limitations
