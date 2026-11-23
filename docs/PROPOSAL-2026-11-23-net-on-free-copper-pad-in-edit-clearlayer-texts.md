@@ -206,3 +206,48 @@ ports, wires, texts, notes, boxes, lines and pins), Update PCB.
 | W24 | `bus` and `busentry` | drawn; no script error |
 | W25 | `footprint` on a placed resistor, to another footprint of `lib\PLT_lib.PcbLib`; save; compile | the part's footprint in the properties and in `bom` is the new one; no "missing model" in the messages |
 | W26 | `part` with `unit` 1 and 2 of a dual symbol under one designator | two units placed; pins of both in `sch read` |
+
+## 11. Scripts 2026.11.23.8: library items, create-only (a new symbol, a new footprint)
+
+Stefan 2026-11-23: "let's build it and document what we need to test". Runtime `selected-edits-20261123h`,
+carries `.7`. **Runtimes `b` to `g` were never started; `h` is the one to start. W1-W31 pending** (PLT-hw
+`tools/eda-agent/QUALIFY-TODO.md`). `lint.py`: 0 errors.
+
+The items ride in `proj.edit_schematic_checked` (sheet 0, run before the per-sheet writes like `newsheet`), so
+they sit behind the same selection binding, batch hash and **"Allow schematic edits" tick**, and the whole
+batch is refused before anything is written when one item fails its preflight.
+
+| Item | Fields | From |
+|---|---|---|
+| `libsym` | `s1` the new symbol, `s2` the .SchLib path, `s3` `PREFIX/description` | upstream `Lib_CreateSymbol`: part id 1 and display mode 0 before any primitive, `AddSchComponent`, the reference set again after it, the component broadcast as new, then `LookupLibComponent` must find it |
+| `libpin` | `x1,y1` the pin, `x2` its length, `n` its orientation 0-3, `s3` `designator/name/type` | upstream `Lib_AddPin` (`SetOwnerPart`, `AddSchObject`, registration) |
+| `librect` | `x1,y1` - `x2,y2`, not filled | upstream `Lib_AddSymbolRectangle` |
+| `liblink` | `s3` the footprint name | upstream `Lib_LinkFootprint` through `SchEditSetFootprint` (section 10): bound by name, empty location |
+| `libfp` | `s1` the new footprint, `s2` the .PcbLib path, `s3` its description | upstream `Lib_CreateFootprint` (`CreatePCBLibComp`, `RegisterComponent`, `CurrentComponent`) |
+| `libpad` | `x1,y1` centre from the footprint origin, `x2,y2` size, `n` hole (0 = SMD on the top layer), `s3` `designator/shape` (rect, round, roundrect) | upstream `Lib_AddFootprintPad`: added to the footprint AND to the library's backing board with both registrations (their finding: without the second the save drops the pad) |
+| `libtrack` | ends, `n` width, `s3` the layer | upstream `Lib_AddFootprintTrack`, the same double registration |
+
+**Create-only, and that is the safety property.** `libsym` / `libfp` are refused when the name is already in
+the library; every other item is refused unless an EARLIER item of the same batch creates its symbol or
+footprint. No item can reach a part that was in the library before. There is no delete and no modify.
+
+**The library must be the active document in Altium**, open and saved: upstream's functions work on the
+current library (`SchServer.GetCurrentSchDocument` / `PCBServer.GetCurrentPCBLibrary`) and that is the only
+route proven there. The path is checked against the active document; a batch names one library.
+
+Client: `sch_plan.py` ops `libsymbol` (prefix, description, `body_mil`, `pins`, `footprint`) and
+`libfootprint` (`pads` in mm, `tracks`), each expanded to the items above; a plan with library ops holds
+nothing else. The client refuses a symbol name that `schlib_parts.py` finds in the file.
+
+**Not checked by a read-back beyond "created":** pins, pads and tracks are not counted after the write. W27
+and W28 (save, close, reopen, read the file) are the proof. Not in it: arcs, texts and 3D bodies on a
+footprint, courtyard / assembly conventions (tracks on any layer can draw them), multi-part symbols, symbol
+lines and arcs, parameters on a library symbol, modifying or deleting anything.
+
+| # | Check (on COPIES of `PLT_lib.SchLib` / `PLT_lib.PcbLib`, outside git) | Pass |
+|---|---|---|
+| W27 | `libsymbol` with a body, three pins, a footprint link; save; close and reopen the library | the symbol shows with body and pins in the editor; `schlib_parts.py` lists one more name; every other symbol unchanged (file diff of the names) |
+| W28 | `libfootprint` with SMD pads (rect, roundrect), one through-hole pad, silk tracks; save; close and reopen | pads and tracks are there after the reopen, at the positions and sizes asked (measure two) |
+| W29 | place the new symbol with `part` in a scratch project that uses the copied libraries; compile; Update PCB | the footprint is found and lands on the board with the right pads |
+| W30 | refusals: a name already in the library; the library not the active document; the library with unsaved edits; a `libpin` whose symbol the batch does not create (hand-made item list) | each refused with its reason, nothing written |
+| W31 | apply without the schematic tick | stopped by the client |

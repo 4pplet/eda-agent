@@ -6923,6 +6923,229 @@ Begin
     If (Result = 0) And (Status = '') Then Status := Des + ' is not on this sheet';
 End;
 
+{ ---- Library items (scripts 2026.11.23.8) --------------------------------------- }
+{ Create-only: a new symbol in a .SchLib or a new footprint in a .PcbLib, and the    }
+{ primitives that go on it. Nothing that was in the library before is touched. The   }
+{ library must be the ACTIVE document in Altium: upstream's library functions (the   }
+{ calls copied here) are proven on the current library only.                         }
+
+{ Field Index (0-based) of a '/'-separated string. }
+Function SchEditSplit(S : String; Index : Integer) : String;
+Var
+    P, I : Integer;
+    Rest : String;
+Begin
+    Rest := S;
+    Result := '';
+    For I := 0 To Index Do
+    Begin
+        P := Pos('/', Rest);
+        If P = 0 Then
+        Begin
+            If I = Index Then Result := Rest Else Result := '';
+            Rest := '';
+        End
+        Else
+        Begin
+            Result := Copy(Rest, 1, P - 1);
+            Rest := Copy(Rest, P + 1, Length(Rest));
+        End;
+    End;
+End;
+
+Function SchEditFocusedSchLib(LibPath : String) : ISch_Lib;
+Begin
+    Result := Nil;
+    Try
+        Result := SchServer.GetCurrentSchDocument;
+        If (Result <> Nil) And (Result.ObjectId <> eSchLib) Then Result := Nil;
+        If (Result <> Nil) And (Not SchLibIsAtPath(Result, LibPath)) Then Result := Nil;
+    Except
+        Result := Nil;
+    End;
+End;
+
+Function SchEditFocusedPcbLib(LibPath : String) : IPCB_Library;
+Begin
+    Result := Nil;
+    Try
+        Result := PCBServer.GetCurrentPCBLibrary;
+        If (Result <> Nil) And (UpperCase(Result.Board.FileName) <> UpperCase(LibPath)) Then Result := Nil;
+    Except
+        Result := Nil;
+    End;
+End;
+
+{ Upstream Lib_CreateSymbol: part id and display mode before any primitive, the   }
+{ reference set again after AddSchComponent, the component broadcast as new.      }
+Function SchEditLibNewSymbol(SchLib : ISch_Lib; SymName, Prefix, Desc : String) : ISch_Component;
+Var
+    Component : ISch_Component;
+Begin
+    Result := Nil;
+    Component := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+    If Component = Nil Then Exit;
+    Component.CurrentPartID := 1;
+    Component.DisplayMode := 0;
+    Component.LibReference := SymName;
+    Component.Designator.Text := Prefix + '?';
+    Component.ComponentDescription := Desc;
+    SchServer.ProcessControl.PreProcess(SchLib, '');
+    SchLib.AddSchComponent(Component);
+    Component.LibReference := SymName;
+    SchServer.ProcessControl.PostProcess(SchLib, 'Edit');
+    Try
+        SchServer.RobotManager.SendMessage(Nil, Nil, SCHM_PrimitiveRegistration, Component.I_ObjectAddress);
+    Except
+    End;
+    Try SchLib.GraphicallyInvalidate; Except End;
+    MarkLibDirty(SchLib);
+    If LookupLibComponent(SchLib, SymName) <> Nil Then Result := Component;
+End;
+
+{ Upstream Lib_AddPin. }
+Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinName, EType : String;
+    X, Y, Len, Orient : Integer) : Boolean;
+Var
+    Pin : ISch_Pin;
+Begin
+    Result := False;
+    Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
+    If Pin = Nil Then Exit;
+    Pin.Designator := Des;
+    Pin.Name := PinName;
+    Pin.Location.X := X;
+    Pin.Location.Y := Y;
+    Pin.PinLength := Len;
+    Pin.Orientation := Orient;
+    Pin.IsHidden := False;
+    Pin.Electrical := StrToPinElectrical(EType);
+    SchServer.ProcessControl.PreProcess(SchLib, '');
+    SetOwnerPart(Pin, Component);
+    Component.AddSchObject(Pin);
+    SchRegisterObject(Component, Pin);
+    SchServer.ProcessControl.PostProcess(SchLib, 'Edit');
+    MarkLibDirty(SchLib);
+    Result := True;
+End;
+
+{ Upstream Lib_AddSymbolRectangle, not filled. }
+Function SchEditLibRect(SchLib : ISch_Lib; Component : ISch_Component; X1, Y1, X2, Y2 : Integer) : Boolean;
+Var
+    Rect : ISch_Rectangle;
+    Loc : TLocation;
+Begin
+    Result := False;
+    Rect := SchServer.SchObjectFactory(eRectangle, eCreate_Default);
+    If Rect = Nil Then Exit;
+    Loc := Rect.Location;
+    Loc.X := X1;
+    Loc.Y := Y1;
+    Rect.Location := Loc;
+    Loc := Rect.Corner;
+    Loc.X := X2;
+    Loc.Y := Y2;
+    Rect.Corner := Loc;
+    Rect.IsSolid := False;
+    SchServer.ProcessControl.PreProcess(SchLib, '');
+    SetOwnerPart(Rect, Component);
+    Component.AddSchObject(Rect);
+    SchRegisterObject(Component, Rect);
+    SchServer.ProcessControl.PostProcess(SchLib, 'Edit');
+    MarkLibDirty(SchLib);
+    Try SchLib.GraphicallyInvalidate; Except End;
+    Result := True;
+End;
+
+{ Upstream Lib_CreateFootprint. }
+Function SchEditLibNewFootprint(PcbLib : IPCB_Library; FpName, Desc : String) : IPCB_LibComponent;
+Var
+    Footprint : IPCB_LibComponent;
+Begin
+    Result := Nil;
+    Footprint := PCBServer.CreatePCBLibComp;
+    If Footprint = Nil Then Exit;
+    Footprint.Name := FpName;
+    Footprint.Description := Desc;
+    PcbLib.RegisterComponent(Footprint);
+    PcbLib.CurrentComponent := Footprint;
+    MarkDocDirtyByPath(PcbLib.Board.FileName);
+    Result := Footprint;
+End;
+
+{ Upstream Lib_AddFootprintPad: the pad goes to the footprint AND to the library's }
+{ backing board, with both registrations (without the second the save drops it).  }
+Function SchEditLibPad(PcbLib : IPCB_Library; Footprint : IPCB_LibComponent; Des, Shape : String;
+    X, Y, SX, SY, Hole : Integer) : Boolean;
+Var
+    Pad : IPCB_Pad;
+Begin
+    Result := False;
+    PCBServer.PreProcess;
+    Try
+        Pad := PCBServer.PCBObjectFactory(ePadObject, eNoDimension, eCreate_Default);
+        If Pad <> Nil Then
+        Begin
+            Pad.Name := Des;
+            Pad.X := FootprintOriginX(Footprint) + X;
+            Pad.Y := FootprintOriginY(Footprint) + Y;
+            Pad.TopXSize := SX;
+            Pad.TopYSize := SY;
+            Pad.HoleSize := Hole;
+            Pad.Rotation := 0;
+            If Hole > 0 Then Pad.Layer := eMultiLayer Else Pad.Layer := eTopLayer;
+            If Shape = 'rect' Then Pad.TopShape := eRectangular
+            Else If Shape = 'roundrect' Then
+            Begin
+                Pad.SetState_StackShapeOnLayer(Pad.Layer, eRoundedRectangular);
+                Pad.SetState_StackCRPctOnLayer(Pad.Layer, 25);
+            End
+            Else Pad.TopShape := eRounded;
+            Footprint.AddPCBObject(Pad);
+            PcbLib.Board.AddPCBObject(Pad);
+            PCBServer.SendMessageToRobots(Footprint.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+            PCBServer.SendMessageToRobots(PcbLib.Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+            Result := True;
+        End;
+    Finally
+        PCBServer.PostProcess;
+    End;
+    MarkDocDirtyByPath(PcbLib.Board.FileName);
+End;
+
+{ Upstream Lib_AddFootprintTrack. }
+Function SchEditLibTrack(PcbLib : IPCB_Library; Footprint : IPCB_LibComponent; LayerStr : String;
+    X1, Y1, X2, Y2, Width : Integer) : Boolean;
+Var
+    Track : IPCB_Track;
+    Lyr : TLayer;
+Begin
+    Result := False;
+    Lyr := ResolveLayerId(PcbLib.Board, LayerStr);
+    If Lyr = eNoLayer Then Exit;
+    PCBServer.PreProcess;
+    Try
+        Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+        If Track <> Nil Then
+        Begin
+            Track.X1 := FootprintOriginX(Footprint) + X1;
+            Track.Y1 := FootprintOriginY(Footprint) + Y1;
+            Track.X2 := FootprintOriginX(Footprint) + X2;
+            Track.Y2 := FootprintOriginY(Footprint) + Y2;
+            Track.Width := Width;
+            Track.Layer := Lyr;
+            Footprint.AddPCBObject(Track);
+            PcbLib.Board.AddPCBObject(Track);
+            PCBServer.SendMessageToRobots(Footprint.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+            PCBServer.SendMessageToRobots(PcbLib.Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+            Result := True;
+        End;
+    Finally
+        PCBServer.PostProcess;
+    End;
+    MarkDocDirtyByPath(PcbLib.Board.FileName);
+End;
+
 { Sheet symbols on a sheet whose displayed name is SymName (scripts 2026.11.23.7, }
 { op `entry`). The name is a sub-object: its text is read through .Text.          }
 Function SchEditSymbolByName(Doc : ISch_Document; SymName : String; Var First : ISch_SheetSymbol) : Integer;
@@ -7126,6 +7349,11 @@ Var
     Sym : ISch_SheetSymbol;
     Entry : ISch_SheetEntry;
     WantSide : Integer;
+    SchLib : ISch_Lib;
+    PcbLib : IPCB_Library;
+    LibComp : ISch_Component;
+    LibFp : IPCB_LibComponent;
+    LibCompName, LibFpName : String;
 Begin
     Mode := ExtractJsonValue(Params, 'mode');
     BatchHash := ExtractJsonValue(Params, 'batch_hash');
@@ -7254,15 +7482,17 @@ Begin
                 Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
                 Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam')
                     And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
-                    Or (Op = 'entry') Or (Op = 'footprint')))
+                    Or (Op = 'entry') Or (Op = 'footprint') Or (Copy(Op, 1, 3) = 'lib')))
                 Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
-                    Or (Op = 'entry') Or (Op = 'footprint'))
+                    Or (Op = 'entry') Or (Op = 'footprint') Or (Copy(Op, 1, 3) = 'lib'))
                     And (SchEditKindId(Kind) < 0))
                 Or (((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')
-                    Or (Op = 'entry') Or (Op = 'footprint')) And (Kind = ''))
+                    Or (Op = 'entry') Or (Op = 'footprint') Or (Copy(Op, 1, 3) = 'lib')) And (Kind = ''))
                 Or ((Op = 'add') And (Kind = 'port') And (S3 = ''))
                 Or ((Op = 'add') And (Kind = 'sheetsymbol') And ((S2 = '') Or (S3 = '')))
                 Or (((Op = 'entry') Or (Op = 'footprint')) And (S3 = ''))
+                Or ((Copy(Op, 1, 3) = 'lib') And ((S2 = '') Or ((Op <> 'libsym') And (Op <> 'libpin') And (Op <> 'librect')
+                    And (Op <> 'liblink') And (Op <> 'libfp') And (Op <> 'libpad') And (Op <> 'libtrack'))))
                 Or ((Op = 'part') And ((Kind = '') Or (S2 = '') Or (S3 = '')
                     Or (StrToIntDef(IN_[J], -1) < 0) Or (StrToIntDef(IN_[J], 9) > 3)))
                 Or ((Op = 'compparam') And ((Pos('/', Kind) < 2) Or (Pos('/', Kind) = Length(Kind))
@@ -7308,6 +7538,49 @@ Begin
                 CDes := Copy(Kind, 1, Pos('/', Kind) - 1);
                 CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
                 SchEditCompParam(Doc, CDes, CName, S2, IS3[J], StrToInt(IN_[J]) = 1, False, Status);
+            End
+            Else If Copy(Op, 1, 3) = 'lib' Then
+            Begin
+                { s1 the symbol / footprint, s2 the library file. libsym and libfp: the  }
+                { library is open, saved and the active document, and the name is free.  }
+                { Every other lib item goes on what an earlier item of this batch makes. }
+                If (Op = 'libsym') Or (Op = 'libfp') Then
+                Begin
+                    Try
+                        If Client.GetDocumentByPath(S2).Modified Then Status := 'the library has unsaved edits';
+                    Except
+                        Status := 'the library is not open in Altium';
+                    End;
+                    If (Status = '') And (Op = 'libsym') Then
+                    Begin
+                        SchLib := SchEditFocusedSchLib(S2);
+                        If SchLib = Nil Then Status := 'make the library the active document in Altium'
+                        Else If LookupLibComponent(SchLib, Kind) <> Nil Then
+                            Status := 'symbol ' + Kind + ' is already in the library (create-only)';
+                    End
+                    Else If Status = '' Then
+                    Begin
+                        PcbLib := SchEditFocusedPcbLib(S2);
+                        If PcbLib = Nil Then Status := 'make the library the active document in Altium'
+                        Else
+                        Begin
+                            LibFp := Nil;
+                            Try LibFp := PcbLib.GetComponentByName(Kind); Except LibFp := Nil; End;
+                            If LibFp <> Nil Then Status := 'footprint ' + Kind + ' is already in the library (create-only)';
+                        End;
+                    End;
+                End
+                Else
+                Begin
+                    Ok := False;
+                    For Hits := 0 To J - 1 Do
+                        If (IS1[Hits] = Kind) And (IS2[Hits] = S2) Then
+                        Begin
+                            If (IOp[Hits] = 'libsym') And ((Op = 'libpin') Or (Op = 'librect') Or (Op = 'liblink')) Then Ok := True;
+                            If (IOp[Hits] = 'libfp') And ((Op = 'libpad') Or (Op = 'libtrack')) Then Ok := True;
+                        End;
+                    If Not Ok Then Status := Op + ' goes only on a symbol or footprint created earlier in this batch';
+                End;
             End
             Else If Op = 'entry' Then
             Begin
@@ -7406,19 +7679,106 @@ Begin
                 End;
             End;
 
+        { Library items (scripts 2026.11.23.8), in batch order, outside any sheet's }
+        { edit transaction. Create-only: see the helpers.                           }
+        LibComp := Nil;
+        LibCompName := '';
+        LibFp := Nil;
+        LibFpName := '';
+        For J := 0 To IOp.Count - 1 Do
+        Begin
+            Op := IOp[J];
+            If (Copy(Op, 1, 3) <> 'lib') Or Partial Then Continue;
+            Kind := IS1[J]; S2 := IS2[J]; S3 := IS3[J];
+            X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]);
+            X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
+            N := StrToInt(IN_[J]);
+            Touched := True;
+            Back := 'exception';
+            Try
+                Back := 'missing';
+                If (Op = 'libsym') Or (Op = 'libpin') Or (Op = 'librect') Or (Op = 'liblink') Then
+                Begin
+                    SchLib := SchEditFocusedSchLib(S2);
+                    If SchLib = Nil Then Back := 'the library is not the active document'
+                    Else If Op = 'libsym' Then
+                    Begin
+                        LibComp := SchEditLibNewSymbol(SchLib, Kind, SchEditSplit(S3, 0), SchEditSplit(S3, 1));
+                        LibCompName := Kind;
+                        If LibComp <> Nil Then Back := 'ok' Else Back := 'the symbol does not resolve in the library';
+                    End
+                    Else If (LibComp = Nil) Or (LibCompName <> Kind) Then Back := 'the symbol was not created in this batch'
+                    Else If Op = 'libpin' Then
+                    Begin
+                        If SchEditLibPin(SchLib, LibComp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), SchEditSplit(S3, 2),
+                            X1, Y1, X2, N) Then Back := 'ok';
+                    End
+                    Else If Op = 'librect' Then
+                    Begin
+                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2) Then Back := 'ok';
+                    End
+                    Else
+                    Begin
+                        SchServer.ProcessControl.PreProcess(SchLib, '');
+                        Try
+                            If SchEditSetFootprint(LibComp, S3) Then Back := 'ok' Else Back := 'text differs';
+                        Finally
+                            SchServer.ProcessControl.PostProcess(SchLib, 'Link footprint');
+                        End;
+                        MarkLibDirty(SchLib);
+                    End;
+                End
+                Else
+                Begin
+                    PcbLib := SchEditFocusedPcbLib(S2);
+                    If PcbLib = Nil Then Back := 'the library is not the active document'
+                    Else If Op = 'libfp' Then
+                    Begin
+                        LibFp := SchEditLibNewFootprint(PcbLib, Kind, S3);
+                        LibFpName := Kind;
+                        If LibFp <> Nil Then Back := 'ok';
+                    End
+                    Else If (LibFp = Nil) Or (LibFpName <> Kind) Then Back := 'the footprint was not created in this batch'
+                    Else If Op = 'libpad' Then
+                    Begin
+                        If SchEditLibPad(PcbLib, LibFp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), X1, Y1, X2, Y2, N) Then
+                            Back := 'ok';
+                    End
+                    Else
+                    Begin
+                        If SchEditLibTrack(PcbLib, LibFp, SchEditSplit(S3, 0), X1, Y1, X2, Y2, N) Then Back := 'ok'
+                        Else Back := 'layer not in the library';
+                    End;
+                End;
+            Except
+                Back := 'exception';
+            End;
+            IBack[J] := Back;
+            If Back = 'ok' Then
+            Begin
+                IStatus[J] := 'written';
+                Inc(Written);
+            End
+            Else
+            Begin
+                IStatus[J] := 'not_ok: ' + Back;
+                Partial := True;
+            End;
+        End;
+
         { Write per sheet, one PreProcess / PostProcess pair per touched sheet. }
         For K := 0 To Docs.Count - 1 Do
         Begin
             Pending := 0;
             For J := 0 To IOp.Count - 1 Do
-                If (StrToInt(ISheet[J]) = K) And (IOp[J] <> 'newsheet') Then Inc(Pending);
+                If (StrToInt(ISheet[J]) = K) And (IOp[J] <> 'newsheet') And (Copy(IOp[J], 1, 3) <> 'lib') Then Inc(Pending);
             If (Pending = 0) Or Partial Then Continue;
             Doc := Docs[K];
             SchServer.ProcessControl.PreProcess(Doc, '');
             Try
                 For J := 0 To IOp.Count - 1 Do
                 Begin
-                    If (StrToInt(ISheet[J]) <> K) Or Partial Or (IOp[J] = 'newsheet') Then Continue;
+                    If (StrToInt(ISheet[J]) <> K) Or Partial Or (IOp[J] = 'newsheet') Or (Copy(IOp[J], 1, 3) = 'lib') Then Continue;
                     Op := IOp[J]; Kind := IS1[J]; S2 := IS2[J]; S3 := IS3[J];
                     X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]);
                     X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
