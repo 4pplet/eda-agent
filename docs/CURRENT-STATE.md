@@ -116,7 +116,9 @@ Parameter edits have their own tick ("Allow parameter edits").
   pads in the free-graphics read; then scripts `2026.11.23.3`, the same proposal section 6, runtime
   `selected-edits-20261123c`, **W9-W11 pending**: a library part placed on a sheet, schematic op `part`; then
   scripts `2026.11.23.4`, section 7, runtime `selected-edits-20261123d`, **W12-W16 pending**: `delpoly`, `delrule`, `flip`, `body3d`; then scripts `2026.11.23.5`, section 8, runtime
-  `selected-edits-20261123e`, **W17 pending, the runtime to start**: `setnet` with a clearance test):
+  `selected-edits-20261123e`, **W17 pending**: `setnet` with a clearance test; then scripts `2026.11.23.6`,
+  section 9, runtime `selected-edits-20261123f`, **W18-W21 pending, the runtime to start**: schematic ops
+  `newsheet`, `port`, `noerc`, `delpart` / `movepart` / `rotpart`):
   polygons created and reshaped from an
   outline (`addpoly`, `setpoly`), `delarc` / `delpad` / `clearlayer`, the poured copper of one polygon in the
   polygons read, bottom-layer text mirrored.

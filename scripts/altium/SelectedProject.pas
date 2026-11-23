@@ -6323,7 +6323,9 @@ Begin
     Else If Kind = 'text' Then Result := eLabel
     Else If Kind = 'box' Then Result := eRectangle
     Else If Kind = 'line' Then Result := eLine
-    Else If Kind = 'note' Then Result := eTextFrame;
+    Else If Kind = 'note' Then Result := eTextFrame
+    Else If Kind = 'port' Then Result := ePort          { scripts 2026.11.23.6 }
+    Else If Kind = 'noerc' Then Result := eNoERC;
 End;
 
 Function SchEditHasText(Kind : String) : Boolean;
@@ -6696,6 +6698,7 @@ Var
     L : ISch_Line;
     T : ISch_TextFrame;
     W : ISch_Wire;
+    Pt : ISch_Port;
     Loc : TLocation;
     FontId, Color : Integer;
 Begin
@@ -6736,6 +6739,26 @@ Begin
         Try T.WordWrap := True; Except End;
         Try T.ClipToRect := True; Except End;
         Try T.ShowBorder := False; Except End;
+    End
+    Else If Kind = 'port' Then
+    Begin
+        { Upstream Gen_PlacePort: location, name, style, IO type. N is the IO type: }
+        { 0 unspecified, 1 output, 2 input, 3 bidirectional.                         }
+        Pt := Obj;
+        Pt.Location := Point(X1, Y1);
+        Pt.Name := Txt;
+        If Style = 'left' Then Pt.Style := ePortLeft
+        Else If Style = 'right' Then Pt.Style := ePortRight
+        Else If Style = 'left_right' Then Pt.Style := ePortLeftRight
+        Else Pt.Style := ePortNone;
+        If N = 1 Then Pt.IOType := ePortOutput
+        Else If N = 2 Then Pt.IOType := ePortInput
+        Else If N = 3 Then Pt.IOType := ePortBidirectional
+        Else Pt.IOType := ePortUnspecified;
+    End
+    Else If Kind = 'noerc' Then
+    Begin
+        Obj.Location := Point(X1, Y1);
     End
     Else
     Begin
@@ -6852,6 +6875,77 @@ Begin
         Doc.SchIterator_Destroy(Iter);
     End;
     If (Result = 0) And (Status = '') Then Status := Des + ' is not on this sheet';
+End;
+
+{ Parts on a sheet carrying the designator Des (scripts 2026.11.23.6: delpart,  }
+{ movepart, rotpart). A multi-part symbol has one part per unit, so more than   }
+{ one hit means the op is refused.                                              }
+Function SchEditPartByDes(Doc : ISch_Document; Des : String; Var First : ISch_Component) : Integer;
+Var
+    Iter : ISch_Iterator;
+    Obj : ISch_GraphicalObject;
+    Comp : ISch_Component;
+Begin
+    Result := 0;
+    First := Nil;
+    Iter := Doc.SchIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Obj := Iter.FirstSchObject;
+        While Obj <> Nil Do
+        Begin
+            Comp := Obj;
+            If Comp.Designator.Text = Des Then
+            Begin
+                Inc(Result);
+                If First = Nil Then First := Comp;
+            End;
+            Obj := Iter.NextSchObject;
+        End;
+    Finally
+        Doc.SchIterator_Destroy(Iter);
+    End;
+End;
+
+{ A new, empty schematic sheet beside the project file, saved and added to the  }
+{ project (upstream Gen_AddSheet: OpenNewDocument names the document up front;  }
+{ the WorkspaceManager process without a file name raised a modal dialog).      }
+{ Returns 'ok' or why not. THIS WRITES A FILE and changes the project.          }
+Function SchEditNewSheet(P : IProject; SheetName : String) : String;
+Var
+    NewPath : String;
+    ServerDoc : IServerDocument;
+Begin
+    Result := 'exception';
+    NewPath := ExtractFilePath(P.DM_ProjectFullPath) + SheetName + '.SchDoc';
+    If FileExists(NewPath) Then
+    Begin
+        Result := 'a file with this name is already there';
+        Exit;
+    End;
+    ServerDoc := Client.OpenNewDocument('SCH', NewPath, SheetName, False);
+    If ServerDoc = Nil Then
+    Begin
+        Result := 'not created';
+        Exit;
+    End;
+    Try ServerDoc.SetFileName(NewPath); Except End;
+    Try
+        ServerDoc.SetModified(True);
+        ServerDoc.DoFileSave('');
+    Except
+    End;
+    If Not FileExists(NewPath) Then
+    Begin
+        Result := 'not saved';
+        Exit;
+    End;
+    Try
+        P.DM_AddSourceDocument(NewPath);
+        Result := 'ok';
+    Except
+        Result := 'not added to the project';
+    End;
 End;
 
 { Parts on a sheet whose location is X, Y; DesHits counts the parts that carry  }
@@ -7029,8 +7123,11 @@ Begin
                 Or (Not PlaceEditIntOk(IX2[J])) Or (Not PlaceEditIntOk(IY2[J]))
                 Or (Not PlaceEditIntOk(IN_[J])) Or (Length(S3) > 2000)
                 Or ((Op <> 'add') And (Op <> 'settext') And (Op <> 'move') And (Op <> 'del') And (Op <> 'docparam')
-                    And (Op <> 'compparam') And (Op <> 'part'))
-                Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And (SchEditKindId(Kind) < 0))
+                    And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')))
+                Or ((Op <> 'docparam') And (Op <> 'compparam') And (Op <> 'part') And Not ((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart'))
+                    And (SchEditKindId(Kind) < 0))
+                Or (((Op = 'newsheet') Or (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart')) And (Kind = ''))
+                Or ((Op = 'add') And (Kind = 'port') And (S3 = ''))
                 Or ((Op = 'part') And ((Kind = '') Or (S2 = '') Or (S3 = '')
                     Or (StrToIntDef(IN_[J], -1) < 0) Or (StrToIntDef(IN_[J], 9) > 3)))
                 Or ((Op = 'compparam') And ((Pos('/', Kind) < 2) Or (Pos('/', Kind) = Length(Kind))
@@ -7076,6 +7173,21 @@ Begin
                 CDes := Copy(Kind, 1, Pos('/', Kind) - 1);
                 CName := Copy(Kind, Pos('/', Kind) + 1, Length(Kind));
                 SchEditCompParam(Doc, CDes, CName, S2, IS3[J], StrToInt(IN_[J]) = 1, False, Status);
+            End
+            Else If Op = 'newsheet' Then
+            Begin
+                If FileExists(ExtractFilePath(P.DM_ProjectFullPath) + Kind + '.SchDoc') Then
+                    Status := 'a file ' + Kind + '.SchDoc is already beside the project';
+            End
+            Else If (Op = 'delpart') Or (Op = 'movepart') Or (Op = 'rotpart') Then
+            Begin
+                { s1 the designator; movepart: x2,y2 the new reference point; rotpart: }
+                { n the orientation 0-3. Wires do not follow a moved part.             }
+                Hits := SchEditPartByDes(Doc, Kind, Comp);
+                If Hits = 0 Then Status := 'no part ' + Kind + ' on this sheet'
+                Else If Hits > 1 Then Status := Kind + ' has ' + IntToStr(Hits) + ' parts on this sheet (a multi-part symbol)'
+                Else If (Op = 'movepart') And (SchEditPartAt(Doc, X2, Y2, Kind, Hits2) > 0) Then
+                    Status := 'a part is already at the target';
             End
             Else If Op = 'part' Then
             Begin
@@ -7123,20 +7235,41 @@ Begin
             Exit;
         End;
 
-        { Write per sheet, one PreProcess / PostProcess pair per touched sheet. }
+        { New sheets first (scripts 2026.11.23.6): each is a file written and a }
+        { document added to the project, outside any sheet's edit transaction.  }
         Written := 0;
+        For J := 0 To IOp.Count - 1 Do
+            If IOp[J] = 'newsheet' Then
+            Begin
+                Touched := True;
+                Back := 'exception';
+                Try Back := SchEditNewSheet(P, IS1[J]); Except Back := 'exception'; End;
+                IBack[J] := Back;
+                If Back = 'ok' Then
+                Begin
+                    IStatus[J] := 'written';
+                    Inc(Written);
+                End
+                Else
+                Begin
+                    IStatus[J] := 'not_ok: ' + Back;
+                    Partial := True;
+                End;
+            End;
+
+        { Write per sheet, one PreProcess / PostProcess pair per touched sheet. }
         For K := 0 To Docs.Count - 1 Do
         Begin
             Pending := 0;
             For J := 0 To IOp.Count - 1 Do
-                If StrToInt(ISheet[J]) = K Then Inc(Pending);
+                If (StrToInt(ISheet[J]) = K) And (IOp[J] <> 'newsheet') Then Inc(Pending);
             If (Pending = 0) Or Partial Then Continue;
             Doc := Docs[K];
             SchServer.ProcessControl.PreProcess(Doc, '');
             Try
                 For J := 0 To IOp.Count - 1 Do
                 Begin
-                    If (StrToInt(ISheet[J]) <> K) Or Partial Then Continue;
+                    If (StrToInt(ISheet[J]) <> K) Or Partial Or (IOp[J] = 'newsheet') Then Continue;
                     Op := IOp[J]; Kind := IS1[J]; S2 := IS2[J]; S3 := IS3[J];
                     X1 := StrToInt(IX1[J]); Y1 := StrToInt(IY1[J]);
                     X2 := StrToInt(IX2[J]); Y2 := StrToInt(IY2[J]);
@@ -7152,6 +7285,46 @@ Begin
                             If Obj = Nil Then Back := 'missing'
                             Else If SchEditHasText(Kind) And (SchEditObjText(Obj) <> S3) Then Back := 'text differs'
                             Else Back := 'ok';
+                        End
+                        Else If Op = 'delpart' Then
+                        Begin
+                            Hits := SchEditPartByDes(Doc, Kind, Comp);
+                            If Comp = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Touched := True;
+                                Doc.RemoveSchObject(Comp);
+                                SchRegisterObject(Doc, Comp);
+                                Hits := SchEditPartByDes(Doc, Kind, Comp);
+                                If Hits = 0 Then Back := 'ok' Else Back := 'still there';
+                            End;
+                        End
+                        Else If Op = 'movepart' Then
+                        Begin
+                            Hits := SchEditPartByDes(Doc, Kind, Comp);
+                            If Comp = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Touched := True;
+                                SchBeginModify(Comp);
+                                Comp.MoveToXY(X2, Y2);
+                                SchEndModify(Comp);
+                                Hits := SchEditPartAt(Doc, X2, Y2, Kind, Hits2);
+                                If (Hits = 1) And (Hits2 = 1) Then Back := 'ok' Else Back := 'not at target';
+                            End;
+                        End
+                        Else If Op = 'rotpart' Then
+                        Begin
+                            Hits := SchEditPartByDes(Doc, Kind, Comp);
+                            If Comp = Nil Then Back := 'missing'
+                            Else
+                            Begin
+                                Touched := True;
+                                SchBeginModify(Comp);
+                                Comp.SetState_Orientation(N);
+                                SchEndModify(Comp);
+                                Back := 'ok';
+                            End;
                         End
                         Else If Op = 'part' Then
                         Begin

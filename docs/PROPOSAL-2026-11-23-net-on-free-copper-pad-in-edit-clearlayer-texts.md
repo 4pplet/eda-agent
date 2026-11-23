@@ -143,3 +143,34 @@ touched. A polygon has no such test: it repours around what is there, and the DR
 | # | Check | Pass |
 |---|---|---|
 | W17 | `setnet` of a scratch no-net via that sits on a track of another net, to GND; then of a free one | refused naming the track and the gap; the free one would_set, done |
+
+## 9. Scripts 2026.11.23.6: the schematic writer: a new sheet, ports, No ERC, a part deleted / moved / rotated
+
+Stefan 2026-11-23: "let's build the missing pieces and add to todo what we need to test". Runtime
+`selected-edits-20261123f`, carries `.5`. **Runtimes `b` to `e` were never started; `f` is the one to start.
+W1-W21 pending**; the test list in order is PLT-hw `tools/eda-agent/QUALIFY-TODO.md`. `lint.py`: 0 errors.
+
+| `proj.edit_schematic_checked` | What | From |
+|---|---|---|
+| `newsheet|0|...|s1 = name` | a new, empty `<name>.SchDoc` beside the project file, saved and added to the project. **The one op that writes a file at once**; the client lets it stand alone in its plan. Run before the per-sheet writes, outside any sheet's edit transaction | upstream `Gen_AddSheet`: `Client.OpenNewDocument('SCH', path, name, False)`, `SetFileName`, `DoFileSave`, `DM_AddSourceDocument` (their note: the WorkspaceManager process without a file name raised a modal dialog) |
+| `add` kind `port` | a port at `x1,y1`: `s3` its name, `s2` its style (none, left, right, left_right), `n` its IO type (0 unspecified, 1 output, 2 input, 3 bidirectional) | upstream `Gen_PlacePort` |
+| `add` kind `noerc` | a No ERC marker at `x1,y1` | upstream `Gen_PlaceNoERC` |
+| `del` kind `port` / `noerc` | through the writer's existing delete (found by location) | |
+| `delpart` / `movepart` / `rotpart`, `s1` = designator | the part removed (`RemoveSchObject` + the announcement the writer's `del` uses); moved to `x2,y2` (`MoveToXY` between the modify calls); orientation `n` 0-3 (`SetState_Orientation`). Refused when the designator is on the sheet more than once (a multi-part symbol). Wires do not follow a moved part | `MoveToXY` and `SetState_Orientation` as in `part` (section 6) |
+
+Client: `sch_plan.py` ops `newsheet`, `delpart`, `movepart`, `rotpart`, `port`, `noerc`. Offline
+`schlib_parts.py <lib.SchLib> [filter]` lists a library's part names (the `lib_ref` of `part`) from the
+file's `FileHeader`, without Altium.
+
+**New on this path, proven upstream only:** `Client.OpenNewDocument`, `IServerDocument.SetFileName` /
+`DoFileSave`, `ISch_Port` (`Name`, `Style`, `IOType`, `ePort...`), `eNoERC`, `RemoveSchObject` on a component.
+
+Not in it: sheet symbols and entries, buses and bus entries, harnesses, sub-parts of multi-part symbols,
+footprint choice on a placed part, symbol and footprint library editing, Update PCB.
+
+| # | Check (disposable project copy) | Pass |
+|---|---|---|
+| W18 | `newsheet` | the SchDoc is on disk beside the project and in the project panel; no dialog; `sch read` lists it |
+| W19 | `port` in each style and IO type, `noerc`; then `del` of one port and of the marker | shown as asked; deleted; no script error |
+| W20 | `movepart`, `rotpart`, `delpart` on the part placed in W9 | at the target; rotated; gone |
+| W21 | a small real flow on the new sheet: two parts, wires, labels, a port, power ports; save; compile | `nets` shows the pins on the nets |
