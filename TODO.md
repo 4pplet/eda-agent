@@ -123,6 +123,15 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
       cause of our open defect "Board Outline Clearance reads as 0" (the value is in the object matrix).
       Review it for a port of the read half.
 
+## Direction (Stefan, 2026-11-25): in line with upstream, and contributing there
+
+- [x] Upstream's server installed side by side for a trial (version 0.8.3, commit `9b741b5`; offline health
+      check passes; nothing has talked to Altium). `AGENTS.md` has the limits of the trial.
+- [ ] The trial: one sheet through upstream as it is, compared with the restricted pilot:
+      [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md). After the
+      current pilot; one Altium, one bridge.
+- [ ] Then decide how much of the restricted layer is rebased, offered upstream or retired.
+
 ## Plans
 
 - [docs/PLAN-2026-11-25-move-clients-into-this-repo.md](docs/PLAN-2026-11-25-move-clients-into-this-repo.md):

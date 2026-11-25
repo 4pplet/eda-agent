@@ -16,6 +16,20 @@ compatibility; running its script project or broad upstream server is not the
 same restricted workflow. Do not infer permission from the upstream README,
 tool availability, a GUI label, or this project's future editing roadmap.
 
+**Upstream trial (Stefan, 2026-11-25).** Upstream's own server and script
+project may be installed side by side and run for a trial, to decide whether
+this fork's restricted layer is still needed and to get back in line with
+upstream. The limits of the trial:
+
+- only on a copy of a project, or on files that are committed and pushed;
+- not while another session uses the restricted bridge: one Altium, one bridge;
+- upstream's operator settings set to refuse deleting and closing unless the
+  trial step is about them; saving stays the operator's;
+- its installation never replaces or edits a restricted runtime;
+- every result is recorded as an upstream result, with upstream's commit.
+
+Outside such a trial the paragraph above stands.
+
 Keep one Altium instance/bridge/client. The operator chooses an exact project via
 the dropdown and Use this project. Get fresh project_path/selection_token before
 scoped reads; never follow focused tabs or silently redirect stale requests.
