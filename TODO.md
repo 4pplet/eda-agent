@@ -101,6 +101,23 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       an expiry (minutes), clearing on any apply attempt, or the preview printing how old the tick is. A safety
       rule: Stefan decides. W31 must start from an untick meanwhile.
 
+- [ ] **Limitations logged by the pilot (2026-11-25), for phase 3 (the library loop).** New write ops, so
+      none is built during the phase 1 freeze; the two that cost the operator most are first.
+  - [ ] Copy a symbol from another library or from a placed part into the project library (create-only, same
+        tick). Upstream has `Lib_CopyComponent`; read it before writing ours. Also covers "no lines or arcs in
+        a drawn symbol", since a copied symbol keeps its drawing.
+  - [ ] Remove a library symbol, limited to one this bridge session created and the library has not been saved
+        with. Upstream has `Lib_DeleteComponent`. Today a rejected symbol costs a close and a restore from git.
+        Changes the create-only rule: Stefan decides.
+  - [ ] Lines, polylines and arcs in `libsymbol` (after the copy op; may not be needed then).
+  - [ ] `libfootprint` refuses a repeated pad number, which an exposed pad split in several pads needs.
+  - [ ] `docparam` cannot create a parameter that does not exist on a new sheet (`Title`).
+  - [ ] Footprint names in `footprint` / `liblink` are not checked against the footprint library.
+  - [ ] `part` places from a `.SchLib` file only, not from an installed integrated library.
+  - [x] An offline tool that imports a sibling failed under `python -I`: fixed in PLT-hw `schlib_check.py`.
+  - For the skill, not the bridge: the bridge command needs PowerShell, not Git Bash; a pin type other than
+    `passive` draws Altium's direction arrows; every library run costs a save and a reopen to check.
+
 ## Tasks kept out of this file
 
 This repository is public, so a task that names another repo is in `docs/handoffs/LOCAL-TODO.md`
