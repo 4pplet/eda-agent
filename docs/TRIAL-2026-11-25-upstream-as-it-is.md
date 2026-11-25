@@ -21,6 +21,7 @@ runtimes and touching none of them:
 |---|---|
 | Upstream commit | `9b741b5` (version 0.8.3) |
 | `venv\` | upstream's server, installed from the upstream checkout |
+| `..\upstream-trial-b\` | second environment, built 2026-11-25: upstream main `a29d132` (script `2026.11.25.3`) with the picture and CadQuery extras, its own `venv\` and `scripts\`, the same workspace. The pilot moves to it between sheets (Stefan, 2026-11-25); the first stays as the way back. |
 | `scripts\Altium_API.PrjScr` | upstream's script project, unmodified |
 | `workspace\` | its own request folder (`EDA_AGENT_WORKSPACE`) |
 
