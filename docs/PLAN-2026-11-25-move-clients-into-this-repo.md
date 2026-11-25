@@ -3,6 +3,28 @@
 **Status: plan only. Nothing has moved.** It starts after phase 1 (the built
 writers run in Altium), and never while a session is using the clients.
 
+## 0. Order changed 2026-11-25 (Stefan): upstream first
+
+This fork is 545 commits behind upstream, from a base that never moved. Moving
+the clients onto that base would mean moving them twice. The order is now:
+
+1. Phase 1: the built writers run in Altium.
+2. **Catch up with upstream**: our layer rebased onto current upstream (a trial
+   merge on 2026-11-25 conflicted in 21 files).
+3. **Compare before carrying**: for each thing our layer does, check whether
+   upstream now does it (its operator settings already refuse edits, deletes
+   or closing on request; 33 of its tools take a dry run; it copies and
+   deletes library symbols and opens and closes documents). What upstream does
+   as well or better, we drop.
+4. **Offer upstream** what it lacks and would take, in pieces.
+5. **Move what remains** as `clients/eda_bridge`: expected to be the approval
+   routine, the runtime generator and the plan resolvers, much less than
+   sections 2 to 5 below describe. Those sections are the upper bound.
+
+Open (asked 2026-11-25, not decided): whether the restricted layer is still
+needed at all once step 3 is done. A trial of upstream as it is, on committed
+files, answers that better than a document.
+
 ## 1. Why
 
 The bridge is in two repositories. The Altium scripts are here; the clients
