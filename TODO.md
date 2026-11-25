@@ -115,13 +115,22 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
   - [ ] Remove a library symbol, limited to one this bridge session created and the library has not been saved
         with. Upstream has `Lib_DeleteComponent`. Today a rejected symbol costs a close and a restore from git.
         Approved in this narrow form "for now" (Stefan, 2026-11-25). Built in the library phase, not before.
+  - [x] Which documents are open and which is focused could not be read, so the operator was asked five times
+        in one day. Read only, so not held by the freeze: the freshness read now names the project's open
+        documents and the focused one when it is a project member (both `next-build` branches, row W42).
+  - [ ] Open a project member document; make a named open document the active one (the earlier ask); close
+        a document only when it is not modified. Three new ops that act on the editor, not on design data.
+        The second touches the rule "never follow focused tabs" (it sets focus, it does not follow it); the
+        third must refuse a modified document. Stefan decides; library phase.
   - [ ] Lines, polylines and arcs in `libsymbol` (after the copy op; may not be needed then).
   - [ ] `libfootprint` refuses a repeated pad number, which an exposed pad split in several pads needs.
   - [ ] `docparam` cannot create a parameter that does not exist on a new sheet (`Title`).
   - [ ] Footprint names in `footprint` / `liblink` are not checked against the footprint library.
   - [ ] `part` places from a `.SchLib` file only, not from an installed integrated library.
   - [x] An offline tool that imports a sibling failed under `python -I`: fixed in PLT-hw `schlib_check.py`.
-  - For the skill, not the bridge: the bridge command needs PowerShell, not Git Bash; a pin type other than
+  - For the skill, not the bridge: Altium's Make Schematic Library adds its output to the project, and a
+    later project save writes it into the project file; remove it before saving.
+  - Also for the skill: the bridge command needs PowerShell, not Git Bash; a pin type other than
     `passive` draws Altium's direction arrows; every library run costs a save and a reopen to check.
 
 ## Tasks kept out of this file
