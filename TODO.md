@@ -66,6 +66,8 @@ This repository is public, so a task that names another repo is in `docs/handoff
 (git-ignored, on the machine). One line each here:
 
 - [ ] Audit of an agent guide for Altium work in another repo (asked 2026-11-25).
+- [ ] A skill for working in Altium through the bridge: written here after a pilot in another repo reports
+      what worked, generic, kept with the clients; that repo tests it on its next sheet (2026-11-25).
 
 ## Open defects
 
