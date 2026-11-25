@@ -147,6 +147,21 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         library it goes into).
   - [ ] Needs Altium (after the pilot): a library reads as saved after a symbol copy (their closed issue 251,
         back on Altium 23); after a delete the lookup by name still returns the symbol.
+  - [ ] **Check how a 3D model sits on its footprint** (asked by Stefan through the pilot, 2026-11-25). After
+        linking a STEP model the agent can read its box and height but not which way round it sits, so the
+        operator had to open the 3D view and look. Wanted: a picture of the footprint with its body from top,
+        bottom and at an angle, and a check of the model's bottom faces against the pads and the courtyard.
+        Upstream has a 3D render module and writes STEP with CadQuery; neither is installed in the trial
+        environment (CadQuery has a build for this Python). A feature, so it is agreed with the maintainer in
+        an issue first, as upstream's contribution rules ask.
+  - [ ] Custom footprint from a drawing (module with a printed body), four findings from one build: the layer
+        check runs after the footprint was created and leaves the library marked modified and focus moved;
+        the courtyard came from the lands only and missed the body's overhang; lands default to rounded
+        corners where the drawing has square ones; the silkscreen has no pin-1 mark.
+  - [ ] The footprint-against-drawing check cannot place a body dimension or a chamfer leg, so any module
+        drawing with a body outline needs the check switched off.
+  - [ ] A linked 3D body lands on Mechanical 1 at the model's own origin, not on the library's 3D layer.
+  - [ ] `lib_get_footprint_primitives` with an unknown `kinds` word returns empty lists and no error.
   - [ ] To raise, not a fix: the server's instructions tell the agent to drive menus and dialogs without
         asking; the long "datasheet first" block in every reply.
 - [ ] The trial: one sheet through upstream as it is, compared with the restricted pilot:
