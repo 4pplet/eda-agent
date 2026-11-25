@@ -17,8 +17,9 @@ What is in flight and the next step. Updated before every compact; after one, st
   bump on `main`, no edits to the client files it runs. New files are safe.
 - **Waiting for:** its pass / fail on the remaining rows and its report for the skill. First results in
   2026-11-25: W27 and W39 passed.
-- **Ready, not built:** branch `next-build`, scripts `2026.11.25.2` (pad shape, region kind, per-unit stamps,
-  and the native half of two `libsymbol` options: filled body, hidden pin labels).
+- **Ready, not built:** branch `next-build` here and in PLT-hw, scripts `2026.11.25.2`, both halves written
+  and tested offline: pad shape, region kind, per-unit stamps, a filled body and hidden pin labels on
+  `libsymbol`, a ten-minute limit on an unused grant tick with its age in the preview.
 - **Next:** tick the rows; fill the skill's `PILOT:` lines; wire the new fields and the stamps into the
   generator, validators and `status`; build `2026.11.25.2`; the reload checks D1-D5; then phase 1.
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
@@ -86,10 +87,16 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
 - [x] Their client half (2026-11-25, PLT-hw branch `next-build`, a separate checkout so the running clients are
       untouched): `body_fill` with the two colours, `pin_labels` on the symbol, `show_name` /
       `show_designator` per pin, validation and tests. A plan without the options gives the same items as before.
-- [ ] Still owed there: `schlib_check.py` comparing fill and visibility in the saved file.
-- [ ] To build it: merge the branch, bump the client pin in PLT-hw, let `create_shared_runtime.py` stamp the
-      units before it hashes them, let `status` name a stale unit, accept the new fields in the validators.
-      Only when no session is using the current runtime.
+- [x] `schlib_check.py` compares fill and label visibility in the saved file when the plan asks for them
+      (2026-11-25, same branch). Which flag bit is the name and which the designator comes from the published
+      file layout; row W40 confirms it in Altium.
+- [x] The client half for the build (2026-11-25, PLT-hw branch `next-build`, 861 tests pass): the generator
+      stamps the units before it hashes them and refuses sources without stamps, `status` names a stale or
+      unstamped unit, the validators require pad `shape` and region `kind`, the client pin is `2026.11.25.2`.
+      A trial runtime built from the two branches into a scratch folder: 25 files, ten units stamped, stamps
+      match the files. Not loaded in Altium.
+- [ ] To build it for real: merge both `next-build` branches, build a new side-by-side runtime with Altium
+      closed, run rows W40, W41 and D1-D5. Only when no session is using the current runtime.
 
 ## Defects and questions found in the pilot
 
@@ -98,8 +105,8 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
 - [x] **A tick that no apply used had no end.** A tick made in the morning was still standing hours later.
       Decided (Stefan, 2026-11-25): a ten-minute limit, and the preview prints the tick's age. The limit is on
       `next-build` for both grants (source only, row W41); the status form names it.
-- [ ] The tick's age in the preview. It cannot go in the selection object (the clients compare that for
-      equality between calls), so it needs a field of its own; with the client half, after the pilot.
+- [x] The tick's age in the preview (2026-11-25, both `next-build` branches): the ping carries `grant_age_s`
+      outside the selection object, and every preview prints "granted (ticked N ago; ...)". Row W41.
 - [ ] **Limitations logged by the pilot (2026-11-25), for phase 3 (the library loop).** New write ops, so
       none is built during the phase 1 freeze; the two that cost the operator most are first.
   - [ ] Copy a symbol from another library or from a placed part into the project library (create-only, same
