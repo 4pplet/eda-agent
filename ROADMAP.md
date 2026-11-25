@@ -45,7 +45,7 @@ files), so upstream is not merged; it is used in three ways:
    `Lib_AddPin` with its lint rule, pull request 452 (2026-11-25).
 2. **Fixes come down by hand.** Before each build, review upstream's commits
    since the last review (PLT-hw `UPSTREAM-REVIEW-*.md`) for the APIs our code
-   uses, and port what applies. Last review: 2026-11-17.
+   uses, and port what applies. Last review: 2026-11-25 (to upstream `9c0a14f`).
 3. **Rebase after phase 1.** Our layer (`SelectedProject.pas`, the pure-read
    splits, the gates in the dispatcher and status form) moved onto current
    upstream as a small patch set, and the checked-write pattern proposed

@@ -24,7 +24,10 @@ found.
 - [x] Reply note left in the sending repo (2026-11-25).
 - [x] Committed: this repo `e9c2af2`, PLT-hw `75556c7` (2026-11-25, not pushed).
 - [x] The `Lib_AddPin` fix and lint rule sent upstream: salitronic/eda-agent pull request 452.
-- [ ] Review upstream's commits since 2026-11-17 for fixes to port (ROADMAP, Upstream, point 2).
+- [x] Upstream reviewed to 2026-11-23 (PLT-hw `tools/eda-agent/UPSTREAM-REVIEW-2026-11-25.md`): one port
+      candidate, rule priorities kept and settable in `setup` (upstream `da31d29`), after phase 1.
+- [ ] Read how upstream's `relaunch --restart` reloads the scripts in a running Altium (phase 2,
+      development runtime).
 
 ## Next (phase 1: qualify, no new ops)
 
