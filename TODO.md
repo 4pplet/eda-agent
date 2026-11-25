@@ -94,13 +94,11 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
 
 - [x] W27 (pin positions) and W39 (bracketed footprint name) passed in Altium on `2026.11.25.1` (2026-11-25;
       PLT-hw `QUALIFY-TODO.md`).
-- [ ] **A tick that no apply used has no end.** A tick made in the morning was still standing hours later,
-      so a preview read "granted" before the operator ticked for the batch. Read in the source 2026-11-25: an
-      apply that touched anything clears the grant, and so does a changed selection; a tick followed by no
-      apply, or by an apply that was refused before touching anything, stands until the bridge stops. Options:
-      an expiry (minutes), clearing on any apply attempt, or the preview printing how old the tick is. A safety
-      rule: Stefan decides. W31 must start from an untick meanwhile.
-
+- [x] **A tick that no apply used had no end.** A tick made in the morning was still standing hours later.
+      Decided (Stefan, 2026-11-25): a ten-minute limit, and the preview prints the tick's age. The limit is on
+      `next-build` for both grants (source only, row W41); the status form names it.
+- [ ] The tick's age in the preview. It cannot go in the selection object (the clients compare that for
+      equality between calls), so it needs a field of its own; with the client half, after the pilot.
 - [ ] **Limitations logged by the pilot (2026-11-25), for phase 3 (the library loop).** New write ops, so
       none is built during the phase 1 freeze; the two that cost the operator most are first.
   - [ ] Copy a symbol from another library or from a placed part into the project library (create-only, same
