@@ -162,6 +162,10 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         sits. Plan: read the STEP's box and underside faces; place them with the body's rotation and offset;
         match each face to a pad; try the four rotations and say which fits; draw pads, faces and body outline
         from above. An offline tool taking the pads and the placement as arguments.
+        **Built 2026-11-25** on a branch of our fork (`feat/check-3d-model-fit`, tool
+        `footprint_check_3d_model`, 11 tests): on the real module it passes the right way round, names
+        the move when the model sits at its own origin, and fails a half turn because the body leaves
+        the courtyard. Not yet a pull request: upstream's full test run first.
   - [ ] Custom footprint from a drawing (module with a printed body), four findings from one build: the layer
         check runs after the footprint was created and leaves the library marked modified and focus moved;
         the courtyard came from the lands only and missed the body's overhang; lands default to rounded
@@ -170,6 +174,21 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         drawing with a body outline needs the check switched off.
   - [ ] A linked 3D body lands on Mechanical 1 at the model's own origin, not on the library's 3D layer.
   - [ ] `lib_get_footprint_primitives` with an unknown `kinds` word returns empty lists and no error.
+  - [ ] **Tools that save without being asked** (pilot, 2026-11-25; the first read in the source, the second
+        seen): the template draw tool says "does not save" and ends by saving, closing and reopening the
+        sheet; the sheet-size tool does the same; creating a document also saves the project. Upstream has an
+        operator switch that holds saves back, and the save these tools use does not ask it. The fix to send:
+        that save honours the switch, the reopen becomes an option, the descriptions say what happens. It
+        touches the Altium script, so it is tested in Altium before it is sent. This is the one finding so far
+        that goes against "the operator saves".
+  - [ ] Footprint link: refused with a sheet in front although its description says it brings the library
+        forward; several footprints linked to one symbol all read as the current one and no tool sets it; a
+        description write on a library symbol through the generic modify reports a match and changes nothing.
+  - [ ] Feature asked for (Stefan: "critical that it's correct"): a check that pad N sits where the datasheet's
+        pin-layout figure puts pin N. Today nothing ties a pad's number to its position; a footprint numbered
+        the wrong way round passes every check. The pilot did it by hand from the figure's labels (53 of 53).
+  - [ ] Feature: compare a built footprint with another footprint (another library, a KiCad file) pad by pad,
+        holes and slots with their rotation included.
   - [ ] To raise, not a fix: the server's instructions tell the agent to drive menus and dialogs without
         asking; the long "datasheet first" block in every reply.
 - [ ] The trial: one sheet through upstream as it is, compared with the restricted pilot:
