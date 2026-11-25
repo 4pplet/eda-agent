@@ -108,3 +108,7 @@ extensions/easyeda/dist/
 
 extensions/easyeda/verified.json
 extensions/easyeda/*.eext
+
+# Handoff notes name other projects; this repo is public. Kept local, never committed.
+docs/handoffs/*.md
+docs/handoffs/outbound/

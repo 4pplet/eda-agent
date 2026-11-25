@@ -8,6 +8,10 @@ To use the bridge, read PLT-hw `tools/eda-agent/BRIDGE.md` first. It holds the r
 the commands, the blind spots and the write workflow. A test keeps its runtime line
 in step with `ACTIVE-RUNTIME.txt`.
 
+> **2026-11-25:** source is at scripts `2026.11.25.1` (pin position fix, W27 failed on `2026.11.23.10`), no
+> runtime built yet. Order of work: [ROADMAP.md](../ROADMAP.md); open tasks: [TODO.md](../TODO.md); the
+> pre-2026-11-25 backlog: [TODO-history-2026-11-25.md](../TODO-history-2026-11-25.md).
+
 ## What is running (2026-11-17)
 
 ### Source
@@ -141,7 +145,7 @@ Parameter edits have their own tick ("Allow parameter edits").
 - **Known limitations:** the same TOOLS.md, "Limitations met in use". One dated
   row per limitation, with the workaround and the backlog row that removes it.
   Blind spots of the reads are in BRIDGE.md section 4.
-- [TODO.md](../TODO.md) holds the older fork backlog (shutdown, Ctrl+Z, lifecycle
+- [TODO-history-2026-11-25.md](../TODO-history-2026-11-25.md) holds the older fork backlog (shutdown, Ctrl+Z, lifecycle
   matrix). Its P0 items are still open; the operating rule stands: stop the bridge
   before quitting Altium.
 

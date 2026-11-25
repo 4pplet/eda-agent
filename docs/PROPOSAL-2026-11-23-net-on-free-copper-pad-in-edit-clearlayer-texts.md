@@ -308,3 +308,27 @@ Found there and built the same evening with Altium closed (Stefan: "let's fix al
 | W36 | `setnet` kind `fill` on a scratch no-net copper fill | net set; refused when other-net copper is within the clearance |
 | W37 | `moves` on a bottom part (disposable board, after `flip` W14) | moved and rotated on the bottom, read back |
 | W38 | `order_check.py 22p` contact step with the pour nets | only real joints listed |
+
+## 14. Scripts 2026.11.25.1: the pin position (W27 failed on 2026.11.23.10)
+
+**W27 FAILED 2026-11-25** on runtime `selected-edits-20261123j`, its first real run (five new symbols, 72 of 72
+items read `written`): every body was right and every pin sat at the symbol origin, with its own orientation,
+length, designator and name. Nothing was saved.
+
+Cause: `SchEditLibPin` wrote `Pin.Location.X := X`. `Location` is a record returned by value, so the write
+changed a temporary. `SchEditLibRect` beside it reads, modifies and writes back, which is why the bodies were
+right. Upstream's `Lib_AddPin` in `Library.pas` had the same two lines. The count of section 12 could not see
+it: the pin was on the symbol, in the wrong place.
+
+Fixed in source, not yet run:
+
+- `SchEditLibPin` and `Lib_AddPin`: `Loc := Pin.Location; Loc.X := ...; Pin.Location := Loc`.
+- `SchEditLibPin` reads the position back before the pin goes on the symbol; if it differs the item reads
+  `the pin was not created at its position` and the batch stops.
+- `lint.py` rule `record-property-field-write` (error) for `.Location.X :=` / `.Corner.Y :=`.
+- Client: `_SCH_FOOTPRINT` accepts `[` and `]` (`0402[1005]`), for `liblink` and `footprint`. Not proven live.
+
+| # | Check | Pass |
+|---|---|---|
+| W27 | re-run on `2026.11.25.1`: a two-pin and a many-pin symbol; save; close and reopen | each pin at its planned position (read two in the editor) |
+| W39 | `liblink` with a bracketed footprint name | the link shows the name; no script error |

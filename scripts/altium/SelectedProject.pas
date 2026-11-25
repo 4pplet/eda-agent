@@ -7300,14 +7300,23 @@ Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinNa
     X, Y, Len, Orient : Integer) : Boolean;
 Var
     Pin : ISch_Pin;
+    Loc : TLocation;
 Begin
     Result := False;
     Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
     If Pin = Nil Then Exit;
     Pin.Designator := Des;
     Pin.Name := PinName;
-    Pin.Location.X := X;
-    Pin.Location.Y := Y;
+    { Read-modify-write: Location is a record returned by value, so      }
+    { `Pin.Location.X := X` changes a copy and the pin stays at (0, 0)   }
+    { (W27, 2026-11-25: every pin of five new symbols at the origin).    }
+    Loc := Pin.Location;
+    Loc.X := X;
+    Loc.Y := Y;
+    Pin.Location := Loc;
+    { Read back before the pin goes on the symbol: a count alone passed W27. }
+    Loc := Pin.Location;
+    If (Loc.X <> X) Or (Loc.Y <> Y) Then Exit;
     Pin.PinLength := Len;
     Pin.Orientation := Orient;
     Pin.IsHidden := False;
@@ -8008,7 +8017,8 @@ Begin
                         Begin
                             If SchEditLibCount(LibComp, ePin) = Hits + 1 Then Back := 'ok'
                             Else Back := 'the pin is not counted on the symbol';
-                        End;
+                        End
+                        Else Back := 'the pin was not created at its position';
                     End
                     Else If Op = 'librect' Then
                     Begin

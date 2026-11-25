@@ -281,6 +281,19 @@ RULE_ARC_WIDTH = LineRule(
     description="IPCB_Arc has no Width; use Arc.LineWidth (Arc.Width raises a modal that stops the loop).",
 )
 
+# Location / Corner are records returned by value: a field write through the
+# property changes a temporary and is silently discarded (W27, 2026-11-25:
+# every pin of a new library symbol at the origin). Read, modify, write back.
+RULE_RECORD_FIELD_WRITE = LineRule(
+    name="record-property-field-write",
+    pattern=re.compile(r"\.(Location|Corner)\.(X|Y)\s*:=", re.IGNORECASE),
+    severity="error",
+    memory="Library.pas, the comment in Lib_AddSymbolLine",
+    description=(
+        "Obj.Location.X := v writes to a by-value copy and is discarded; use "
+        "Loc := Obj.Location; Loc.X := v; Obj.Location := Loc."),
+)
+
 # IPCB_Rule.Priority is a read-only function, not a property.
 RULE_RULE_PRIORITY_WRITE = LineRule(
     name="rule-priority-readonly-write",
@@ -476,6 +489,7 @@ LINE_RULES = [
     RULE_FOOTPRINT_NAME_WRITE,
     RULE_RULE_PRIORITY_WRITE,
     RULE_ARC_WIDTH,
+    RULE_RECORD_FIELD_WRITE,
     RULE_PROBE_TEXT_WRITE,
     RULE_KNOWN_WRONG_E_IDENT,
     RULE_KNOWN_WRONG_METHOD,
