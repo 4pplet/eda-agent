@@ -7296,11 +7296,14 @@ Begin
 End;
 
 { Upstream Lib_AddPin. }
-Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinName, EType : String;
+{ Flags (scripts 2026.11.25.2): 'n' hides the pin's name, 'd' its designator;   }
+{ both are read back before the pin goes on the symbol.                        }
+Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinName, EType, Flags : String;
     X, Y, Len, Orient : Integer) : Boolean;
 Var
     Pin : ISch_Pin;
     Loc : TLocation;
+    WantName, WantDes : Boolean;
 Begin
     Result := False;
     Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
@@ -7320,6 +7323,11 @@ Begin
     Pin.PinLength := Len;
     Pin.Orientation := Orient;
     Pin.IsHidden := False;
+    WantName := Pos('n', Flags) = 0;
+    WantDes := Pos('d', Flags) = 0;
+    Pin.ShowName := WantName;
+    Pin.ShowDesignator := WantDes;
+    If (Pin.ShowName <> WantName) Or (Pin.ShowDesignator <> WantDes) Then Exit;
     Pin.Electrical := StrToPinElectrical(EType);
     SchServer.ProcessControl.PreProcess(SchLib, '');
     SetOwnerPart(Pin, Component);
@@ -7330,8 +7338,11 @@ Begin
     Result := True;
 End;
 
-{ Upstream Lib_AddSymbolRectangle, not filled. }
-Function SchEditLibRect(SchLib : ISch_Lib; Component : ISch_Component; X1, Y1, X2, Y2 : Integer) : Boolean;
+{ Upstream Lib_AddSymbolRectangle. Not filled when FillColor is negative;      }
+{ otherwise solid in FillColor with the border in BorderColor (scripts          }
+{ 2026.11.25.2), each read back before the rectangle goes on the symbol.        }
+Function SchEditLibRect(SchLib : ISch_Lib; Component : ISch_Component; X1, Y1, X2, Y2,
+    FillColor, BorderColor : Integer) : Boolean;
 Var
     Rect : ISch_Rectangle;
     Loc : TLocation;
@@ -7348,6 +7359,14 @@ Begin
     Loc.Y := Y2;
     Rect.Corner := Loc;
     Rect.IsSolid := False;
+    If FillColor >= 0 Then
+    Begin
+        Rect.AreaColor := FillColor;
+        Rect.IsSolid := True;
+        If BorderColor >= 0 Then Rect.Color := BorderColor;
+        If (Not Rect.IsSolid) Or (Rect.AreaColor <> FillColor) Then Exit;
+        If (BorderColor >= 0) And (Rect.Color <> BorderColor) Then Exit;
+    End;
     SchServer.ProcessControl.PreProcess(SchLib, '');
     SetOwnerPart(Rect, Component);
     Component.AddSchObject(Rect);
@@ -8013,21 +8032,24 @@ Begin
                     Begin
                         Hits := SchEditLibCount(LibComp, ePin);
                         If SchEditLibPin(SchLib, LibComp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), SchEditSplit(S3, 2),
-                            X1, Y1, X2, N) Then
+                            SchEditSplit(S3, 3), X1, Y1, X2, N) Then
                         Begin
                             If SchEditLibCount(LibComp, ePin) = Hits + 1 Then Back := 'ok'
                             Else Back := 'the pin is not counted on the symbol';
                         End
-                        Else Back := 'the pin was not created at its position';
+                        Else Back := 'the pin was not created at its position or with its visibility';
                     End
                     Else If Op = 'librect' Then
                     Begin
                         Hits := SchEditLibCount(LibComp, eRectangle);
-                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2) Then
+                        { text "fill/border" as colour integers; empty = not filled }
+                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2,
+                            StrToIntDef(SchEditSplit(S3, 0), -1), StrToIntDef(SchEditSplit(S3, 1), -1)) Then
                         Begin
                             If SchEditLibCount(LibComp, eRectangle) = Hits + 1 Then Back := 'ok'
                             Else Back := 'the rectangle is not counted on the symbol';
-                        End;
+                        End
+                        Else Back := 'the rectangle was not created with its fill';
                     End
                     Else
                     Begin
