@@ -12,18 +12,22 @@ found.
 
 What is in flight and the next step. Updated before every compact; after one, start here.
 
-- **Direction (Stefan, 2026-11-25):** be in line with upstream and contribute there. Upstream's own server
-  (0.8.3) is installed side by side and a pilot in another repo now draws its sheet through it
-  ([docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md)). One Altium, one
-  bridge, one session: no call to either bridge from here while that session works.
-- **Waiting for:** its snags as they come and its comparison table; then the decision how much of the restricted
-  layer is rebased, offered upstream or retired.
-- **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) is built and was used by the
-  pilot before the switch; rows W40-W42 as far as that session reported them. Branch `next-build` in both repos
-  holds `2026.11.25.3` (the `.Clear` fix, rule priorities), source only. No new work on it until the trial is
-  judged.
-- **Next from here:** four reports for upstream are drafted (local file, not posted: Stefan's go); the three
-  private board names in tracked documents and the private sibling's name are undecided (section below).
+- **Direction (Stefan, 2026-11-25):** be in line with upstream and contribute there; findings become fixes
+  and pull requests, not reports. A pilot in another repo draws its sheet through upstream's own server
+  (0.8.3, installed side by side): [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md).
+  One Altium, one bridge, one session: no call to either bridge from here while that session works.
+- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457, all checks passing, none reviewed yet.
+- **Built, pushed to our fork, pull request NOT yet open** (GitHub answered with server errors): the 3D model
+  check and the pad-number check. Texts are ready (local drafts).
+- **Unread when this was written:** the pilot's report (asked for since the morning; it is the input for the
+  skill) and one more snag note. Read them first.
+- **Next:** open the two pull requests; read the pilot's report and fill the skill's `PILOT:` lines; write the
+  fix for tools that save unasked and test it in Altium when the pilot's sheet is done; then the two
+  Altium-dependent defects (a library reading as saved after a copy; a lookup returning a deleted symbol).
+- **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
+  `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
+- **Undecided with Stefan:** the three private board names in tracked documents and whether the private
+  sibling's name is private (section below); how much of the restricted layer is kept after the trial.
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
 
 ## Done 2026-11-25 (phase 0)
