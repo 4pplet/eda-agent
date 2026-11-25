@@ -6007,8 +6007,19 @@ Begin
             Else NetName := '';
         Except NetName := ''; End;
         Try LayerStr := GetLayerString(Pad.Layer); Except LayerStr := 'Unknown'; End;
+        { The top shape as a word (scripts 2026.11.25.2): the read gave size and  }
+        { rotation only, so a round pad and a square one could not be told apart. }
+        { The same four names PCB_GetPadProperties already compares in this file. }
+        ShapeStr := 'unknown';
+        Try
+            If Pad.TopShape = eRounded Then ShapeStr := 'round'
+            Else If Pad.TopShape = eRectangular Then ShapeStr := 'rect'
+            Else If Pad.TopShape = eOctagonal Then ShapeStr := 'octagon'
+            Else If Pad.TopShape = eRoundedRectangular Then ShapeStr := 'roundrect';
+        Except ShapeStr := 'unknown'; End;
 
         JsonItems := JsonItems + '{"name":"' + EscapeJsonString(PadName) + '",'
+            + '"shape":"' + ShapeStr + '",'
             + '"x":' + IntToStr(CoordToMils(Pad.x)) + ','
             + '"y":' + IntToStr(CoordToMils(Pad.y)) + ','
             + '"x_raw":' + IntToStr(Pad.x) + ','
@@ -6686,7 +6697,7 @@ Var
     Region : IPCB_Region;
     Contour : IPCB_Contour;
     Pad : IPCB_Pad;
-    JsonItems, LayerStr, Row, FillsJson, RegionsJson, NetName, PadsJson : String;
+    JsonItems, LayerStr, Row, FillsJson, RegionsJson, NetName, PadsJson, KindStr : String;
     Count, Total, FillCount, FillTotal, RegionCount, RegionTotal, PtCount, HoleCount, K : Integer;
     PadCount, PadTotal : Integer;
 Begin
@@ -6795,8 +6806,20 @@ Begin
                                 If K > 1 Then Row := Row + ',';
                                 Row := Row + '[' + IntToStr(Contour.X[K]) + ',' + IntToStr(Contour.Y[K]) + ']';
                             End;
+                        { The region's kind as a word (scripts 2026.11.25.2), so a board  }
+                        { cutout can be told from copper. The same five names PCBGeneric   }
+                        { compares; a word, not the ordinal, for the reason given there.   }
+                        KindStr := 'unknown';
+                        Try
+                            If Region.Kind = eRegionKind_BoardCutout Then KindStr := 'board_cutout'
+                            Else If Region.Kind = eRegionKind_Cutout Then KindStr := 'cutout'
+                            Else If Region.Kind = eRegionKind_Copper Then KindStr := 'copper'
+                            Else If Region.Kind = eRegionKind_NamedRegion Then KindStr := 'named_region'
+                            Else If Region.Kind = eRegionKind_Cavity Then KindStr := 'cavity';
+                        Except KindStr := 'unknown'; End;
                         If RegionCount > 0 Then RegionsJson := RegionsJson + ',';
                         RegionsJson := RegionsJson + '{"layer":"' + EscapeJsonString(LayerStr) + '",'
+                            + '"kind":"' + KindStr + '",'
                             + '"net":"' + EscapeJsonString(NetName) + '",'
                             + '"point_count":' + IntToStr(PtCount) + ','
                             + '"hole_count":' + IntToStr(HoleCount) + ','
