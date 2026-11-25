@@ -109,7 +109,7 @@ Known from the source, not from the descriptions:
 
 | Tool | What reaches disk |
 |---|---|
-| `sch_draw_template` | saves the sheet, closes and reopens it; this save ignores the Saving switch |
+| `sch_draw_template` | after a successful draw: saves the sheet, closes it and reopens it |
 | `app_create_document` | saves the new document and the project |
 | `sch_set_sheet_size` | saves the sheet and reopens it |
 | `proj_rename_document` | Save As, the project entry and a project save |
@@ -117,6 +117,11 @@ Known from the source, not from the descriptions:
 
 The list is not complete. Rule 2 of section 3 stands for any tool not on it. A project
 file changed by a tool is shown to the operator before it is committed.
+
+The server has a Saving switch (Config tab). Off, the save commands and a new document are
+refused and tools that save on the side write nothing and say so; the draw then leaves the
+sheet open and unsaved. Read from the source, **(not run)** by us. Switching it is the
+operator's.
 
 ## 5. A library part
 

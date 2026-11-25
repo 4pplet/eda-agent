@@ -16,14 +16,22 @@ What is in flight and the next step. Updated before every compact; after one, st
   and pull requests, not reports. A pilot in another repo draws its sheet through upstream's own server
   (0.8.3, installed side by side): [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md).
   One Altium, one bridge, one session: no call to either bridge from here while that session works.
-- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457 (fixes), 459 (the 3D model check) and 460
-  (the pad-number check). None reviewed yet.
+- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457 (fixes), 459 (the 3D model check), 460
+  (the pad-number check) and 461 (the draw says that it saves and takes `reopen=False`). None reviewed yet.
+  459 and 460 were rebased the same day: upstream's main had moved.
+- **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
+  its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
+  document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
+  published `9b741b5`. Whether to move the trial to the new main is Stefan's.
+- **Corrected 2026-11-25:** "the draw's save ignores the Saving switch" was wrong. The switch refuses
+  `application.save_document` in the dispatcher, already in `9b741b5`; the pilot and I had read only the save
+  routine. So the fix needed no script change and went out as 461. Read from source, not run in Altium.
 - **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)) is rewritten for upstream's
   server from the pilot's report (2026-11-25): a draft that has done one sheet. The pilot tests it on its next
   sheet and reports what it lacked.
-- **Next:** write the fix for tools that save unasked and test it in Altium when the pilot is not using it;
-  the project entry for a missing file (below); then the two Altium-dependent defects (a library reading as
-  saved after a copy; a lookup returning a deleted symbol).
+- **Next:** the project entry for a missing file (below, needs Altium); check on upstream's new main whether
+  a lookup still returns a deleted symbol and whether the unsaved record covers a symbol copy (needs Altium);
+  then the drawing check (chamfer and body numbers) and the layer-role check after a create.
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
