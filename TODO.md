@@ -111,6 +111,8 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       outside the selection object, and every preview prints "granted (ticked N ago; ...)". Row W41.
 - [ ] **Limitations logged by the pilot (2026-11-25), for phase 3 (the library loop).** New write ops, so
       none is built during the phase 1 freeze; the two that cost the operator most are first.
+      Design for copy, delete, open, activate and close, with rows L1-L12:
+      [docs/PROPOSAL-2026-11-25-library-loop-copy-delete-documents.md](docs/PROPOSAL-2026-11-25-library-loop-copy-delete-documents.md).
   - [ ] Copy a symbol from another library or from a placed part into the project library (create-only, same
         tick). Upstream has `Lib_CopyComponent`; read it before writing ours. Also covers "no lines or arcs in
         a drawn symbol", since a copied symbol keeps its drawing.
