@@ -2822,6 +2822,134 @@ Begin
     Else Result := 'kind' + IntToStr(K);
 End;
 
+{ ---- Rule priorities (scripts 2026.11.25.3), ported from upstream's PCB.pas ---- }
+{ Rule.Priority is read only. Every rule carries a stored sort key:              }
+{ Rule.SetState_Priority writes it and Board.SortRulesByPriority re-orders all   }
+{ rules of all kinds by it. The sort does not renumber the keys and a rule whose }
+{ place has drifted goes back to its key, so the key of EVERY rule is written    }
+{ before the one sort, each from its own place. Measured upstream on AD 25.8.1,  }
+{ kept over save and reopen. NOT YET RUN ON AD 23: both names are reached only   }
+{ when a rule item carries `priority`, so a spec without it behaves as before.   }
+
+{ 0 when none was given, -1 when it is not a whole number from 1 to 9999. }
+Function SetupPrioAsked(V : String) : Integer;
+Var
+    I : Integer;
+    C : String;
+Begin
+    Result := 0;
+    If V = '' Then Exit;
+    Result := -1;
+    If Length(V) > 4 Then Exit;
+    For I := 1 To Length(V) Do
+    Begin
+        C := Copy(V, I, 1);
+        If (C < '0') Or (C > '9') Then Exit;
+    End;
+    Result := StrToInt(V);
+    If Result < 1 Then Result := -1;
+End;
+
+{ Every rule's name, kind and place, in walk order. }
+Procedure SetupPrioRecord(Board : IPCB_Board; Names, Kinds, Places : TStringList);
+Var
+    Iter : IPCB_BoardIterator;
+    Rule : IPCB_Rule;
+    K, P : Integer;
+Begin
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Rule := Iter.FirstPCBObject;
+        While Rule <> Nil Do
+        Begin
+            K := -1;
+            P := 0;
+            Try K := Rule.RuleKind; Except K := -1; End;
+            Try P := Rule.Priority; Except P := 0; End;
+            Names.Add(Rule.Name);
+            Kinds.Add(IntToStr(K));
+            Places.Add(IntToStr(P));
+            Rule := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+End;
+
+{ Rules of the same kind as the named one; 0 when the name is not recorded. }
+Function SetupPrioKindCount(Names, Kinds : TStringList; RuleName : String) : Integer;
+Var
+    I, M : Integer;
+Begin
+    Result := 0;
+    M := Names.IndexOf(RuleName);
+    If M < 0 Then Exit;
+    For I := 0 To Kinds.Count - 1 Do
+        If Kinds[I] = Kinds[M] Then Inc(Result);
+End;
+
+{ Moves the named rule to MoveTo (1 = first) within its kind in Wanted; the rules }
+{ of that kind it passes move one place. Returns '' or why it cannot be had.      }
+Function SetupPrioMove(Names, Kinds, Wanted : TStringList; MoveName : String; MoveTo : Integer) : String;
+Var
+    I, M, From, Count, P : Integer;
+Begin
+    Result := '';
+    M := Names.IndexOf(MoveName);
+    If M < 0 Then
+    Begin
+        Result := 'the rule was not among the rules read';
+        Exit;
+    End;
+    Count := SetupPrioKindCount(Names, Kinds, MoveName);
+    If MoveTo > Count Then
+    Begin
+        Result := 'priority ' + IntToStr(MoveTo) + ' is past the last place: this kind has '
+            + IntToStr(Count) + ' rule(s)';
+        Exit;
+    End;
+    From := StrToInt(Wanted[M]);
+    For I := 0 To Wanted.Count - 1 Do
+    Begin
+        If (I <> M) And (Kinds[I] = Kinds[M]) Then
+        Begin
+            P := StrToInt(Wanted[I]);
+            If (From < MoveTo) And (P > From) And (P <= MoveTo) Then P := P - 1
+            Else If (From > MoveTo) And (P >= MoveTo) And (P < From) Then P := P + 1;
+            Wanted[I] := IntToStr(P);
+        End;
+    End;
+    Wanted[M] := IntToStr(MoveTo);
+End;
+
+{ The stored sort key of every recorded rule set to its wanted place, then one sort. }
+Procedure SetupPrioWrite(Board : IPCB_Board; Names, Wanted : TStringList);
+Var
+    Iter : IPCB_BoardIterator;
+    Rule : IPCB_Rule;
+    Idx : Integer;
+Begin
+    Iter := Board.BoardIterator_Create;
+    Try
+        Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+        Iter.AddFilter_LayerSet(AllLayers);
+        Iter.AddFilter_Method(eProcessAll);
+        Rule := Iter.FirstPCBObject;
+        While Rule <> Nil Do
+        Begin
+            Idx := Names.IndexOf(Rule.Name);
+            If Idx >= 0 Then Rule.SetState_Priority(StrToInt(Wanted[Idx]));
+            Rule := Iter.NextPCBObject;
+        End;
+    Finally
+        Board.BoardIterator_Destroy(Iter);
+    End;
+    Board.SortRulesByPriority;
+End;
+
 { Write a rule's values from the fields; the rule is already of the right kind.  }
 { Each kind takes its typed view (constraint setters live on the subtype; a   }
 { base IPCB_Rule write faults with "Undeclared identifier", which Try cannot  }
@@ -3096,6 +3224,9 @@ Var
     Mode, ItemsStr, BatchHash, Rest, OpStr, Problems, Binding, Blank, ItemsJson : String;
     PcbPath, ErrCode, ErrMsg, State, Kind, Name, Fields, Old, Problem, Lyr, Members, Net : String;
     IKind, IName, IFields, IOld, IState, IStatus, IBack, IPrio : TStringList;
+    PNames, PKinds, PPlaces, PWanted : TStringList;
+    PJ, PAsk : Integer;
+    PrioAsked : Boolean;
     J, Count, WouldChange, Unchanged, Refused, Done, NotDone : Integer;
     Apply, PcbModified, Partial, Touched, Ok, Exists : Boolean;
     Board : IPCB_Board;
@@ -3271,6 +3402,8 @@ Begin
             Begin
                 KindId := SetupRuleKindId(SetupField(Fields, 'kind'));
                 If KindId < 0 Then Problem := 'unknown rule kind'
+                Else If SetupPrioAsked(SetupField(Fields, 'priority')) < 0 Then
+                    Problem := 'priority is a whole number from 1 to 9999'
                 Else
                 Begin
                     Rule := SetupFindRule(Board, Name);
@@ -3513,6 +3646,59 @@ Begin
                 End;
             Finally
                 If Touched Then MarkDocDirtyByPath(PcbPath);
+            End;
+            { Priorities asked for, in one pass after every rule of the batch exists: }
+            { record every rule's place, move the asked ones in batch order, write    }
+            { every key, sort once, read back.                                         }
+            PrioAsked := False;
+            For J := 0 To IKind.Count - 1 Do
+                If (IKind[J] = 'rule') And (SetupField(IFields[J], 'priority') <> '')
+                    And ((IStatus[J] = 'created') Or (IStatus[J] = 'updated')) Then PrioAsked := True;
+            If PrioAsked Then
+            Begin
+                PNames := TStringList.Create;
+                PKinds := TStringList.Create;
+                PPlaces := TStringList.Create;
+                PWanted := TStringList.Create;
+                Try
+                    SetupPrioRecord(Board, PNames, PKinds, PPlaces);
+                    For PJ := 0 To PPlaces.Count - 1 Do PWanted.Add(PPlaces[PJ]);
+                    For J := 0 To IKind.Count - 1 Do
+                        If (IKind[J] = 'rule') And (SetupField(IFields[J], 'priority') <> '')
+                            And ((IStatus[J] = 'created') Or (IStatus[J] = 'updated')) Then
+                        Begin
+                            PAsk := SetupPrioAsked(SetupField(IFields[J], 'priority'));
+                            Problem := SetupPrioMove(PNames, PKinds, PWanted, IName[J], PAsk);
+                            If Problem <> '' Then
+                            Begin
+                                IStatus[J] := 'not_done: ' + Problem;
+                                Partial := True;
+                                Dec(Done);
+                                Inc(NotDone);
+                            End;
+                        End;
+                    SetupPrioWrite(Board, PNames, PWanted);
+                    For J := 0 To IKind.Count - 1 Do
+                        If IKind[J] = 'rule' Then
+                        Begin
+                            Rule := SetupFindRule(Board, IName[J]);
+                            If Rule <> Nil Then IPrio[J] := SetupRulePriority(Rule);
+                            PAsk := SetupPrioAsked(SetupField(IFields[J], 'priority'));
+                            If (PAsk > 0) And ((IStatus[J] = 'created') Or (IStatus[J] = 'updated'))
+                                And (IPrio[J] <> IntToStr(PAsk)) Then
+                            Begin
+                                IStatus[J] := 'not_done: priority ' + IntToStr(PAsk) + ' asked, the rule is at ' + IPrio[J];
+                                Partial := True;
+                                Dec(Done);
+                                Inc(NotDone);
+                            End;
+                        End;
+                Finally
+                    PNames.Free;
+                    PKinds.Free;
+                    PPlaces.Free;
+                    PWanted.Free;
+                End;
             End;
             For J := 0 To IKind.Count - 1 Do
                 If (IStatus[J] = 'would_create') Or (IStatus[J] = 'would_update') Then
