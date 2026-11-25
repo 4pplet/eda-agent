@@ -135,10 +135,12 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
 - **Fixes to send upstream** (Stefan, 2026-11-25: fix and open pull requests, not issue reports). Found in
   the trial on Altium 23.3.1 with upstream 0.8.3. Python-only ones first: they can be written and tested
   while the pilot has Altium.
-  - [ ] The `--toolset` / `--backend` flags restart the server, which drops a stdio connection on Windows.
+  - [x] The `--toolset` / `--backend` flags restart the server, which drops a stdio connection on Windows:
+        upstream pull request 455 (2026-11-25; unit tests, not run end to end with a client).
   - [ ] The server exits with code 0 and no message whatever ends its main loop.
-  - [ ] The symbol-against-pin-table check does not expand a range (`36-53`) or join the wrapped lines of one
-        table row, so a module's ground and no-connect pins are reported missing.
+  - [x] The symbol-against-pin-table check does not expand a range (`36-53`) or join the wrapped lines of one
+        table row, so a module's ground and no-connect pins are reported missing: upstream pull request 454
+        (2026-11-25; the datasheet page that was refused now reads 39 of 39 pins).
   - [ ] The template preview answers ok without a picture when the picture library is missing.
   - [ ] The version check compares the bundled script, not the script project Altium has open.
   - [ ] The IC symbol tool has no pin length, fill or border arguments (a created symbol does not match the
