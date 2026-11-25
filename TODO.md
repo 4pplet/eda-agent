@@ -83,9 +83,10 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       `librect` text `fill/border` (colour integers; empty = not filled, as before) and a fourth `libpin` text
       field (`n` hides the name, `d` the designator); each is read back before the primitive goes on the symbol.
       Options on a built op, not a new op. Row W40.
-- [ ] Their client half, when no session runs the clients: plan fields (`body_mil` with `fill`, pins with
-      `show_name` / `show_designator`), validation, tests through `SharedReader.send`, and `schlib_check.py`
-      comparing fill and visibility in the saved file.
+- [x] Their client half (2026-11-25, PLT-hw branch `next-build`, a separate checkout so the running clients are
+      untouched): `body_fill` with the two colours, `pin_labels` on the symbol, `show_name` /
+      `show_designator` per pin, validation and tests. A plan without the options gives the same items as before.
+- [ ] Still owed there: `schlib_check.py` comparing fill and visibility in the saved file.
 - [ ] To build it: merge the branch, bump the client pin in PLT-hw, let `create_shared_runtime.py` stamp the
       units before it hashes them, let `status` name a stale unit, accept the new fields in the validators.
       Only when no session is using the current runtime.
@@ -106,7 +107,7 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
         a drawn symbol", since a copied symbol keeps its drawing.
   - [ ] Remove a library symbol, limited to one this bridge session created and the library has not been saved
         with. Upstream has `Lib_DeleteComponent`. Today a rejected symbol costs a close and a restore from git.
-        Changes the create-only rule: Stefan decides.
+        Approved in this narrow form "for now" (Stefan, 2026-11-25). Built in the library phase, not before.
   - [ ] Lines, polylines and arcs in `libsymbol` (after the copy op; may not be needed then).
   - [ ] `libfootprint` refuses a repeated pad number, which an exposed pad split in several pads needs.
   - [ ] `docparam` cannot create a parameter that does not exist on a new sheet (`Title`).
