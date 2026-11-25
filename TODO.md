@@ -132,9 +132,21 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
       Usable. Snags recorded in the trial document; three to report upstream.
 - [ ] Decided (Stefan, 2026-11-25): continue with upstream and improve as snags are hit. The pilot's session
       continues its sheet through upstream (handoff note left), default settings, the agent does not save.
-- [ ] Report upstream: a copied symbol leaves the library reading as saved (Altium 23.3.1); after a delete
-      the lookup by name still returns the symbol; the `--toolset` flag drops a stdio connection on Windows;
-      the server exits silently with code 0.
+- **Fixes to send upstream** (Stefan, 2026-11-25: fix and open pull requests, not issue reports). Found in
+  the trial on Altium 23.3.1 with upstream 0.8.3. Python-only ones first: they can be written and tested
+  while the pilot has Altium.
+  - [ ] The `--toolset` / `--backend` flags restart the server, which drops a stdio connection on Windows.
+  - [ ] The server exits with code 0 and no message whatever ends its main loop.
+  - [ ] The symbol-against-pin-table check does not expand a range (`36-53`) or join the wrapped lines of one
+        table row, so a module's ground and no-connect pins are reported missing.
+  - [ ] The template preview answers ok without a picture when the picture library is missing.
+  - [ ] The version check compares the bundled script, not the script project Altium has open.
+  - [ ] The IC symbol tool has no pin length, fill or border arguments (a created symbol does not match the
+        library it goes into).
+  - [ ] Needs Altium (after the pilot): a library reads as saved after a symbol copy (their closed issue 251,
+        back on Altium 23); after a delete the lookup by name still returns the symbol.
+  - [ ] To raise, not a fix: the server's instructions tell the agent to drive menus and dialogs without
+        asking; the long "datasheet first" block in every reply.
 - [ ] The trial: one sheet through upstream as it is, compared with the restricted pilot:
       [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md). After the
       current pilot; one Altium, one bridge.
