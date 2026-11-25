@@ -9,7 +9,7 @@ the commands, the blind spots and the write workflow. A test keeps its runtime l
 in step with `ACTIVE-RUNTIME.txt`.
 
 > **2026-11-25:** source is at scripts `2026.11.25.1` (pin position fix, W27 failed on `2026.11.23.10`), runtime
-> `selected-edits-20261125a` built 2026-11-25 on the second workstation, not yet started in Altium. Order of work: [ROADMAP.md](../ROADMAP.md); open tasks: [TODO.md](../TODO.md); the
+> `selected-edits-20261125b` (scripts `2026.11.25.2`) built 2026-11-25 on the second workstation, not yet started in Altium; `selected-edits-20261125a` (scripts `2026.11.25.1`, used 2026-11-25: W27 and W39 passed on it) is the fallback. Order of work: [ROADMAP.md](../ROADMAP.md); open tasks: [TODO.md](../TODO.md); the
 > pre-2026-11-25 backlog: [TODO-history-2026-11-25.md](../TODO-history-2026-11-25.md).
 
 ## What is running (2026-11-17)

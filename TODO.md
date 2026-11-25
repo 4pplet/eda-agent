@@ -12,16 +12,17 @@ found.
 
 What is in flight and the next step. Updated before every compact; after one, start here.
 
-- **In flight (2026-11-25):** a pilot in another repo is drawing a schematic sheet through the bridge on runtime
-  `selected-edits-20261125a` (scripts `2026.11.25.1`). While it runs: no bridge calls from here, no version
-  bump on `main`, no edits to the client files it runs. New files are safe.
-- **Waiting for:** its pass / fail on the remaining rows and its report for the skill. First results in
-  2026-11-25: W27 and W39 passed.
-- **Ready, not built:** branch `next-build` here and in PLT-hw, scripts `2026.11.25.2`, both halves written
-  and tested offline: pad shape, region kind, per-unit stamps, a filled body and hidden pin labels on
-  `libsymbol`, a ten-minute limit on an unused grant tick with its age in the preview.
-- **Next:** tick the rows; fill the skill's `PILOT:` lines; wire the new fields and the stamps into the
-  generator, validators and `status`; build `2026.11.25.2`; the reload checks D1-D5; then phase 1.
+- **In flight (2026-11-25):** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built with Altium
+  closed: 25 files, integrity check passes, ten units stamped. **Not yet started in Altium.** Both
+  `next-build` branches are merged into `main`. `selected-edits-20261125a` stays as the fallback.
+- **In it, all unqualified:** pad shape, region kind, per-unit stamps, a filled body and hidden pin labels on
+  `libsymbol`, a ten-minute limit on an unused grant tick with its age in the preview, open and focused
+  documents by name in `status`.
+- **Next:** the operator opens the script project of the new runtime and starts the bridge; `status` first
+  (`script_version`, `script_units.ok`); rows W40, W41, W42 and the reload checks D1-D5; the pilot in the
+  other repo continues on this runtime and reports per row.
+- **Still waiting for** from that pilot: the remaining rows and its report for the skill (W27, W39 passed).
+- One client at a time: when the pilot session is running, no bridge calls from here.
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
 
 ## Done 2026-11-25 (phase 0)
@@ -95,10 +96,9 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       unstamped unit, the validators require pad `shape` and region `kind`, the client pin is `2026.11.25.2`.
       A trial runtime built from the two branches into a scratch folder: 25 files, ten units stamped, stamps
       match the files. Not loaded in Altium.
-- [ ] To build it for real: go given (Stefan, 2026-11-25): the pilot pauses, Altium is closed, both
-      `next-build` branches are merged, a new side-by-side runtime is built, Altium is restarted on it,
-      and rows W40, W41, W42 and D1-D5 are run. The pause note is with the pilot; both branches merge
-      cleanly (trial merge).
+- [x] Built 2026-11-25 (go: Stefan): the pilot paused, Altium closed, both branches merged, runtime
+      `selected-edits-20261125b` built side by side.
+- [ ] Run in Altium: `status` (version, units), rows W40, W41, W42, the reload checks D1-D5.
 
 ## Defects and questions found in the pilot
 
