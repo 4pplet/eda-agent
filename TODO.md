@@ -179,7 +179,8 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         sheet; the sheet-size tool does the same; creating a document also saves the project. Upstream has an
         operator switch that holds saves back, and the save these tools use does not ask it. The fix to send:
         that save honours the switch, the reopen becomes an option, the descriptions say what happens. It
-        touches the Altium script, so it is tested in Altium before it is sent. This is the one finding so far
+        touches the Altium script, so it is tested in Altium before it is sent. Stefan, 2026-11-25: fix it
+        and send a pull request. This is the one finding so far
         that goes against "the operator saves". Decided for the trial (Stefan, 2026-11-25): such a tool may
         be used on a new sheet, files committed first, the save said before the call.
   - [ ] Footprint link: refused with a sheet in front although its description says it brings the library
@@ -188,6 +189,12 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
   - [ ] Feature asked for (Stefan: "critical that it's correct"): a check that pad N sits where the datasheet's
         pin-layout figure puts pin N. Today nothing ties a pad's number to its position; a footprint numbered
         the wrong way round passes every check. The pilot did it by hand from the figure's labels (53 of 53).
+        **Built 2026-11-25**: tool `footprint_compare_pinout` on our fork, branch
+        `feat/pad-number-against-pin-layout`, 8 tests, 1415 of upstream's related tests pass. On the real
+        figure: 53 of 53 as built; a wrong view, eleven pins numbered the other way and a mirrored
+        footprint are each refused. The pull request could not be opened (GitHub answered with a server
+        error four times; its status page showed a minor outage): open it when GitHub is back, the text is
+        ready.
   - [ ] Feature: compare a built footprint with another footprint (another library, a KiCad file) pad by pad,
         holes and slots with their rotation included.
   - [ ] To raise, not a fix: the server's instructions tell the agent to drive menus and dialogs without
