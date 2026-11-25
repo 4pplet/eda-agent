@@ -155,8 +155,13 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         operator had to open the 3D view and look. Wanted: a picture of the footprint with its body from top,
         bottom and at an angle, and a check of the model's bottom faces against the pads and the courtyard.
         Upstream has a 3D render module and writes STEP with CadQuery; neither is installed in the trial
-        environment (CadQuery has a build for this Python). A feature, so it is agreed with the maintainer in
-        an issue first, as upstream's contribution rules ask.
+        environment. Stefan, 2026-11-25: build it and send a pull request. Feasibility measured the same day
+        with FreeCAD (CadQuery is blocked on this workstation by Windows Smart App Control): a module's STEP
+        model read in 7 s gives 61 flat faces on its underside, the same count as the footprint's 61 pads, in
+        four sizes. So the model's terminals can be matched to the pads, and that tells which way round it
+        sits. Plan: read the STEP's box and underside faces; place them with the body's rotation and offset;
+        match each face to a pad; try the four rotations and say which fits; draw pads, faces and body outline
+        from above. An offline tool taking the pads and the placement as arguments.
   - [ ] Custom footprint from a drawing (module with a printed body), four findings from one build: the layer
         check runs after the footprint was created and leaves the library marked modified and focus moved;
         the courtyard came from the lands only and missed the body's overhang; lands default to rounded
