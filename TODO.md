@@ -95,8 +95,10 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       unstamped unit, the validators require pad `shape` and region `kind`, the client pin is `2026.11.25.2`.
       A trial runtime built from the two branches into a scratch folder: 25 files, ten units stamped, stamps
       match the files. Not loaded in Altium.
-- [ ] To build it for real: merge both `next-build` branches, build a new side-by-side runtime with Altium
-      closed, run rows W40, W41 and D1-D5. Only when no session is using the current runtime.
+- [ ] To build it for real: go given (Stefan, 2026-11-25): the pilot pauses, Altium is closed, both
+      `next-build` branches are merged, a new side-by-side runtime is built, Altium is restarted on it,
+      and rows W40, W41, W42 and D1-D5 are run. The pause note is with the pilot; both branches merge
+      cleanly (trial merge).
 
 ## Defects and questions found in the pilot
 
@@ -121,7 +123,8 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
   - [ ] Open a project member document; make a named open document the active one (the earlier ask); close
         a document only when it is not modified. Three new ops that act on the editor, not on design data.
         The second touches the rule "never follow focused tabs" (it sets focus, it does not follow it); the
-        third must refuse a modified document. Stefan decides; library phase.
+        third must refuse a modified document. Approved for the library phase (Stefan, 2026-11-25); the
+        rule text in `AGENTS.md` has the line that setting focus is not following it.
   - [ ] Lines, polylines and arcs in `libsymbol` (after the copy op; may not be needed then).
   - [ ] `libfootprint` refuses a repeated pad number, which an exposed pad split in several pads needs.
   - [ ] `docparam` cannot create a parameter that does not exist on a new sheet (`Title`).

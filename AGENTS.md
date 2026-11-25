@@ -19,6 +19,11 @@ tool availability, a GUI label, or this project's future editing roadmap.
 Keep one Altium instance/bridge/client. The operator chooses an exact project via
 the dropdown and Use this project. Get fresh project_path/selection_token before
 scoped reads; never follow focused tabs or silently redirect stale requests.
+Setting focus is not following it: a checked op may open a member document of the
+selected project, make a named open one the active document, or close one that is
+not modified (Stefan, 2026-11-25; approved for the library phase, not built). Such
+an op never discards or saves, never answers a prompt, and the focused document
+still selects nothing.
 Shared mode reads the selected working project, not an automatically made copy.
 Identify original/copy and saved revision. Use disposable designs for native
 acceptance experiments. Named .1 profiles are separate legacy fallbacks with
