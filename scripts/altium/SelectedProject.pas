@@ -8344,6 +8344,31 @@ Begin
     End;
 End;
 
+{ UnitStamp_SelectedProject - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_SelectedProject(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;
+
+{ Every stamped unit's stamp as a JSON object. StatusForm.pas and Dispatcher.pas }
+{ come after this file in the project and are not asked.                        }
+Function SelectedUnitStampsJson(Dummy : Integer) : String;
+Begin
+    Result := '{"Main":"' + UnitStamp_Main(0)
+        + '","Utils":"' + UnitStamp_Utils(0)
+        + '","Application":"' + UnitStamp_Application(0)
+        + '","Project":"' + UnitStamp_Project(0)
+        + '","Library":"' + UnitStamp_Library(0)
+        + '","PCBGeneric":"' + UnitStamp_PCBGeneric(0)
+        + '","PCB":"' + UnitStamp_PCB(0)
+        + '","Generic":"' + UnitStamp_Generic(0)
+        + '","Audit":"' + UnitStamp_Audit(0)
+        + '","SelectedProject":"' + UnitStamp_SelectedProject(0) + '"}';
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -8363,15 +8388,18 @@ Begin
         If SELECTED_PLACE_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-edits-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}')
         Else If SELECTED_PARAM_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-paramedit-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}')
         Else
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}');
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}');
         Exit;
     End;
     If Command = 'selection.get_projects' Then

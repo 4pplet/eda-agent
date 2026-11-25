@@ -1810,3 +1810,12 @@ Begin
 End;
 
 { Dispatcher and entry points are in Dispatcher.pas (compiles last) }
+
+{ UnitStamp_Main - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_Main(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;

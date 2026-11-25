@@ -10370,3 +10370,12 @@ Begin
         Result := BuildErrorResponse(RequestId, 'UNKNOWN_ACTION', 'Unknown generic action: ' + Action);
     End;
 End;
+
+{ UnitStamp_Generic - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_Generic(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;

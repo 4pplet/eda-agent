@@ -13969,3 +13969,12 @@ Begin
         Result := BuildErrorResponse(RequestId, 'UNKNOWN_ACTION', 'Unknown PCB action: ' + Action);
     End;
 End;
+
+{ UnitStamp_PCB - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_PCB(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;
