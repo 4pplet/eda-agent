@@ -143,7 +143,7 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
       [docs/PROPOSAL-2026-11-25-library-loop-copy-delete-documents.md](docs/PROPOSAL-2026-11-25-library-loop-copy-delete-documents.md).
   - [ ] Copy a symbol from another library or from a placed part into the project library (create-only, same
         tick). Upstream has `Lib_CopyComponent`; read it before writing ours. Also covers "no lines or arcs in
-        a drawn symbol", since a copied symbol keeps its drawing.
+        a drawn symbol", since a copied symbol keeps its drawing. Approved (Stefan, 2026-11-25, directly).
   - [ ] Remove a library symbol, limited to one this bridge session created and the library has not been saved
         with. Upstream has `Lib_DeleteComponent`. Today a rejected symbol costs a close and a restore from git.
         Approved in this narrow form "for now" (Stefan, 2026-11-25). Built in the library phase, not before.
