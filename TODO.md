@@ -60,13 +60,23 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
 - [ ] Holes of a free region (today only their count), and the arc centres already present in polygon
       outlines drawn as arcs in the client.
 
+- [x] On branch `next-build` (scripts `2026.11.25.2`, not built, 2026-11-25): pad `shape` in the pads read, a
+      region's `kind` in the free-graphics read, and a per-unit stamp in ten script units reported by the ping as
+      `unit_stamps` (PLT-hw `script_stamps.py` is the client half).
+- [ ] To build it: merge the branch, bump the client pin in PLT-hw, let `create_shared_runtime.py` stamp the
+      units before it hashes them, let `status` name a stale unit, accept the new fields in the validators.
+      Only when no session is using the current runtime.
+
 ## Tasks kept out of this file
 
 This repository is public, so a task that names another repo is in `docs/handoffs/LOCAL-TODO.md`
 (git-ignored, on the machine). One line each here:
 
-- [ ] Audit of an agent guide for Altium work in another repo (asked 2026-11-25).
-- [ ] A skill for working in Altium through the bridge: written here after a pilot in another repo reports
+- [x] ~~Audit of an agent guide for Altium work in another repo~~ (2026-11-25: there is no such guide; the
+      guide meant is the skill below, which now carries the Altium and board-design practice).
+- [x] Skill draft written 2026-11-25: [skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md), with
+      `PILOT:` gaps. Not installed, not yet used for a job.
+- [ ] A skill for working in Altium through the bridge: finished here after a pilot in another repo reports
       what worked, generic, kept with the clients; that repo tests it on its next sheet (2026-11-25).
 
 ## Open defects
