@@ -12,17 +12,18 @@ found.
 
 What is in flight and the next step. Updated before every compact; after one, start here.
 
-- **In flight (2026-11-25):** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built with Altium
-  closed: 25 files, integrity check passes, ten units stamped. **Not yet started in Altium.** Both
-  `next-build` branches are merged into `main`. `selected-edits-20261125a` stays as the fallback.
-- **In it, all unqualified:** pad shape, region kind, per-unit stamps, a filled body and hidden pin labels on
-  `libsymbol`, a ten-minute limit on an unused grant tick with its age in the preview, open and focused
-  documents by name in `status`.
-- **Next:** the operator opens the script project of the new runtime and starts the bridge; `status` first
-  (`script_version`, `script_units.ok`); rows W40, W41, W42 and the reload checks D1-D5; the pilot in the
-  other repo continues on this runtime and reports per row.
-- **Still waiting for** from that pilot: the remaining rows and its report for the skill (W27, W39 passed).
-- One client at a time: when the pilot session is running, no bridge calls from here.
+- **Direction (Stefan, 2026-11-25):** be in line with upstream and contribute there. Upstream's own server
+  (0.8.3) is installed side by side and a pilot in another repo now draws its sheet through it
+  ([docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md)). One Altium, one
+  bridge, one session: no call to either bridge from here while that session works.
+- **Waiting for:** its snags as they come and its comparison table; then the decision how much of the restricted
+  layer is rebased, offered upstream or retired.
+- **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) is built and was used by the
+  pilot before the switch; rows W40-W42 as far as that session reported them. Branch `next-build` in both repos
+  holds `2026.11.25.3` (the `.Clear` fix, rule priorities), source only. No new work on it until the trial is
+  judged.
+- **Next from here:** four reports for upstream are drafted (local file, not posted: Stefan's go); the three
+  private board names in tracked documents and the private sibling's name are undecided (section below).
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
 
 ## Done 2026-11-25 (phase 0)
