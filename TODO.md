@@ -127,6 +127,13 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
 
 - [x] Upstream's server installed side by side for a trial (version 0.8.3, commit `9b741b5`; offline health
       check passes; nothing has talked to Altium). `AGENTS.md` has the limits of the trial.
+- [x] First session 2026-11-25: connected, reads without any focused window, a symbol copy and delete.
+      Usable. Snags recorded in the trial document; three to report upstream.
+- [ ] Decided (Stefan, 2026-11-25): continue with upstream and improve as snags are hit. The pilot's session
+      continues its sheet through upstream (handoff note left), default settings, the agent does not save.
+- [ ] Report upstream: a copied symbol leaves the library reading as saved (Altium 23.3.1); after a delete
+      the lookup by name still returns the symbol; the `--toolset` flag drops a stdio connection on Windows;
+      the server exits silently with code 0.
 - [ ] The trial: one sheet through upstream as it is, compared with the restricted pilot:
       [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md). After the
       current pilot; one Altium, one bridge.

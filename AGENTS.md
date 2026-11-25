@@ -23,8 +23,8 @@ upstream. The limits of the trial:
 
 - only on a copy of a project, or on files that are committed and pushed;
 - not while another session uses the restricted bridge: one Altium, one bridge;
-- upstream's operator settings set to refuse deleting and closing unless the
-  trial step is about them; saving stays the operator's;
+- upstream's operator settings stay at their defaults (Stefan, 2026-11-25);
+  the agent still does not save: saving stays the operator's;
 - its installation never replaces or edits a restricted runtime;
 - every result is recorded as an upstream result, with upstream's commit.
 
