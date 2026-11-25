@@ -24,7 +24,11 @@ upstream. The limits of the trial:
 - only on a copy of a project, or on files that are committed and pushed;
 - not while another session uses the restricted bridge: one Altium, one bridge;
 - upstream's operator settings stay at their defaults (Stefan, 2026-11-25);
-  the agent still does not save: saving stays the operator's;
+  the agent still does not save: saving stays the operator's. One exception
+  (Stefan, 2026-11-25): a tool that saves as part of its work (the template
+  draw, a new document, the sheet size) may be used on a NEW sheet, with the
+  files committed first and the save said before the call. Not on a sheet that
+  already holds work, and never a save the agent chooses itself;
 - its installation never replaces or edits a restricted runtime;
 - every result is recorded as an upstream result, with upstream's commit.
 

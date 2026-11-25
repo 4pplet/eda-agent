@@ -180,7 +180,8 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
         operator switch that holds saves back, and the save these tools use does not ask it. The fix to send:
         that save honours the switch, the reopen becomes an option, the descriptions say what happens. It
         touches the Altium script, so it is tested in Altium before it is sent. This is the one finding so far
-        that goes against "the operator saves".
+        that goes against "the operator saves". Decided for the trial (Stefan, 2026-11-25): such a tool may
+        be used on a new sheet, files committed first, the save said before the call.
   - [ ] Footprint link: refused with a sheet in front although its description says it brings the library
         forward; several footprints linked to one symbol all read as the current one and no tool sets it; a
         description write on a library symbol through the generic modify reports a match and changes nothing.
