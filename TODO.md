@@ -8,7 +8,20 @@ reasoning, not a task list. An item moves here only when it is still open.
 Tick an item with the date and where the proof is. Add a defect the day it is
 found.
 
-## Now (phase 0)
+## Now
+
+What is in flight and the next step. Updated before every compact; after one, start here.
+
+- **In flight (2026-11-25):** a pilot in another repo is drawing a schematic sheet through the bridge on runtime
+  `selected-edits-20261125a` (scripts `2026.11.25.1`). While it runs: no bridge calls from here, no version
+  bump on `main`, no edits to the client files it runs. New files are safe.
+- **Waiting for:** its pass / fail per qualification row and its report for the skill.
+- **Ready, not built:** branch `next-build`, scripts `2026.11.25.2` (pad shape, region kind, per-unit stamps).
+- **Next:** tick the rows; fill the skill's `PILOT:` lines; wire the new fields and the stamps into the
+  generator, validators and `status`; build `2026.11.25.2`; the reload checks D1-D5; then phase 1.
+- Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
+
+## Done 2026-11-25 (phase 0)
 
 - [x] `libsymbol` pins at the origin: read-modify-write in `SchEditLibPin`, and
       the pin's position read back before it goes on the symbol (2026-11-25,

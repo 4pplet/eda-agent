@@ -23,6 +23,25 @@ files say "the sending repo" or "a USB-C connector", not the name.
    `docs/handoffs/README.md` (local, not in git; absent on a fresh clone).
 5. Before any bridge call: `../PLT-hw/tools/eda-agent/BRIDGE.md`.
 
+## Before a compact, and after one
+
+The same routine as the other repos of this owner. A summary is only as good as the records it points to.
+
+1. **Work in flight** that exists only in the conversation goes into a file first: a decision into
+   [TODO.md](TODO.md) or [ROADMAP.md](ROADMAP.md), a result into its proposal, anything that names another
+   repo into `docs/handoffs/LOCAL-TODO.md`.
+2. **Git:** every touched repo clean and level with its origin (`git diff --cached --stat`,
+   `git log origin/main..HEAD`). Side branches and worktrees are listed in the local file, pushed or not.
+3. **Entry points:** [TODO.md](TODO.md) section Now says what is in flight and the next step;
+   docs/CURRENT-STATE.md names the runtime in use. Fix a stale status line when you see one.
+4. **Memory:** the day's corrections as feedback memories. This repository is public, so memory is NOT
+   backed up into it (the other repos do that; they are private).
+5. **The handoff block** for the owner to paste back: plain text in one text fence, no markdown inside, first
+   line exactly `we just compacted.`, then READ FIRST, RULES, REPOS, WHERE THINGS ARE, DONE THIS SESSION,
+   DECISIONS, PENDING WITH STEFAN, PLAN FOR NEXT SESSION. Short: the records hold the detail.
+
+After a compact: read the block's READ FIRST list, run the handoff check, start at TODO.md section Now.
+
 ## Where each kind of truth lives
 
 | What | Where |
