@@ -13,6 +13,26 @@ Var
     { Checked placement edits: the same rules, a grant of their own. }
     PlaceEditGrant : Boolean;
     PlaceEditGrantGeneration : Integer;
+    { When each grant was ticked (GetTickCount). A tick that no apply used     }
+    { ends after GrantLimitMs (scripts 2026.11.25.2): on 2026-11-25 a tick     }
+    { from the morning was still standing hours later.                         }
+    ParamEditGrantTick : Integer;
+    PlaceEditGrantTick : Integer;
+
+Function GrantLimitMs(Dummy : Integer) : Integer;
+Begin
+    Result := 600000;
+End;
+
+{ True while a tick taken at Tick is younger than the limit. A negative age  }
+{ (the counter wrapped) counts as expired.                                   }
+Function GrantTickFresh(Tick : Integer) : Boolean;
+Var
+    Age : Integer;
+Begin
+    Age := GetTickCount - Tick;
+    Result := (Age >= 0) And (Age <= GrantLimitMs(0));
+End;
 
 Procedure ClearSelectedProject(Dummy : Integer);
 Begin
@@ -32,6 +52,8 @@ Begin
     SelectedBusy := False;
     ParamEditGrantGeneration := -1;
     PlaceEditGrantGeneration := -1;
+    ParamEditGrantTick := 0;
+    PlaceEditGrantTick := 0;
     SelectedSession := FormatDateTime('yyyymmddhhnnsszzz', Now)
         + '-' + IntToStr(GetTickCount);
     ClearSelectedProject(0);
@@ -68,6 +90,7 @@ End;
 
 Function ParamEditGrantActive(Dummy : Integer) : Boolean;
 Begin
+    If ParamEditGrant And (Not GrantTickFresh(ParamEditGrantTick)) Then ParamEditGrant := False;
     Result := SELECTED_PARAM_EDITS And ParamEditGrant
         And (ParamEditGrantGeneration = SelectedGeneration)
         And (SelectedPath <> '');
@@ -86,6 +109,7 @@ Begin
         Exit;
     End;
     ParamEditGrant := Not ParamEditGrant;
+    ParamEditGrantTick := GetTickCount;
     Inc(SelectedGeneration);
     ParamEditGrantGeneration := SelectedGeneration;
     Result := True;
@@ -93,6 +117,7 @@ End;
 
 Function PlaceEditGrantActive(Dummy : Integer) : Boolean;
 Begin
+    If PlaceEditGrant And (Not GrantTickFresh(PlaceEditGrantTick)) Then PlaceEditGrant := False;
     Result := SELECTED_PLACE_EDITS And PlaceEditGrant
         And (PlaceEditGrantGeneration = SelectedGeneration)
         And (SelectedPath <> '');
@@ -111,9 +136,27 @@ Begin
         Exit;
     End;
     PlaceEditGrant := Not PlaceEditGrant;
+    PlaceEditGrantTick := GetTickCount;
     Inc(SelectedGeneration);
     PlaceEditGrantGeneration := SelectedGeneration;
     Result := True;
+End;
+
+{ Seconds since each standing grant was ticked, -1 when it is not granted, and }
+{ the limit (scripts 2026.11.25.2). In the ping, not in the selection object:   }
+{ the clients compare that object for equality between calls.                   }
+Function SelectedGrantAgesJson(Dummy : Integer) : String;
+Var
+    A, B : Integer;
+Begin
+    A := -1;
+    B := -1;
+    If ParamEditGrantActive(0) Then A := (GetTickCount - ParamEditGrantTick) Div 1000;
+    If PlaceEditGrantActive(0) Then B := (GetTickCount - PlaceEditGrantTick) Div 1000;
+    If A < -1 Then A := -1;
+    If B < -1 Then B := -1;
+    Result := '{"param_edits":' + IntToStr(A) + ',"place_edits":' + IntToStr(B)
+        + ',"limit_s":' + IntToStr(GrantLimitMs(0) Div 1000) + '}';
 End;
 
 Function UseSelectedProject(Path : String) : Boolean;
@@ -224,11 +267,24 @@ Var
     I, DirtyCount, OpenCount : Integer;
     D : IDocument;
     S : IServerDocument;
-    Path, DirtyList : String;
+    Path, DirtyList, OpenList, FocusPath, ActivePath : String;
+    View : IServerDocumentView;
 Begin
     DirtyCount := 0;
     OpenCount := 0;
     DirtyList := '';
+    OpenList := '';
+    ActivePath := '';
+    { The focused document, as information only (scripts 2026.11.25.2): it is    }
+    { reported when it is a member of the selected project and never selects     }
+    { anything. Upstream reads the view the same way in Main.pas.                }
+    FocusPath := '';
+    Try
+        View := Client.GetCurrentView;
+        If View <> Nil Then FocusPath := View.OwnerDocument.FileName;
+    Except
+        FocusPath := '';
+    End;
     For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
     Begin
         D := Project.DM_LogicalDocuments(I);
@@ -238,7 +294,10 @@ Begin
         S := Client.GetDocumentByPath(Path);
         If S <> Nil Then
         Begin
+            If OpenCount > 0 Then OpenList := OpenList + ',';
+            OpenList := OpenList + '"' + EscapeJsonString(Path) + '"';
             Inc(OpenCount);
+            If (FocusPath <> '') And (UpperCase(FocusPath) = UpperCase(Path)) Then ActivePath := Path;
             If S.Modified Then
             Begin
                 If DirtyCount > 0 Then DirtyList := DirtyList + ',';
@@ -250,7 +309,9 @@ Begin
     Result := '{"project":"' + EscapeJsonString(SelectedPath)
         + '","dirty_doc_count":' + IntToStr(DirtyCount)
         + ',"open_doc_count":' + IntToStr(OpenCount)
-        + ',"dirty_docs":[' + DirtyList + ']}';
+        + ',"dirty_docs":[' + DirtyList + ']'
+        + ',"open_docs":[' + OpenList + ']'
+        + ',"active_doc":"' + EscapeJsonString(ActivePath) + '"}';
 End;
 
 Function SelectedDocumentsJSON(Project : IProject) : String;
@@ -7296,11 +7357,14 @@ Begin
 End;
 
 { Upstream Lib_AddPin. }
-Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinName, EType : String;
+{ Flags (scripts 2026.11.25.2): 'n' hides the pin's name, 'd' its designator;   }
+{ both are read back before the pin goes on the symbol.                        }
+Function SchEditLibPin(SchLib : ISch_Lib; Component : ISch_Component; Des, PinName, EType, Flags : String;
     X, Y, Len, Orient : Integer) : Boolean;
 Var
     Pin : ISch_Pin;
     Loc : TLocation;
+    WantName, WantDes : Boolean;
 Begin
     Result := False;
     Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
@@ -7320,6 +7384,11 @@ Begin
     Pin.PinLength := Len;
     Pin.Orientation := Orient;
     Pin.IsHidden := False;
+    WantName := Pos('n', Flags) = 0;
+    WantDes := Pos('d', Flags) = 0;
+    Pin.ShowName := WantName;
+    Pin.ShowDesignator := WantDes;
+    If (Pin.ShowName <> WantName) Or (Pin.ShowDesignator <> WantDes) Then Exit;
     Pin.Electrical := StrToPinElectrical(EType);
     SchServer.ProcessControl.PreProcess(SchLib, '');
     SetOwnerPart(Pin, Component);
@@ -7330,8 +7399,11 @@ Begin
     Result := True;
 End;
 
-{ Upstream Lib_AddSymbolRectangle, not filled. }
-Function SchEditLibRect(SchLib : ISch_Lib; Component : ISch_Component; X1, Y1, X2, Y2 : Integer) : Boolean;
+{ Upstream Lib_AddSymbolRectangle. Not filled when FillColor is negative;      }
+{ otherwise solid in FillColor with the border in BorderColor (scripts          }
+{ 2026.11.25.2), each read back before the rectangle goes on the symbol.        }
+Function SchEditLibRect(SchLib : ISch_Lib; Component : ISch_Component; X1, Y1, X2, Y2,
+    FillColor, BorderColor : Integer) : Boolean;
 Var
     Rect : ISch_Rectangle;
     Loc : TLocation;
@@ -7348,6 +7420,14 @@ Begin
     Loc.Y := Y2;
     Rect.Corner := Loc;
     Rect.IsSolid := False;
+    If FillColor >= 0 Then
+    Begin
+        Rect.AreaColor := FillColor;
+        Rect.IsSolid := True;
+        If BorderColor >= 0 Then Rect.Color := BorderColor;
+        If (Not Rect.IsSolid) Or (Rect.AreaColor <> FillColor) Then Exit;
+        If (BorderColor >= 0) And (Rect.Color <> BorderColor) Then Exit;
+    End;
     SchServer.ProcessControl.PreProcess(SchLib, '');
     SetOwnerPart(Rect, Component);
     Component.AddSchObject(Rect);
@@ -8013,21 +8093,24 @@ Begin
                     Begin
                         Hits := SchEditLibCount(LibComp, ePin);
                         If SchEditLibPin(SchLib, LibComp, SchEditSplit(S3, 0), SchEditSplit(S3, 1), SchEditSplit(S3, 2),
-                            X1, Y1, X2, N) Then
+                            SchEditSplit(S3, 3), X1, Y1, X2, N) Then
                         Begin
                             If SchEditLibCount(LibComp, ePin) = Hits + 1 Then Back := 'ok'
                             Else Back := 'the pin is not counted on the symbol';
                         End
-                        Else Back := 'the pin was not created at its position';
+                        Else Back := 'the pin was not created at its position or with its visibility';
                     End
                     Else If Op = 'librect' Then
                     Begin
                         Hits := SchEditLibCount(LibComp, eRectangle);
-                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2) Then
+                        { text "fill/border" as colour integers; empty = not filled }
+                        If SchEditLibRect(SchLib, LibComp, X1, Y1, X2, Y2,
+                            StrToIntDef(SchEditSplit(S3, 0), -1), StrToIntDef(SchEditSplit(S3, 1), -1)) Then
                         Begin
                             If SchEditLibCount(LibComp, eRectangle) = Hits + 1 Then Back := 'ok'
                             Else Back := 'the rectangle is not counted on the symbol';
-                        End;
+                        End
+                        Else Back := 'the rectangle was not created with its fill';
                     End
                     Else
                     Begin
@@ -8344,6 +8427,31 @@ Begin
     End;
 End;
 
+{ UnitStamp_SelectedProject - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_SelectedProject(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;
+
+{ Every stamped unit's stamp as a JSON object. StatusForm.pas and Dispatcher.pas }
+{ come after this file in the project and are not asked.                        }
+Function SelectedUnitStampsJson(Dummy : Integer) : String;
+Begin
+    Result := '{"Main":"' + UnitStamp_Main(0)
+        + '","Utils":"' + UnitStamp_Utils(0)
+        + '","Application":"' + UnitStamp_Application(0)
+        + '","Project":"' + UnitStamp_Project(0)
+        + '","Library":"' + UnitStamp_Library(0)
+        + '","PCBGeneric":"' + UnitStamp_PCBGeneric(0)
+        + '","PCB":"' + UnitStamp_PCB(0)
+        + '","Generic":"' + UnitStamp_Generic(0)
+        + '","Audit":"' + UnitStamp_Audit(0)
+        + '","SelectedProject":"' + UnitStamp_SelectedProject(0) + '"}';
+End;
+
 Function ProcessSelectedCommand(Command, Params, RequestId : String) : String;
 Var
     P : IProject;
@@ -8363,15 +8471,21 @@ Begin
         If SELECTED_PLACE_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-edits-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}')
         Else If SELECTED_PARAM_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-paramedit-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}')
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}')
         Else
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
-                + ',"selection_api":1,"selection":' + SelectionJSON(0) + '}');
+                + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
+                + ',"selection":' + SelectionJSON(0) + '}');
         Exit;
     End;
     If Command = 'selection.get_projects' Then

@@ -13,7 +13,7 @@ Const
     // returns, mismatch means Altium is running a stale compiled script
     // (DelphiScript caches compiled units until the script project is
     // reopened or Altium is restarted).
-    SCRIPT_VERSION = '2026.11.25.1';
+    SCRIPT_VERSION = '2026.11.25.2';
     { Shared deployment enables this; legacy named profiles keep it False. }
     SELECTED_PROJECT_READ_ONLY = False;
     { Checked parameter edits (PROPOSAL-2026-09-28-metadata-write-increment):
@@ -1810,3 +1810,12 @@ Begin
 End;
 
 { Dispatcher and entry points are in Dispatcher.pas (compiles last) }
+
+{ UnitStamp_Main - which build of this file Altium compiled. 'dev' in the      }
+{ repository; the runtime generator writes a hash of the file in its place, }
+{ and the selected-mode ping reports every unit's stamp, so a unit that     }
+{ Altium did not recompile is named instead of passing as current.          }
+Function UnitStamp_Main(Dummy : Integer) : String;
+Begin
+    Result := 'dev';
+End;

@@ -611,12 +611,12 @@ Begin
     Try
         If ParamGrantShown And (Not Granted) Then
             mmo_Log.Lines.Insert(0, 'Parameter edit grant ended (a batch was applied, '
-                + 'or the selection changed). Tick again for the next batch.');
+                + 'the selection changed, or 10 minutes passed). Tick again for the next batch.');
         ParamGrantShown := Granted;
         If Granted Then
         Begin
             chk_AllowParams.Caption := '  ' + FilledDot(0)
-                + '  Parameter edits GRANTED for ONE batch - click to revoke';
+                + '  Parameter edits GRANTED for ONE batch, 10 min - click to revoke';
             chk_AllowParams.Color := $00303848;
             If SelectedPath <> '' Then
             Begin
@@ -649,12 +649,12 @@ Begin
     Try
         If PlaceGrantShown And (Not Granted) Then
             mmo_Log.Lines.Insert(0, 'Placement edit grant ended (a batch was applied, '
-                + 'or the selection changed). Tick again for the next batch.');
+                + 'the selection changed, or 10 minutes passed). Tick again for the next batch.');
         PlaceGrantShown := Granted;
         If Granted Then
         Begin
             chk_AllowPlace.Caption := '  ' + FilledDot(0)
-                + '  Board edits GRANTED for ONE batch - click to revoke';
+                + '  Board edits GRANTED for ONE batch, 10 min - click to revoke';
             chk_AllowPlace.Color := $00303848;
             If SelectedPath <> '' Then
             Begin
