@@ -142,6 +142,23 @@ Begin
     Result := True;
 End;
 
+{ Seconds since each standing grant was ticked, -1 when it is not granted, and }
+{ the limit (scripts 2026.11.25.2). In the ping, not in the selection object:   }
+{ the clients compare that object for equality between calls.                   }
+Function SelectedGrantAgesJson(Dummy : Integer) : String;
+Var
+    A, B : Integer;
+Begin
+    A := -1;
+    B := -1;
+    If ParamEditGrantActive(0) Then A := (GetTickCount - ParamEditGrantTick) Div 1000;
+    If PlaceEditGrantActive(0) Then B := (GetTickCount - PlaceEditGrantTick) Div 1000;
+    If A < -1 Then A := -1;
+    If B < -1 Then B := -1;
+    Result := '{"param_edits":' + IntToStr(A) + ',"place_edits":' + IntToStr(B)
+        + ',"limit_s":' + IntToStr(GrantLimitMs(0) Div 1000) + '}';
+End;
+
 Function UseSelectedProject(Path : String) : Boolean;
 Var
     Candidate : IProject;
@@ -8437,16 +8454,19 @@ Begin
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-edits-v1"'
                 + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
                 + ',"selection":' + SelectionJSON(0) + '}')
         Else If SELECTED_PARAM_EDITS Then
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-paramedit-v1"'
                 + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
                 + ',"selection":' + SelectionJSON(0) + '}')
         Else
             Result := BuildSuccessResponse(RequestId, '{"pong":true,"script_version":"'
                 + SCRIPT_VERSION + '","plt_profile":"eda-selected-readonly-v1"'
                 + ',"selection_api":1,"unit_stamps":' + SelectedUnitStampsJson(0)
+                + ',"grant_age_s":' + SelectedGrantAgesJson(0)
                 + ',"selection":' + SelectionJSON(0) + '}');
         Exit;
     End;
