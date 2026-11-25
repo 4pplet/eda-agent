@@ -17,12 +17,14 @@ found.
 - [x] Lint rule `record-property-field-write`, with a test.
 - [x] Brackets in footprint names (`0402[1005]`): client check in PLT-hw
       `shared_server.py`, with a test.
-- [ ] **Stefan: close Altium**, then build the runtime (`selected-edits-20261125a`)
-      and start it.
+- [x] Runtime `selected-edits-20261125a` built 2026-11-25 with Altium closed (24 files,
+      integrity check and tool list pass; nothing run in Altium).
+- [ ] **Stefan: start Altium from the new runtime's script project.**
 - [ ] Re-run W27 on it: pins at the planned positions after save, close, reopen.
-- [ ] Reply note to the sending repo with the scripts version and runtime name
-      ([handoffs](docs/handoffs/README.md)).
-- [ ] Commit this repo and PLT-hw together (the version pin is in both).
+- [x] Reply note left in the sending repo (2026-11-25).
+- [x] Committed: this repo `e9c2af2`, PLT-hw `75556c7` (2026-11-25, not pushed).
+- [x] The `Lib_AddPin` fix and lint rule sent upstream: salitronic/eda-agent pull request 452.
+- [ ] Review upstream's commits since 2026-11-17 for fixes to port (ROADMAP, Upstream, point 2).
 
 ## Next (phase 1: qualify, no new ops)
 

@@ -15,8 +15,8 @@ The full-access mode (phase 2b) has none of those and is for scratch designs.
 
 ## Where we are
 
-Phase 0 is done in source (scripts `2026.11.25.1`), waiting for a runtime build
-and a re-run. Phase 1 is next.
+Phase 0 is built (scripts `2026.11.25.1`, runtime `selected-edits-20261125a`),
+waiting for the re-run in Altium. Phase 1 is next.
 
 ## Phases
 
@@ -42,8 +42,7 @@ files), so upstream is not merged; it is used in three ways:
 
 1. **Fixes go up.** Small fixes as pull requests (the maintainer cherry-picks
    them; `SCRIPT_VERSION` is left alone). First: the pin position in
-   `Lib_AddPin` with its lint rule, drafted in the worktree
-   `../eda-agent-upstream-pr`.
+   `Lib_AddPin` with its lint rule, pull request 452 (2026-11-25).
 2. **Fixes come down by hand.** Before each build, review upstream's commits
    since the last review (PLT-hw `UPSTREAM-REVIEW-*.md`) for the APIs our code
    uses, and port what applies. Last review: 2026-11-17.
