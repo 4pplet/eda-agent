@@ -1,6 +1,6 @@
 # Trial 2026-11-25: one sheet through upstream as it is
 
-**Status: installed, not started.** Decided by Stefan, 2026-11-25. Limits of the
+**Status: first session run 2026-11-25 (reads, one copy and one delete of a library symbol). The sheet itself is not drawn yet.** Decided by Stefan, 2026-11-25. Limits of the
 trial: [AGENTS.md](../AGENTS.md), "Upstream trial".
 
 ## The question
@@ -76,6 +76,49 @@ detect that the design changed since the dry run.
   layer.
 - Upstream does something not acceptable on a real board: that names the part
   of our layer to keep, rebase and offer upstream.
+
+## First session, 2026-11-25 (upstream `9b741b5`, Altium 23.3.1, a project whose files were committed and pushed)
+
+Connection:
+
+- Upstream refuses a server started by a script in an AI session's shell; the tools are reached only through
+  the session's own connection. A deliberate guard, and a good one.
+- The `--toolset` flag restarts the server once, which drops a stdio connection on Windows: the client waited
+  out its whole limit twice. The documented way, the environment variable, works. To report upstream.
+- The server exits with code 0 and no message when its main loop ends, so a crash at start would look the
+  same. To report upstream.
+- The script loop in Altium stops after sitting idle and is started again by hand, as ours is.
+
+Reads (no window had to be focused):
+
+- Open projects, every document of every open project with loaded and modified flags, the active document,
+  the documents of one project by its path, the symbols of a library by its path. Three projects were open;
+  each read named the project or file it was asked for.
+- Its ping reports per-unit stamps and whether saving is allowed (it was).
+- Every reply that touches a part carries a long block of instructions for the agent ("datasheet first").
+  It is text inside a tool result; it costs context on every call and is treated here as data.
+
+Writes (library only, by explicit path, nothing saved):
+
+| Step | Reply | Checked |
+|---|---|---|
+| Focus the library by path | done, and it says the focused document moved | active document read back |
+| Copy a two-pin symbol to a new name in the same library | success, "verified", 2 pins, "in memory only" | the copy read back with its pins, parameters, hidden pin labels and footprint link; no file changed on disk |
+| Delete the copy | success, "in memory only" | **two reads disagree**: the library's list no longer has the name (47 symbols, as before), but a read of the symbol by name still returns it in full |
+
+Findings:
+
+1. **A read that disagrees with another read.** After the delete, the list says gone and the lookup by name
+   says present. Which is true needs a look in Altium's library panel. Until explained, a lookup by name is
+   not a read-back for a delete.
+2. **The modified flag stayed false** on the library through a copy and a delete. Here the net change is
+   nothing, so this proves little; upstream's own notes say a copy may leave the library reading as saved.
+   To test: copy only, then read the flag.
+3. A copy keeps footprint links and parameters (an open question in our own proposal: answered yes).
+4. Nothing was saved, closed or changed without being asked. Saving is available to the agent
+   (`app_save_all`, `app_save_document`) and was not used.
+5. Not yet looked at: the operator's permission settings (edits, deleting, closing), a dry run, what a write
+   does when another project's document is in front, and the sheet itself.
 
 ## Removing it
 
