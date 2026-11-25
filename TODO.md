@@ -15,8 +15,10 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **In flight (2026-11-25):** a pilot in another repo is drawing a schematic sheet through the bridge on runtime
   `selected-edits-20261125a` (scripts `2026.11.25.1`). While it runs: no bridge calls from here, no version
   bump on `main`, no edits to the client files it runs. New files are safe.
-- **Waiting for:** its pass / fail per qualification row and its report for the skill.
-- **Ready, not built:** branch `next-build`, scripts `2026.11.25.2` (pad shape, region kind, per-unit stamps).
+- **Waiting for:** its pass / fail on the remaining rows and its report for the skill. First results in
+  2026-11-25: W27 and W39 passed.
+- **Ready, not built:** branch `next-build`, scripts `2026.11.25.2` (pad shape, region kind, per-unit stamps,
+  and the native half of two `libsymbol` options: filled body, hidden pin labels).
 - **Next:** tick the rows; fill the skill's `PILOT:` lines; wire the new fields and the stamps into the
   generator, validators and `status`; build `2026.11.25.2`; the reload checks D1-D5; then phase 1.
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
@@ -76,9 +78,28 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
 - [x] On branch `next-build` (scripts `2026.11.25.2`, not built, 2026-11-25): pad `shape` in the pads read, a
       region's `kind` in the free-graphics read, and a per-unit stamp in ten script units reported by the ping as
       `unit_stamps` (PLT-hw `script_stamps.py` is the client half).
+- [x] On the same branch (2026-11-25, native half only): two options on the existing `libsymbol` writer, asked
+      for by the pilot because its library's symbols have filled bodies and hide the labels of two-pin parts.
+      `librect` text `fill/border` (colour integers; empty = not filled, as before) and a fourth `libpin` text
+      field (`n` hides the name, `d` the designator); each is read back before the primitive goes on the symbol.
+      Options on a built op, not a new op. Row W40.
+- [ ] Their client half, when no session runs the clients: plan fields (`body_mil` with `fill`, pins with
+      `show_name` / `show_designator`), validation, tests through `SharedReader.send`, and `schlib_check.py`
+      comparing fill and visibility in the saved file.
 - [ ] To build it: merge the branch, bump the client pin in PLT-hw, let `create_shared_runtime.py` stamp the
       units before it hashes them, let `status` name a stale unit, accept the new fields in the validators.
       Only when no session is using the current runtime.
+
+## Defects and questions found in the pilot
+
+- [x] W27 (pin positions) and W39 (bracketed footprint name) passed in Altium on `2026.11.25.1` (2026-11-25;
+      PLT-hw `QUALIFY-TODO.md`).
+- [ ] **A tick that no apply used has no end.** A tick made in the morning was still standing hours later,
+      so a preview read "granted" before the operator ticked for the batch. Read in the source 2026-11-25: an
+      apply that touched anything clears the grant, and so does a changed selection; a tick followed by no
+      apply, or by an apply that was refused before touching anything, stands until the bridge stops. Options:
+      an expiry (minutes), clearing on any apply attempt, or the preview printing how old the tick is. A safety
+      rule: Stefan decides. W31 must start from an untick meanwhile.
 
 ## Tasks kept out of this file
 
