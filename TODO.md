@@ -125,6 +125,9 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
         The second touches the rule "never follow focused tabs" (it sets focus, it does not follow it); the
         third must refuse a modified document. Approved for the library phase (Stefan, 2026-11-25); the
         rule text in `AGENTS.md` has the line that setting focus is not following it.
+  - [ ] `libsymbol` creates single-unit symbols only: a unit number per pin and one body per unit would
+        cover multi-part symbols. Read in the source, not hit on a run; no sheet needs it today. Related:
+        pin edits refuse a pin number found on more than one unit.
   - [ ] Lines, polylines and arcs in `libsymbol` (after the copy op; may not be needed then).
   - [ ] `libfootprint` refuses a repeated pad number, which an exposed pad split in several pads needs.
   - [ ] `docparam` cannot create a parameter that does not exist on a new sheet (`Title`).
