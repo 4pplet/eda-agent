@@ -41,6 +41,8 @@ Plan:
 ```
 
 - Create only: a `name` already in the target is refused. No overwrite.
+- The source library may be the target itself (a copy under a new name): the pilot's library holds the
+  generic symbols, copied in by hand once and committed. Then nothing outside the project is opened.
 - The source is a `.SchLib` file. It may be outside the project and is only
   read. An integrated library is not a source in the first version: it has to
   be extracted first, and on a machine without the vendor libraries installed
