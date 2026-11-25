@@ -13,6 +13,26 @@ Var
     { Checked placement edits: the same rules, a grant of their own. }
     PlaceEditGrant : Boolean;
     PlaceEditGrantGeneration : Integer;
+    { When each grant was ticked (GetTickCount). A tick that no apply used     }
+    { ends after GrantLimitMs (scripts 2026.11.25.2): on 2026-11-25 a tick     }
+    { from the morning was still standing hours later.                         }
+    ParamEditGrantTick : Integer;
+    PlaceEditGrantTick : Integer;
+
+Function GrantLimitMs(Dummy : Integer) : Integer;
+Begin
+    Result := 600000;
+End;
+
+{ True while a tick taken at Tick is younger than the limit. A negative age  }
+{ (the counter wrapped) counts as expired.                                   }
+Function GrantTickFresh(Tick : Integer) : Boolean;
+Var
+    Age : Integer;
+Begin
+    Age := GetTickCount - Tick;
+    Result := (Age >= 0) And (Age <= GrantLimitMs(0));
+End;
 
 Procedure ClearSelectedProject(Dummy : Integer);
 Begin
@@ -32,6 +52,8 @@ Begin
     SelectedBusy := False;
     ParamEditGrantGeneration := -1;
     PlaceEditGrantGeneration := -1;
+    ParamEditGrantTick := 0;
+    PlaceEditGrantTick := 0;
     SelectedSession := FormatDateTime('yyyymmddhhnnsszzz', Now)
         + '-' + IntToStr(GetTickCount);
     ClearSelectedProject(0);
@@ -68,6 +90,7 @@ End;
 
 Function ParamEditGrantActive(Dummy : Integer) : Boolean;
 Begin
+    If ParamEditGrant And (Not GrantTickFresh(ParamEditGrantTick)) Then ParamEditGrant := False;
     Result := SELECTED_PARAM_EDITS And ParamEditGrant
         And (ParamEditGrantGeneration = SelectedGeneration)
         And (SelectedPath <> '');
@@ -86,6 +109,7 @@ Begin
         Exit;
     End;
     ParamEditGrant := Not ParamEditGrant;
+    ParamEditGrantTick := GetTickCount;
     Inc(SelectedGeneration);
     ParamEditGrantGeneration := SelectedGeneration;
     Result := True;
@@ -93,6 +117,7 @@ End;
 
 Function PlaceEditGrantActive(Dummy : Integer) : Boolean;
 Begin
+    If PlaceEditGrant And (Not GrantTickFresh(PlaceEditGrantTick)) Then PlaceEditGrant := False;
     Result := SELECTED_PLACE_EDITS And PlaceEditGrant
         And (PlaceEditGrantGeneration = SelectedGeneration)
         And (SelectedPath <> '');
@@ -111,6 +136,7 @@ Begin
         Exit;
     End;
     PlaceEditGrant := Not PlaceEditGrant;
+    PlaceEditGrantTick := GetTickCount;
     Inc(SelectedGeneration);
     PlaceEditGrantGeneration := SelectedGeneration;
     Result := True;
