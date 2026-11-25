@@ -267,11 +267,24 @@ Var
     I, DirtyCount, OpenCount : Integer;
     D : IDocument;
     S : IServerDocument;
-    Path, DirtyList : String;
+    Path, DirtyList, OpenList, FocusPath, ActivePath : String;
+    View : IServerDocumentView;
 Begin
     DirtyCount := 0;
     OpenCount := 0;
     DirtyList := '';
+    OpenList := '';
+    ActivePath := '';
+    { The focused document, as information only (scripts 2026.11.25.2): it is    }
+    { reported when it is a member of the selected project and never selects     }
+    { anything. Upstream reads the view the same way in Main.pas.                }
+    FocusPath := '';
+    Try
+        View := Client.GetCurrentView;
+        If View <> Nil Then FocusPath := View.OwnerDocument.FileName;
+    Except
+        FocusPath := '';
+    End;
     For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
     Begin
         D := Project.DM_LogicalDocuments(I);
@@ -281,7 +294,10 @@ Begin
         S := Client.GetDocumentByPath(Path);
         If S <> Nil Then
         Begin
+            If OpenCount > 0 Then OpenList := OpenList + ',';
+            OpenList := OpenList + '"' + EscapeJsonString(Path) + '"';
             Inc(OpenCount);
+            If (FocusPath <> '') And (UpperCase(FocusPath) = UpperCase(Path)) Then ActivePath := Path;
             If S.Modified Then
             Begin
                 If DirtyCount > 0 Then DirtyList := DirtyList + ',';
@@ -293,7 +309,9 @@ Begin
     Result := '{"project":"' + EscapeJsonString(SelectedPath)
         + '","dirty_doc_count":' + IntToStr(DirtyCount)
         + ',"open_doc_count":' + IntToStr(OpenCount)
-        + ',"dirty_docs":[' + DirtyList + ']}';
+        + ',"dirty_docs":[' + DirtyList + ']'
+        + ',"open_docs":[' + OpenList + ']'
+        + ',"active_doc":"' + EscapeJsonString(ActivePath) + '"}';
 End;
 
 Function SelectedDocumentsJSON(Project : IProject) : String;
