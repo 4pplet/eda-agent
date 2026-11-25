@@ -120,6 +120,16 @@ Findings:
 5. Not yet looked at: the operator's permission settings (edits, deleting, closing), a dry run, what a write
    does when another project's document is in front, and the sheet itself.
 
+Second step, same day (the library had been closed by the operator without saving):
+
+- A copy addressed to the closed library by path **opened it and moved focus to it**, and said so in the reply.
+- **Copy only, then the modified flag: still false.** The library holds a symbol that is not on disk and reads
+  as saved. On this Altium (23.3.1) upstream's own guard for that case does not hold. Consequence: neither an
+  agent nor a status read can tell that there is unsaved work in a library. To report upstream.
+- The operator's permission settings (edits, deleting, closing, UI automation) are on the Config tab of
+  upstream's status window in Altium and are stored in the workspace; only the operator changes them. No tool
+  reads or sets them.
+
 ## Removing it
 
 Delete the `upstream-trial` folder and `C:\ProgramData\eda-agent\`. Nothing
