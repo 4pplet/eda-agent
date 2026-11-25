@@ -45,8 +45,14 @@ What is in flight and the next step. Updated before every compact; after one, st
 
 - [ ] `proj_remove_document` cannot remove a project entry whose file is missing: the script looks only at
       the project's logical documents, which never hold a missing file, and Altium's saves write the entry
-      back. Remove what the project FILE lists. The catalog marks the tool `modal`; it raises no dialog.
-      Needs Altium to test.
+      back. Read 2026-11-25 (`Proj_RemoveDocument`, `Proj_RewriteFile`, `prjpcb.finish_removal` on upstream
+      `a29d132`): **not fixable from the source alone.** Unknown, and each needs a look in Altium on a copy of
+      a project with such an entry: (1) whether the list Altium loads from the saved file
+      (`ProjectFileDocumentList`) shows the entry at all; (2) which list of the project object holds it, since
+      a save writes it back; (3) whether `DM_RemoveSourceDocument` by path removes it although it is no
+      logical document. To do from this session when Altium is free, then the fix.
+      The catalog's `modal` mark is NOT a defect: upstream measured an "Unsaved Changes" dialog when the
+      target document is modified; "No dialog" in the description is about the file rewrite.
 - [ ] From the report, not yet on this list as fixes: the `kinds` filter of `lib_get_footprint_primitives`
       returning an empty list silently; `sch_draw_template` answering `ok: true` while `footprint_issues`
       lists a footprint it could not choose (a warning the caller can miss); a chamfered land given as an
