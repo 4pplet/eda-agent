@@ -26,8 +26,9 @@ found.
 - [x] The `Lib_AddPin` fix and lint rule sent upstream: salitronic/eda-agent pull request 452.
 - [x] Upstream reviewed to 2026-11-23 (PLT-hw `tools/eda-agent/UPSTREAM-REVIEW-2026-11-25.md`): one port
       candidate, rule priorities kept and settable in `setup` (upstream `da31d29`), after phase 1.
-- [ ] Read how upstream's `relaunch --restart` reloads the scripts in a running Altium (phase 2,
-      development runtime).
+- [x] Read how upstream reloads scripts: closing and reopening the script project recompiles, an Altium
+      restart alone may not (2026-11-25, [design note](docs/DESIGN-development-runtime.md)).
+- [ ] Prove D1-D5 of that note on a scratch project (one sitting, before phase 2 builds on it).
 
 ## Next (phase 1: qualify, no new ops)
 
