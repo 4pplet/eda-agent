@@ -16,19 +16,35 @@ What is in flight and the next step. Updated before every compact; after one, st
   and pull requests, not reports. A pilot in another repo draws its sheet through upstream's own server
   (0.8.3, installed side by side): [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md).
   One Altium, one bridge, one session: no call to either bridge from here while that session works.
-- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457, all checks passing, none reviewed yet.
-- **Built, pushed to our fork, pull request NOT yet open** (GitHub answered with server errors): the 3D model
-  check and the pad-number check. Texts are ready (local drafts).
-- **Unread when this was written:** the pilot's report (asked for since the morning; it is the input for the
-  skill) and one more snag note. Read them first.
-- **Next:** open the two pull requests; read the pilot's report and fill the skill's `PILOT:` lines; write the
-  fix for tools that save unasked and test it in Altium when the pilot's sheet is done; then the two
-  Altium-dependent defects (a library reading as saved after a copy; a lookup returning a deleted symbol).
+- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457 (fixes), 459 (the 3D model check) and 460
+  (the pad-number check). None reviewed yet.
+- **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)) is rewritten for upstream's
+  server from the pilot's report (2026-11-25): a draft that has done one sheet. The pilot tests it on its next
+  sheet and reports what it lacked.
+- **Next:** write the fix for tools that save unasked and test it in Altium when the pilot is not using it;
+  the project entry for a missing file (below); then the two Altium-dependent defects (a library reading as
+  saved after a copy; a lookup returning a deleted symbol).
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
   sibling's name is private (section below); how much of the restricted layer is kept after the trial.
 - Machine-local state (side checkouts, what is blocked, notes to other repos): `docs/handoffs/LOCAL-TODO.md`.
+
+## Found by the pilot, to fix upstream (added 2026-11-25, after its report)
+
+- [ ] `proj_remove_document` cannot remove a project entry whose file is missing: the script looks only at
+      the project's logical documents, which never hold a missing file, and Altium's saves write the entry
+      back. Remove what the project FILE lists. The catalog marks the tool `modal`; it raises no dialog.
+      Needs Altium to test.
+- [ ] From the report, not yet on this list as fixes: the `kinds` filter of `lib_get_footprint_primitives`
+      returning an empty list silently; `sch_draw_template` answering `ok: true` while `footprint_issues`
+      lists a footprint it could not choose (a warning the caller can miss); a chamfered land given as an
+      outline coming out as the full square pad plus a region (assumed, not verified in the editor).
+- [ ] The pilot's count of stops for the operator on upstream: 18, of which the check toggles (6), the 3D
+      look and one pane click were avoidable. Pull requests 454, 459 and 460 remove some; the drawing check
+      (chamfer and body numbers) and the layer-role check after a create are still to fix.
+- Qualification rows from the pilot: W30a, W27, W39 passed. W28, W18, W9, W11, W10, W19, W21, W31 were not
+  run: the pilot left the restricted bridge first. They stay open with that bridge.
 
 ## Done 2026-11-25 (phase 0)
 
