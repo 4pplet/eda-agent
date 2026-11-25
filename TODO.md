@@ -44,6 +44,29 @@ The list is PLT-hw `tools/eda-agent/QUALIFY-TODO.md`. In this order:
 - [ ] Older open rows: setup S4-S8, U6, dialog press D1-D3, placement T2-T13 / T15.
 - [ ] Mark the runtime qualified in `provenance.json`; move the pointer.
 
+## Next build: read-only additions (after phase 1; no new write op)
+
+Found 2026-11-25 while drawing boards from reads (PLT-hw `board_render.py`). The drawing is ready for each;
+the reads do not carry them yet. Each is a field on an existing read, with its validator and one live check.
+
+- [ ] **Pad shape** in `pcb.get_component_pads` and in the free pads of `pcb.get_free_graphics`: `shape`
+      (round / oval / rect / roundrect / octagon), `corner_radius_pct`, and the size per side where top and
+      bottom differ. Today a pad is its top size only, so every pad draws as a rectangle and a pad-to-track gap
+      near a limit cannot be computed (the 2026-10-14 limitation, BRIDGE.md section 4). Upstream reads pad
+      geometry in its library tools; check its property names before ours.
+- [ ] **Board cutouts**: a region's kind in the free-region read (`cutout` true for a board cutout, and the
+      keep-out and mask kinds), and the holes of the board outline. Upstream's object read returns
+      `Region.Kind = eRegionKind_BoardCutout`; check that the free-region read includes cutout regions at all.
+- [ ] Holes of a free region (today only their count), and the arc centres already present in polygon
+      outlines drawn as arcs in the client.
+
+## Tasks kept out of this file
+
+This repository is public, so a task that names another repo is in `docs/handoffs/LOCAL-TODO.md`
+(git-ignored, on the machine). One line each here:
+
+- [ ] Audit of an agent guide for Altium work in another repo (asked 2026-11-25).
+
 ## Open defects
 
 | Found | Defect | State |
