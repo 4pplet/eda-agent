@@ -19,8 +19,10 @@ found.
       `shared_server.py`, with a test.
 - [x] Runtime `selected-edits-20261125a` built 2026-11-25 with Altium closed (24 files,
       integrity check and tool list pass; nothing run in Altium).
-- [ ] **Stefan: start Altium from the new runtime's script project.**
-- [ ] Re-run W27 on it: pins at the planned positions after save, close, reopen.
+- [x] Runtime started 2026-11-25; the pilot session's reads and the L1 apply ran on it.
+- [x] W27 pin positions on `2026.11.25.1`: the library saved 2026-11-25 09:49 matches the plan, 5 of 5 symbols,
+      60 pins, by position, length, side and name (PLT-hw `schlib_check.py` on the saved file, and its drawing
+      looked at). Still owed from the pilot session: the look in Altium's editor, and W39 (bracketed footprint link).
 - [x] Reply note left in the sending repo (2026-11-25).
 - [x] Committed: this repo `e9c2af2`, PLT-hw `75556c7` (2026-11-25, not pushed).
 - [x] The `Lib_AddPin` fix and lint rule sent upstream: salitronic/eda-agent pull request 452.
