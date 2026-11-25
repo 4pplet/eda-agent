@@ -128,6 +128,18 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
 - [docs/PLAN-2026-11-25-move-clients-into-this-repo.md](docs/PLAN-2026-11-25-move-clients-into-this-repo.md):
   roadmap phase 2, plan only, with four decisions for Stefan.
 
+## Private names already in this public repository (found 2026-11-25)
+
+The new guard `tests/test_no_private_words.py` (word list outside the repository; it skips where there is no
+list) fails on this machine. Counts only, the names are not repeated here:
+
+- [ ] Three board or project names in 10 tracked documents (the old TODO history, CURRENT-STATE, six
+      proposals, the shutdown guide, the README). They have been public since those files were pushed.
+- [ ] The private sibling repository's name in 29 tracked files (every path of the form `../<repo>/tools/...`).
+- Stefan decides: rewrite the files (the names stay in git history unless the history is rewritten too, which
+  breaks every clone and the upstream pull-request branch), and whether the sibling's name counts as private.
+  Until decided the guard stays red here on purpose.
+
 ## Defects and questions found in the pilot
 
 - [x] W27 (pin positions) and W39 (bracketed footprint name) passed in Altium on `2026.11.25.1` (2026-11-25;

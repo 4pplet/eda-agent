@@ -121,14 +121,19 @@ came from by hash only.
 | A session runs the old clients against a new runtime | already refused by the version check; the cutover is done with no session running |
 | Upstream merges get harder | our code stays out of `src/eda_agent/` |
 
-## 9. Decisions for the owner
+## 9. Decisions (Stefan, 2026-11-25)
 
-1. The package location and name (`clients/eda_bridge` proposed).
-2. Whether group B is public at all, or only group A.
-3. Whether the qualification list moves (it is the record of what has run in
-   Altium, and today it names boards) or is split into a public list of rows
-   and a private log of where each was run.
-4. The licence line on our own files beside upstream's.
+1. Package location: `clients/eda_bridge`.
+2. Group A (the bridge) is published first. Group B is decided tool by tool,
+   later.
+3. The qualification list is split: a public list of rows and their results, a
+   private log of the board and date each was run on.
+4. Apache-2.0 on our files, as the repository. Open: whose name is in the
+   copyright line (asked when the move starts).
+
+Step 2 is done ahead of the move (2026-11-25): `tests/test_no_private_words.py`
+reads a word list from outside the repository. Its first run found names
+already in tracked documents; see TODO.md.
 
 ## 10. Done means
 
