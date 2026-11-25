@@ -100,6 +100,34 @@ the reads do not carry them yet. Each is a field on an existing read, with its v
       `selected-edits-20261125b` built side by side.
 - [ ] Run in Altium: `status` (version, units), rows W40, W41, W42, the reload checks D1-D5.
 
+## Written for the build after next (branch `next-build` in both repos, scripts `2026.11.25.3`, source only)
+
+Not on `main`: the clients on `main` are pinned to the runtime in use.
+
+- [x] **16 calls of `.Clear` on a string list** in the polygon and shape branches of the free-object writer
+      (2026-11-25). Upstream's lint says the call is not declared in Altium's script engine, and those
+      branches have never run in Altium, so the first `addpoly`, `setpoly` or shape op would have stopped
+      the bridge with a script error. Replaced by a Delete loop, the form upstream uses. Lint: 0 errors,
+      0 warnings. Proof is the first run of those ops (rows W5, V5 and the shape rows).
+- [x] **Rule priorities** (2026-11-25, ported from upstream `da31d29`): a rule in a setup spec may carry
+      `priority` (its place within its kind, 1 = first). Without it nothing changes. Both halves, tests pass.
+      **The two Altium calls it uses are measured upstream on a newer Altium only**: row W43 proves them on
+      a scratch board first.
+- [ ] Merge and build only when no session uses the current runtime.
+
+## Upstream, 2026-11-25
+
+- [x] Our pull request 452 (library pin position) is on upstream's main as `3f9b1eb`, with us as author,
+      and was checked live there. The pull request itself was closed, not merged.
+- [ ] New upstream commit `2961fa2`: reads and writes a Clearance rule's table by object kind. That is the
+      cause of our open defect "Board Outline Clearance reads as 0" (the value is in the object matrix).
+      Review it for a port of the read half.
+
+## Plans
+
+- [docs/PLAN-2026-11-25-move-clients-into-this-repo.md](docs/PLAN-2026-11-25-move-clients-into-this-repo.md):
+  roadmap phase 2, plan only, with four decisions for Stefan.
+
 ## Defects and questions found in the pilot
 
 - [x] W27 (pin positions) and W39 (bracketed footprint name) passed in Altium on `2026.11.25.1` (2026-11-25;
