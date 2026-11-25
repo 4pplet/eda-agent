@@ -4774,6 +4774,15 @@ Begin
     End;
 End;
 
+{ Empties a string list. TStringList.Clear is not declared in Altium's script  }
+{ engine (lint rule tstringlist-clear), and an undeclared name is a script      }
+{ error no Try catches; Delete is declared. Until 2026-11-25 the polygon and    }
+{ shape branches called .Clear and had never been run in Altium.               }
+Procedure EmptyList(L : TStringList);
+Begin
+    While L.Count > 0 Do L.Delete(L.Count - 1);
+End;
+
 { ---- Scripts 2026.11.23.1: polygon outlines from a plan, more free-object deletes ---- }
 { A polygon outline 'x,y x,y,cx,cy,a1,a2 ...' (raw units, angles in             }
 { millidegrees): a token with two numbers is a line vertex, one with six an arc }
@@ -5453,7 +5462,7 @@ Begin
                 { addpoly: a new polygon on `layer` from the outline in s1 (s2 its net, }
                 { copper only). setpoly: the polygon whose first vertex is x1,y1 with w }
                 { vertices takes the outline in s1. Both are repoured.                  }
-                VX.Clear; VY.Clear; VCX.Clear; VCY.Clear; VA1.Clear; VA2.Clear;
+                EmptyList(VX); EmptyList(VY); EmptyList(VCX); EmptyList(VCY); EmptyList(VA1); EmptyList(VA2);
                 Net := Nil;
                 If (IOp[J] = 'addpoly') And (IS2[J] <> '') Then Net := FindNetByName(Board, IS2[J]);
                 If (Lyr = eNoLayer) Or (Lyr = eMultiLayer) Then Status := 'refused: layer not on this board'
@@ -5890,8 +5899,8 @@ Begin
             End
             Else
             Begin
-                VX.Clear;
-                VY.Clear;
+                EmptyList(VX);
+                EmptyList(VY);
                 If Lyr = eNoLayer Then Status := 'refused: layer not on this board'
                 Else If IsCopper Then Status := 'refused: the shape comes from a non-copper layer'
                 Else If Not ShapeVertices(IS1[J], VX, VY) Then Status := 'refused: vertices must be 3-64 x,y pairs'
@@ -5945,7 +5954,7 @@ Begin
                     End
                     Else If (IOp[J] = 'addpoly') Or (IOp[J] = 'setpoly') Then
                     Begin
-                        VX.Clear; VY.Clear; VCX.Clear; VCY.Clear; VA1.Clear; VA2.Clear;
+                        EmptyList(VX); EmptyList(VY); EmptyList(VCX); EmptyList(VCY); EmptyList(VA1); EmptyList(VA2);
                         PolyVertices(IS1[J], VX, VY, VCX, VCY, VA1, VA2);
                         Poly := Nil;
                         If IOp[J] = 'addpoly' Then
@@ -6507,8 +6516,8 @@ Begin
                     End
                     Else
                     Begin
-                        VX.Clear;
-                        VY.Clear;
+                        EmptyList(VX);
+                        EmptyList(VY);
                         ShapeVertices(IS1[J], VX, VY);
                         Board.BoardOutline.PointCount := VX.Count;
                         Seg := TPolySegment;
