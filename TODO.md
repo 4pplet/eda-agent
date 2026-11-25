@@ -137,14 +137,17 @@ Not on `main`: the clients on `main` are pinned to the runtime in use.
   while the pilot has Altium.
   - [x] The `--toolset` / `--backend` flags restart the server, which drops a stdio connection on Windows:
         upstream pull request 455 (2026-11-25; unit tests, not run end to end with a client).
-  - [ ] The server exits with code 0 and no message whatever ends its main loop.
+  - [x] The server exits with code 0 and no message whatever ends its main loop: upstream pull request 456.
   - [x] The symbol-against-pin-table check does not expand a range (`36-53`) or join the wrapped lines of one
         table row, so a module's ground and no-connect pins are reported missing: upstream pull request 454
         (2026-11-25; the datasheet page that was refused now reads 39 of 39 pins).
-  - [ ] The template preview answers ok without a picture when the picture library is missing.
-  - [ ] The version check compares the bundled script, not the script project Altium has open.
-  - [ ] The IC symbol tool has no pin length, fill or border arguments (a created symbol does not match the
-        library it goes into).
+  - [ ] The template preview answers ok without a picture when the picture library is missing. Not sent: the
+        reply already names the cause, and whether it should be a failure is the maintainer's design choice.
+        To raise with him, not to patch.
+  - [ ] The version check compares the bundled script, not the script project Altium has open. Not sent: the
+        reply already warns in plain words when the two locations differ. To raise, not to patch.
+  - [x] The IC symbol tool has no pin length, fill or border arguments (a created symbol does not match the
+        library it goes into): upstream pull request 457 (not run in Altium).
   - [ ] Needs Altium (after the pilot): a library reads as saved after a symbol copy (their closed issue 251,
         back on Altium 23); after a delete the lookup by name still returns the symbol.
   - [ ] **Check how a 3D model sits on its footprint** (asked by Stefan through the pilot, 2026-11-25). After
