@@ -365,6 +365,7 @@ This repository is public, so a task that names another repo is in `docs/handoff
 | 2026-09-24 | `Library.pas` calls `Application.ProcessMessages` inside handlers (can defer keys during a library command) | open |
 | 2026-09 | cancellation and deadlines undefined end to end | phase 6 |
 | 2026-11-25 | the upstream test suite does not start in the runtime venv (no pytest-asyncio); no dev environment is defined | phase 2 |
+| 2026-11-26 | `tests/test_skill_names_real_tools.py` fails on `skills/altium-bridge/SKILL.md` (2 tests): the skill names tools of upstream's current server, and this fork's `src/` is older and does not register them | goes away when the fork's main is brought level with upstream; failed before the skill's second revision too |
 
 ## Docs that say something untrue today
 
