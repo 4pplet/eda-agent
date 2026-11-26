@@ -31,7 +31,9 @@ What is in flight and the next step. Updated before every compact; after one, st
   project is closed again.
 - **The pilot's environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-d`: upstream main `57bc73e`
   as it is, with the extras (Stefan, 2026-11-26). **The move is confirmed** (its note of 2026-11-26: server
-  and Altium both on `2026.11.26.1`); `upstream-trial-b` is the way back.
+  and Altium both on `2026.11.26.1`). There is no way back any more: `upstream-trial-b` and the first environment's
+  venv and scripts were removed on 2026-11-26 (Stefan). The folder `upstream-trial` stays because it holds
+  the workspace both environments share.
 - **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
   its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
@@ -51,8 +53,9 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **Next:** the pilot's findings per section after its next sheet; review comments on 465 to 471. With
   Altium, in a break of the pilot (ask Stefan): the lookup that still finds a deleted symbol; the
   `is_current` read; a layer read that does not focus the library; a footprint check before anything is
-  placed. Tidying when the pilot has worked a day on `upstream-trial-d`: the first environment and
-  `upstream-trial-b` (Stefan to agree).
+  placed. Checked 2026-11-26 in the pilot's run log: the lengths-as-text defect (470) touched one call
+  only, the first 3D check, which was repeated in mm; every footprint was built from a package in mm and
+  read back exact.
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
