@@ -20,12 +20,12 @@ What is in flight and the next step. Updated before every compact; after one, st
   upstream's main (closed with "Merged as <commit>"; the maintainer applies them himself). Main is now
   `57bc73e`, script `2026.11.26.1`.
 - **Open upstream:** 465 (the drawing check can place the body, an edge of a land's outline, and a number
-  that is not built) and 466 (the footprint read refuses an unknown `kinds` word). Both are Python before
-  the first bridge call; neither was run in Altium and their texts say so. 465 first failed upstream's
-  description budget test (`tests/test_tool_description_budget.py`); fixed and rebased 2026-11-26.
+  that is not built; checks pass after the description-budget fix), 466 (the footprint read refuses an
+  unknown `kinds` word) and 467 (a project entry whose file is missing, run in Altium 2026-11-26).
 - **Probe environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-c`: upstream main `57bc73e` plus a
   probe command for the missing-file project entry (branch `probe/project-dead-entry`, local, not for
-  upstream). This repo's `.mcp.json` points at it. Waiting for Altium to be started with its script project.
+  upstream), with the fix of 467 on top. This repo's `.mcp.json` points at it. Used 2026-11-26; the scratch
+  project is closed again.
 - **The pilot's next environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-d`: upstream main
   `57bc73e` as it is, with the extras (Stefan, 2026-11-26). The pilot has the note and waits for Stefan's
   word that Altium is free; `upstream-trial-b` is the way back.
@@ -55,16 +55,12 @@ What is in flight and the next step. Updated before every compact; after one, st
 
 ## Found by the pilot, to fix upstream (added 2026-11-25, after its report)
 
-- [ ] `proj_remove_document` cannot remove a project entry whose file is missing: the script looks only at
-      the project's logical documents, which never hold a missing file, and Altium's saves write the entry
-      back. Read 2026-11-25 (`Proj_RemoveDocument`, `Proj_RewriteFile`, `prjpcb.finish_removal` on upstream
-      `a29d132`): **not fixable from the source alone.** Unknown, and each needs a look in Altium on a copy of
-      a project with such an entry: (1) whether the list Altium loads from the saved file
-      (`ProjectFileDocumentList`) shows the entry at all; (2) which list of the project object holds it, since
-      a save writes it back; (3) whether `DM_RemoveSourceDocument` by path removes it although it is no
-      logical document. To do from this session when Altium is free, then the fix.
-      The catalog's `modal` mark is NOT a defect: upstream measured an "Unsaved Changes" dialog when the
-      target document is modified; "No dialog" in the description is about the file rewrite.
+- [x] `proj_remove_document` could not remove a project entry whose file is missing. Measured in Altium
+      23.3.1 on a scratch project, 2026-11-26: no call reaches such an entry (not a logical document, not a
+      source document, `DM_RemoveSourceDocument` by path or name does nothing), yet Altium writes it back on
+      every save. Fix: project closed, section taken out of the file, project opened and saved. Pull
+      request 467, run in Altium (single call and a list). It edits the project file, which upstream's
+      `prjpcb` module forbids itself; the edit is in a module of its own and the text says why.
 - [x] The `kinds` filter of `lib_get_footprint_primitives` returning empty lists silently: pull request 466
       (2026-11-26).
 - [x] The drawing check could not place the body, the legs of a cut corner, or a keep-out distance: pull
@@ -72,10 +68,10 @@ What is in flight and the next step. Updated before every compact; after one, st
       The last one loosens a check the maintainer made strict on purpose; the text says it can be dropped.
 - [ ] The mechanical-layer check of `lib_create_footprint_from_package` runs after the footprint is created
       when the library is not in front, and the footprint is then removed again (library marked changed,
-      focus moved). Read 2026-11-26 on `a29d132`: **the order is deliberate** (the comment at the early
-      create: the layer read brings the library forward, and a library focused first shows its last
-      footprint). A fix needs a layer read that does not bring the library forward, which is a script change
-      and a look in Altium. Not started.
+      focus moved). Read 2026-11-26: **the order is deliberate.** `Lib_GetMechLayers` opens and focuses the
+      library it is given (`WorkspaceManager:OpenObject`), and a library focused first shows its last
+      footprint. A fix needs a layer read that does not focus, which is a script change to design and try
+      in Altium. Not started. Until then: name both layers on the first call.
 - [ ] From the report, not yet fixes: `sch_draw_template` answering `ok: true` while `footprint_issues`
       lists a footprint it could not choose (a warning the caller can miss); a chamfered land given as an
       outline coming out as the full square pad plus a region (assumed, not verified in the editor).
