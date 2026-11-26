@@ -26,6 +26,9 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **Probe environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-c`: upstream main `57bc73e` plus a
   probe command for the missing-file project entry (branch `probe/project-dead-entry`, local, not for
   upstream). This repo's `.mcp.json` points at it. Waiting for Altium to be started with its script project.
+- **The pilot's next environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-d`: upstream main
+  `57bc73e` as it is, with the extras (Stefan, 2026-11-26). The pilot has the note and waits for Stefan's
+  word that Altium is free; `upstream-trial-b` is the way back.
 - **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
   its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the

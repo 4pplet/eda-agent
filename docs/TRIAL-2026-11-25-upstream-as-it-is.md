@@ -22,6 +22,8 @@ runtimes and touching none of them:
 | Upstream commit | `9b741b5` (version 0.8.3) |
 | `venv\` | upstream's server, installed from the upstream checkout |
 | `..\upstream-trial-b\` | second environment, built 2026-11-25: upstream main `a29d132` (script `2026.11.25.3`) with the picture and CadQuery extras, its own `venv\` and `scripts\`, the same workspace. The pilot moves to it between sheets (Stefan, 2026-11-25); the first stays as the way back. |
+| `..\upstream-trial-d\` | built 2026-11-26: upstream main `57bc73e` (script `2026.11.26.1`), which holds the seven fixes upstream took from us, with the same extras and the same workspace. The pilot moves to it after its break (Stefan, 2026-11-26); `upstream-trial-b` is the way back. |
+| `..\upstream-trial-c\` | ours, not the pilot's: the same main plus a probe command (`proj_probe_documents`) for the missing-file project entry. No extras. Used from this repo on a scratch project only. |
 | `scripts\Altium_API.PrjScr` | upstream's script project, unmodified |
 | `workspace\` | its own request folder (`EDA_AGENT_WORKSPACE`) |
 
