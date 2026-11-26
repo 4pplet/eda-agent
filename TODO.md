@@ -44,9 +44,11 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)) is rewritten for upstream's
   server from the pilot's report (2026-11-25): a draft that has done one sheet. The pilot tests it on its next
   sheet and reports what it lacked.
-- **Next:** the pilot's reply note (not there on 2026-11-26 morning); the project entry for a missing file
-  and the layer check that runs after the create (both below, both need Altium from this session); the
-  draw's `ok: true` beside `footprint_issues`.
+- **Next:** the pilot's reply note (ping from `upstream-trial-d`, the two scratch tests, objections to the
+  skill), then the skill revised from it; review comments on 465, 466, 467; the layer check that runs after
+  the create (below; a script change to design and try in Altium); the draw's `ok: true` beside
+  `footprint_issues`. Tidying when the pilot has worked a day on `upstream-trial-d`: the first environment
+  and `upstream-trial-b` (Stefan to agree).
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
