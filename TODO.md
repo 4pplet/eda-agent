@@ -16,12 +16,16 @@ What is in flight and the next step. Updated before every compact; after one, st
   and pull requests, not reports. A pilot in another repo draws its sheet through upstream's own server
   (0.8.3, installed side by side): [docs/TRIAL-2026-11-25-upstream-as-it-is.md](docs/TRIAL-2026-11-25-upstream-as-it-is.md).
   One Altium, one bridge, one session: no call to either bridge from here while that session works.
-- **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457 (fixes), 459 (the 3D model check), 460
-  (the pad-number check) and 461 (the draw says that it saves and takes `reopen=False`). None reviewed yet.
-  459 and 460 were rebased the same day: upstream's main had moved.
-- **Sent upstream 2026-11-26:** 465 (the drawing check can place the body, an edge of a land's outline, and
-  a number that is not built) and 466 (the footprint read refuses an unknown `kinds` word). Both are Python
-  before the first bridge call; neither was run in Altium and their texts say so.
+- **Taken by upstream 2026-11-26:** pull requests 454, 455, 456, 457, 459, 460 and 461 are all in
+  upstream's main (closed with "Merged as <commit>"; the maintainer applies them himself). Main is now
+  `57bc73e`, script `2026.11.26.1`.
+- **Open upstream:** 465 (the drawing check can place the body, an edge of a land's outline, and a number
+  that is not built) and 466 (the footprint read refuses an unknown `kinds` word). Both are Python before
+  the first bridge call; neither was run in Altium and their texts say so. 465 first failed upstream's
+  description budget test (`tests/test_tool_description_budget.py`); fixed and rebased 2026-11-26.
+- **Probe environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-c`: upstream main `57bc73e` plus a
+  probe command for the missing-file project entry (branch `probe/project-dead-entry`, local, not for
+  upstream). This repo's `.mcp.json` points at it. Waiting for Altium to be started with its script project.
 - **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
   its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
