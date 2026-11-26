@@ -19,6 +19,9 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **Sent upstream 2026-11-25:** pull requests 454, 455, 456, 457 (fixes), 459 (the 3D model check), 460
   (the pad-number check) and 461 (the draw says that it saves and takes `reopen=False`). None reviewed yet.
   459 and 460 were rebased the same day: upstream's main had moved.
+- **Sent upstream 2026-11-26:** 465 (the drawing check can place the body, an edge of a land's outline, and
+  a number that is not built) and 466 (the footprint read refuses an unknown `kinds` word). Both are Python
+  before the first bridge call; neither was run in Altium and their texts say so.
 - **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
   its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
@@ -34,9 +37,9 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)) is rewritten for upstream's
   server from the pilot's report (2026-11-25): a draft that has done one sheet. The pilot tests it on its next
   sheet and reports what it lacked.
-- **Next:** the project entry for a missing file (below, needs Altium); check on upstream's new main whether
-  a lookup still returns a deleted symbol and whether the unsaved record covers a symbol copy (needs Altium);
-  then the drawing check (chamfer and body numbers) and the layer-role check after a create.
+- **Next:** the pilot's reply note (not there on 2026-11-26 morning); the project entry for a missing file
+  and the layer check that runs after the create (both below, both need Altium from this session); the
+  draw's `ok: true` beside `footprint_issues`.
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
@@ -55,13 +58,23 @@ What is in flight and the next step. Updated before every compact; after one, st
       logical document. To do from this session when Altium is free, then the fix.
       The catalog's `modal` mark is NOT a defect: upstream measured an "Unsaved Changes" dialog when the
       target document is modified; "No dialog" in the description is about the file rewrite.
-- [ ] From the report, not yet on this list as fixes: the `kinds` filter of `lib_get_footprint_primitives`
-      returning an empty list silently; `sch_draw_template` answering `ok: true` while `footprint_issues`
+- [x] The `kinds` filter of `lib_get_footprint_primitives` returning empty lists silently: pull request 466
+      (2026-11-26).
+- [x] The drawing check could not place the body, the legs of a cut corner, or a keep-out distance: pull
+      request 465 (2026-11-26). `BODY`, `{pad, edge, mm, axis}`, and `{mm, not_built}` in `drawing_numbers`.
+      The last one loosens a check the maintainer made strict on purpose; the text says it can be dropped.
+- [ ] The mechanical-layer check of `lib_create_footprint_from_package` runs after the footprint is created
+      when the library is not in front, and the footprint is then removed again (library marked changed,
+      focus moved). Read 2026-11-26 on `a29d132`: **the order is deliberate** (the comment at the early
+      create: the layer read brings the library forward, and a library focused first shows its last
+      footprint). A fix needs a layer read that does not bring the library forward, which is a script change
+      and a look in Altium. Not started.
+- [ ] From the report, not yet fixes: `sch_draw_template` answering `ok: true` while `footprint_issues`
       lists a footprint it could not choose (a warning the caller can miss); a chamfered land given as an
       outline coming out as the full square pad plus a region (assumed, not verified in the editor).
 - [ ] The pilot's count of stops for the operator on upstream: 18, of which the check toggles (6), the 3D
-      look and one pane click were avoidable. Pull requests 454, 459 and 460 remove some; the drawing check
-      (chamfer and body numbers) and the layer-role check after a create are still to fix.
+      look and one pane click were avoidable. Pull requests 454, 459, 460 and 465 remove some; the
+      layer-role check after a create is still to fix.
 - Qualification rows from the pilot: W30a, W27, W39 passed. W28, W18, W9, W11, W10, W19, W21, W31 were not
   run: the pilot left the restricted bridge first. They stay open with that bridge.
 
