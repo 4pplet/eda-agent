@@ -20,15 +20,16 @@ What is in flight and the next step. Updated before every compact; after one, st
   upstream's main (closed with "Merged as <commit>"; the maintainer applies them himself). Main is now
   `57bc73e`, script `2026.11.26.1`.
 - **Open upstream:** 465 (the drawing check can place the body, an edge of a land's outline, and a number
-  that is not built; checks pass after the description-budget fix), 466 (the footprint read refuses an
-  unknown `kinds` word) and 467 (a project entry whose file is missing, run in Altium 2026-11-26).
+  that is not built), 466 (the footprint read refuses an unknown `kinds` word), 467 (a project entry whose
+  file is missing, run in Altium 2026-11-26), 468 (the ping says which side is older) and 469 (the draw
+  stops when a footprint was not chosen). 468 and 469 are server-side only, not run in Altium.
 - **Probe environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-c`: upstream main `57bc73e` plus a
   probe command for the missing-file project entry (branch `probe/project-dead-entry`, local, not for
   upstream), with the fix of 467 on top. This repo's `.mcp.json` points at it. Used 2026-11-26; the scratch
   project is closed again.
-- **The pilot's next environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-d`: upstream main
-  `57bc73e` as it is, with the extras (Stefan, 2026-11-26). The pilot has the note and waits for Stefan's
-  word that Altium is free; `upstream-trial-b` is the way back.
+- **The pilot's environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-d`: upstream main `57bc73e`
+  as it is, with the extras (Stefan, 2026-11-26). **The move is confirmed** (its note of 2026-11-26: server
+  and Altium both on `2026.11.26.1`); `upstream-trial-b` is the way back.
 - **Upstream moved on 2026-11-25** (main `a29d132`, script `2026.11.25.3`, still called 0.8.3): it now keeps
   its own record of unsaved documents by full path (our finding of a library reading as saved), finds a
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
@@ -41,14 +42,15 @@ What is in flight and the next step. Updated before every compact; after one, st
 - **Corrected 2026-11-25:** "the draw's save ignores the Saving switch" was wrong. The switch refuses
   `application.save_document` in the dispatcher, already in `9b741b5`; the pilot and I had read only the save
   routine. So the fix needed no script change and went out as 461. Read from source, not run in Altium.
-- **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)) is rewritten for upstream's
-  server from the pilot's report (2026-11-25): a draft that has done one sheet. The pilot tests it on its next
-  sheet and reports what it lacked.
-- **Next:** the pilot's reply note (ping from `upstream-trial-d`, the two scratch tests, objections to the
-  skill), then the skill revised from it; review comments on 465, 466, 467; the layer check that runs after
-  the create (below; a script change to design and try in Altium); the draw's `ok: true` beside
-  `footprint_issues`. Tidying when the pilot has worked a day on `upstream-trial-d`: the first environment
-  and `upstream-trial-b` (Stefan to agree).
+- **The skill** ([skills/altium-bridge/SKILL.md](skills/altium-bridge/SKILL.md)): second revision
+  2026-11-26, from the fifteen objections of the session that draws the second sheet from it. Builds are
+  named by script version; board practice moved to `skills/altium-bridge/BOARD-PRACTICE.md`. Still a draft
+  that has done one sheet; the second sheet is its test.
+- **Next:** the pilot's findings per section after its next sheet; review comments on 465 to 469. With
+  Altium, in a break of the pilot (ask Stefan): the lookup that still finds a deleted symbol; the
+  `is_current` read; a layer read that does not focus the library; a footprint check before anything is
+  placed. Tidying when the pilot has worked a day on `upstream-trial-d`: the first environment and
+  `upstream-trial-b` (Stefan to agree).
 - **Our own bridge:** runtime `selected-edits-20261125b` (scripts `2026.11.25.2`) built and used; branch
   `next-build` in both repos holds `2026.11.25.3`, source only. No new work on it until the trial is judged.
 - **Undecided with Stefan:** the three private board names in tracked documents and whether the private
@@ -74,9 +76,26 @@ What is in flight and the next step. Updated before every compact; after one, st
       library it is given (`WorkspaceManager:OpenObject`), and a library focused first shows its last
       footprint. A fix needs a layer read that does not focus, which is a script change to design and try
       in Altium. Not started. Until then: name both layers on the first call.
-- [ ] From the report, not yet fixes: `sch_draw_template` answering `ok: true` while `footprint_issues`
-      lists a footprint it could not choose (a warning the caller can miss); a chamfered land given as an
-      outline coming out as the full square pad plus a region (assumed, not verified in the editor).
+- [x] `sch_draw_template` answering `ok: true`, and saving, while `footprint_issues` lists a footprint
+      it could not choose: pull request 469 (2026-11-26). The draw stops at the placement, before any wire
+      and any save. Server side only, not run in Altium.
+- [ ] The same, earlier: refuse in the preview, before anything is placed. Needs each symbol's footprint
+      model names beside its pins (`library.get_pin_list`), a script change to try in Altium. Offered in
+      469's text.
+- [x] `app_ping` named the wrong cure when the server was the older side ("STALE SCRIPT CACHE ... reopen
+      the script project"): pull request 468 (2026-11-26). Not run in Altium; a message only.
+- [ ] `script_location_match: false` warns on every ping when the script project is opened from a folder
+      of its own beside the venv (our environments), although the stamps and the version agree. Raised in
+      468's text, not changed.
+- [ ] A lookup after a delete (the pilot's scratch test, `2026.11.26.1`): after `lib_delete_component`,
+      `lib_get_components` no longer lists the symbol and `lib_get_component_details` by name still
+      returns it whole. Read 2026-11-26: the lookup resolves the live symbol by name
+      (`ResolveLibComponent`) and that still answers. A fix needs a look in Altium. Not started.
+- [ ] The `is_current` flags of a symbol with four footprints read all true on `2026.11.25.1` and true on
+      one only on `2026.11.26.1`, the saved file unchanged (all four set). Either Altium keeps one current
+      per type on load or the read changed. To measure on a scratch library, with a save. Not started.
+- [ ] A chamfered land given as an outline coming out as the full square pad plus a region (assumed by
+      the pilot, not verified in the editor). Needs Altium.
 - [ ] The pilot's count of stops for the operator on upstream: 18, of which the check toggles (6), the 3D
       look and one pane click were avoidable. Pull requests 454, 459, 460 and 465 remove some; the
       layer-role check after a create is still to fix.
