@@ -96,6 +96,20 @@ What is in flight and the next step. Updated before every compact; after one, st
       per type on load or the read changed. To measure on a scratch library, with a save. Not started.
 - [ ] A chamfered land given as an outline coming out as the full square pad plus a region (assumed by
       the pilot, not verified in the editor). Needs Altium.
+- [ ] `footprint_check_3d_model` read pads given in mils as millimetres (the pilot, 2026-11-26, script
+      `2026.11.26.1`). Reproduced in upstream's source 2026-11-26, same numbers: the plain call converts
+      correctly; a list argument sent as JSON text (clients often do) is turned into a list by the
+      server's argument check AFTER the lengths were converted, so it reaches the tool as given while
+      the reply is converted back. Every tool with a list of lengths is affected, and a number sent as
+      text the same way. Fix in the server's conversion (`server.py` `_lengths_in`). No Altium needed.
+- [ ] Two custom lands of different numbers whose edges touch are refused as overlapping (the pilot,
+      2026-11-26): a centre land shared by two pins cannot be built as the datasheet draws it. Read:
+      `builder.py` `_check_overlaps` refuses a gap of zero or less; hand-placed lands are not trimmed.
+      To try: touching allowed between hand-placed lands, with a warning that they are one copper
+      area; overlapping still refused. No Altium needed for the build itself.
+- [ ] A printed hole diameter cannot be placed in `drawing_dims` (the pilot, 2026-11-26): the forms
+      measure a land's size, not its hole, so a through-hole drawing that prints only drills cannot
+      pass. A `{pad, mm, hole: true}` form, checked against the pad's hole. Same file as 465.
 - [ ] The pilot's count of stops for the operator on upstream: 18, of which the check toggles (6), the 3D
       look and one pane click were avoidable. Pull requests 454, 459, 460 and 465 remove some; the
       layer-role check after a create is still to fix.
