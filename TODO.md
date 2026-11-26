@@ -24,8 +24,10 @@ What is in flight and the next step. Updated before every compact; after one, st
   document by its own file (issue 398) and shortened its preamble (issue 451). The trial install is still the
   published `9b741b5`. Stefan, 2026-11-25: move, between sheets. A second environment is built beside the
   first (`%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-b`, main `a29d132` as it is, same workspace); the pilot
-  switches at its next clean stop and runs two scratch tests there (lookup after a delete; the unsaved record
-  after a copy). Saving stays switched on (Stefan, 2026-11-25).
+  runs two scratch tests there (lookup after a delete; the unsaved record after a copy). Saving stays
+  switched on (Stefan, 2026-11-25). **The move was started on 2026-11-25 late evening:** Stefan stopped
+  Altium to open the new script project; the pilot has a do-now note. Not yet confirmed by a ping: the
+  pilot's reply note (ping, open documents, two test results) is the next thing to read.
 - **Corrected 2026-11-25:** "the draw's save ignores the Saving switch" was wrong. The switch refuses
   `application.save_document` in the dispatcher, already in `9b741b5`; the pilot and I had read only the save
   routine. So the fix needed no script change and went out as 461. Read from source, not run in Altium.
