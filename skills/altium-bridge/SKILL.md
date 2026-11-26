@@ -325,6 +325,9 @@ any build yet.
 | `proj_remove_document` cannot remove a project entry whose file is missing; Altium writes the entry back on every save | through `2026.11.26.1` | offered; leave the entry, do not edit the project file while the project is open |
 | `sch_draw_template` answers `ok: true` and saves when a footprint was not chosen | through `2026.11.26.1` | offered; section 6 step 2 |
 | `app_ping` advises reopening the script project when the server is the older side | `2026.11.26.1` | offered; section 2 |
+| A list or object of lengths sent as JSON text (a quoted string) skips the unit conversion; the reply is converted, so numbers come back 39.37 times off. Seen as `footprint_check_3d_model` answering "model of another package" | through `2026.11.26.1` | offered; send lists and `tool_invoke`'s `arguments` as real values, and compare one echoed length with what was sent |
+| Two `custom_pads` of different numbers that touch are refused as overlapping (one land serving two pins) | through `2026.11.26.1` | offered; until taken, the operator decides the split |
+| `drawing_dims` cannot place a printed hole diameter, the body, or a number that is not built | through `2026.11.26.1` | offered; until taken, the operator switches the check off for that build and the numbers are checked by hand in the run log |
 
 ## 9. Reporting
 

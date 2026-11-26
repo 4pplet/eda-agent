@@ -21,8 +21,10 @@ What is in flight and the next step. Updated before every compact; after one, st
   `57bc73e`, script `2026.11.26.1`.
 - **Open upstream:** 465 (the drawing check can place the body, an edge of a land's outline, and a number
   that is not built), 466 (the footprint read refuses an unknown `kinds` word), 467 (a project entry whose
-  file is missing, run in Altium 2026-11-26), 468 (the ping says which side is older) and 469 (the draw
-  stops when a footprint was not chosen). 468 and 469 are server-side only, not run in Altium.
+  file is missing, run in Altium 2026-11-26), 468 (the ping says which side is older), 469 (the draw
+  stops when a footprint was not chosen), 470 (lengths in a list given as JSON text are converted) and 471
+  (two hand-placed lands that meet are one land). 465 also carries a hole diameter form since 2026-11-26.
+  468 to 471 are server-side only, not run in Altium.
 - **Probe environment** `%LOCALAPPDATA%\PLT\eda-agent\upstream-trial-c`: upstream main `57bc73e` plus a
   probe command for the missing-file project entry (branch `probe/project-dead-entry`, local, not for
   upstream), with the fix of 467 on top. This repo's `.mcp.json` points at it. Used 2026-11-26; the scratch
@@ -46,7 +48,7 @@ What is in flight and the next step. Updated before every compact; after one, st
   2026-11-26, from the fifteen objections of the session that draws the second sheet from it. Builds are
   named by script version; board practice moved to `skills/altium-bridge/BOARD-PRACTICE.md`. Still a draft
   that has done one sheet; the second sheet is its test.
-- **Next:** the pilot's findings per section after its next sheet; review comments on 465 to 469. With
+- **Next:** the pilot's findings per section after its next sheet; review comments on 465 to 471. With
   Altium, in a break of the pilot (ask Stefan): the lookup that still finds a deleted symbol; the
   `is_current` read; a layer read that does not focus the library; a footprint check before anything is
   placed. Tidying when the pilot has worked a day on `upstream-trial-d`: the first environment and
@@ -96,20 +98,24 @@ What is in flight and the next step. Updated before every compact; after one, st
       per type on load or the read changed. To measure on a scratch library, with a save. Not started.
 - [ ] A chamfered land given as an outline coming out as the full square pad plus a region (assumed by
       the pilot, not verified in the editor). Needs Altium.
-- [ ] `footprint_check_3d_model` read pads given in mils as millimetres (the pilot, 2026-11-26, script
+- [x] `footprint_check_3d_model` read pads given in mils as millimetres (the pilot, 2026-11-26, script
       `2026.11.26.1`). Reproduced in upstream's source 2026-11-26, same numbers: the plain call converts
       correctly; a list argument sent as JSON text (clients often do) is turned into a list by the
       server's argument check AFTER the lengths were converted, so it reaches the tool as given while
       the reply is converted back. Every tool with a list of lengths is affected, and a number sent as
-      text the same way. Fix in the server's conversion (`server.py` `_lengths_in`). No Altium needed.
-- [ ] Two custom lands of different numbers whose edges touch are refused as overlapping (the pilot,
+      text the same way. Pull request 470 (2026-11-26): the text is read into its value before the
+      conversion, for the tool, inside `tool_invoke` and for a family member. Until it is in an
+      environment: send lists as real values, not text.
+- [x] Two custom lands of different numbers whose edges touch are refused as overlapping (the pilot,
       2026-11-26): a centre land shared by two pins cannot be built as the datasheet draws it. Read:
       `builder.py` `_check_overlaps` refuses a gap of zero or less; hand-placed lands are not trimmed.
-      To try: touching allowed between hand-placed lands, with a warning that they are one copper
-      area; overlapping still refused. No Altium needed for the build itself.
-- [ ] A printed hole diameter cannot be placed in `drawing_dims` (the pilot, 2026-11-26): the forms
+      Pull request 471 (2026-11-26): hand-placed lands that meet along an edge are built, with a
+      warning that both pins must be on one net; overlapping and a corner touch still refused. The
+      maintainer is asked whether he prefers one pad with two numbers. Not run in Altium.
+- [x] A printed hole diameter cannot be placed in `drawing_dims` (the pilot, 2026-11-26): the forms
       measure a land's size, not its hole, so a through-hole drawing that prints only drills cannot
-      pass. A `{pad, mm, hole: true}` form, checked against the pad's hole. Same file as 465.
+      pass. `{pad, mm, hole: true}` (drill, a slot's width) and `hole: "length"` added to pull request
+      465 as a further commit (2026-11-26).
 - [ ] The pilot's count of stops for the operator on upstream: 18, of which the check toggles (6), the 3D
       look and one pane click were avoidable. Pull requests 454, 459, 460 and 465 remove some; the
       layer-role check after a create is still to fix.
